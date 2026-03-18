@@ -4,16 +4,51 @@
 
 ## 🚀 Quick Start
 
+### Option A — Docker (recommended, works everywhere)
+
 ```bash
 git clone https://github.com/RAHUL-DevelopeRR/deepseekfs
 cd deepseekfs
+docker compose up --build
+```
+
+The API will be available at **http://localhost:8000** and the interactive docs at **http://localhost:8000/docs**.
+
+### Option B — Python (local, with desktop UI)
+
+```bash
+git clone https://github.com/RAHUL-DevelopeRR/deepseekfs
+cd deepseekfs
+
+# Windows
 python -m venv venv
-venv\Scripts\activate       # Windows
+venv\Scripts\activate
+pip install -r requirements.txt
+python run.py
+
+# macOS / Linux
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 python run.py
 ```
 
-That's it. The app:
+### Option B — Python (headless / server mode)
+
+If you don't need the desktop window (e.g. running on a server or WSL), `run.py`
+automatically falls back to headless mode and keeps the API alive:
+
+```bash
+python run.py          # opens browser UI if possible, otherwise stays headless
+```
+
+Or run the API directly with uvicorn:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+The app:
 1. **Auto-detects** your Documents, Downloads, Desktop, OneDrive folders
 2. **Indexes them in the background** (first run = full scan, subsequent = incremental)
 3. **Opens the search UI** immediately — you can search while indexing runs

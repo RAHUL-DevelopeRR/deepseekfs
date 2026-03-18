@@ -187,9 +187,19 @@ def start_ui():
     except Exception as e:
         logger.error(f"UI error: {e}")
         logger.info(f"Open browser: http://localhost:{config.API_PORT}")
+        return False
+    return True
 
 
 if __name__ == "__main__":
     api_thread = threading.Thread(target=start_api, daemon=True)
     api_thread.start()
-    start_ui()
+    ui_running = start_ui()
+    if not ui_running:
+        # No GUI available — keep the API server alive
+        logger.info("Running in headless mode. Press Ctrl+C to stop.")
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            logger.info("Shutting down.")
