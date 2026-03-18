@@ -1,224 +1,429 @@
-import sys
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLineEdit, QLabel, QProgressBar, QListWidget,
-    QListWidgetItem, QFileDialog, QSystemTrayIcon, QMenu, QMessageBox
-)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QIcon, QColor
-import threading
+"""
+DeepSeekFS – Desktop Entry Point (v2.0 PyQt6 Monolithic)
+=========================================================
+Replaces run.py + FastAPI + pywebview with a single native PyQt6 window.
+All business logic is called directly — zero HTTP, zero network sockets.
+
+Usage:
+    python run_desktop.py
+"""
+from __future__ import annotations
+
 import os
+import sys
+import platform
+import subprocess
+from pathlib import Path
+from typing import List
 
-# ── Indexing background thread ───────────────────────────────────────────────
-class IndexingThread(QThread):
-    progress = pyqtSignal(int, str)   # percent, message
-    finished = pyqtSignal(bool, str)  # success, message
+# Make sure project root is on sys.path regardless of CWD
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
 
-    def __init__(self, service, paths):
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget,
+    QVBoxLayout, QHBoxLayout,
+    QLineEdit, QPushButton, QLabel,
+    QProgressBar, QTableWidget, QTableWidgetItem,
+    QHeaderView, QStatusBar, QSystemTrayIcon,
+    QMenu, QMessageBox, QFileDialog,
+)
+from PyQt6.QtCore  import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtGui   import QFont, QColor, QIcon
+
+import app.config as config
+from app.logger import logger
+from services.desktop_service import DesktopService
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Background worker: initial indexing
+# ─────────────────────────────────────────────────────────────────────────────
+class IndexThread(QThread):
+    """
+    Runs StartupIndexer._run() in a background thread.
+    Emits:
+      status(str)       – human-readable message for the status bar
+      progress(int,int) – (files_done, files_total) for the progress bar
+      finished(int)     – total new files indexed
+    """
+    status   = pyqtSignal(str)
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(int)
+
+    def __init__(self, service: DesktopService):
         super().__init__()
-        self.service = service
-        self.paths = paths
+        self._svc = service
 
     def run(self):
         try:
-            self.service.start_indexing(
-                self.paths,
-                on_progress=lambda p, m: self.progress.emit(p, m),
-                on_done=lambda ok, m: self.finished.emit(ok, m)
+            total = self._svc.run_indexing(
+                on_status=self.status.emit,
+                on_progress=self.progress.emit,
             )
-        except Exception as e:
-            self.finished.emit(False, str(e))
+            self.finished.emit(total)
+        except Exception as exc:
+            logger.error(f"IndexThread error: {exc}")
+            self.status.emit(f"⚠️  Indexing error — {exc}")
+            self.finished.emit(0)
 
 
-# ── Search background thread ─────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Background worker: search
+# ─────────────────────────────────────────────────────────────────────────────
 class SearchThread(QThread):
-    results_ready = pyqtSignal(list)
-    error = pyqtSignal(str)
+    """
+    Calls the search engine in a background thread so the UI never blocks.
+    Emits:
+      results(list)  – list of result dicts
+      error(str)     – on failure
+    """
+    results = pyqtSignal(list)
+    error   = pyqtSignal(str)
 
-    def __init__(self, service, query):
+    def __init__(self, service: DesktopService, query: str, top_k: int = 15):
         super().__init__()
-        self.service = service
-        self.query = query
+        self._svc   = service
+        self._query = query
+        self._top_k = top_k
 
     def run(self):
         try:
-            results = self.service.search(self.query)
-            self.results_ready.emit(results)
-        except Exception as e:
-            self.error.emit(str(e))
+            hits = self._svc.search(self._query, self._top_k)
+            self.results.emit(hits)
+        except Exception as exc:
+            logger.error(f"SearchThread error: {exc}")
+            self.error.emit(str(exc))
 
 
-# ── Main Window ──────────────────────────────────────────────────────────────
-class DeepSeekFSWindow(QMainWindow):
-    """Main PyQt6 desktop window for DeepSeekFS."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Main window
+# ─────────────────────────────────────────────────────────────────────────────
+class MainWindow(QMainWindow):
+    """
+    Single monolithic window: search box + results table + progress bar + tray.
+    No HTTP, no localhost, no browser. Everything is a direct Python call.
+    """
 
-    def __init__(self):
+    APP_STYLE = """
+    QMainWindow, QWidget#central { background:#f0f2f5; }
+
+    QLabel#title {
+        font-size:22px; font-weight:700; color:#1a1a2e;
+    }
+    QLabel#subtitle { font-size:12px; color:#6c757d; }
+
+    QLineEdit {
+        border:2px solid #dee2e6;
+        border-radius:8px;
+        padding:10px 14px;
+        font-size:14px;
+        background:#ffffff;
+    }
+    QLineEdit:focus { border-color:#4361ee; background:#fafbff; }
+
+    QPushButton#btn_search {
+        background:#4361ee;
+        color:#ffffff;
+        border:none;
+        border-radius:8px;
+        padding:10px 28px;
+        font-size:14px;
+        font-weight:600;
+    }
+    QPushButton#btn_search:hover   { background:#3451d1; }
+    QPushButton#btn_search:pressed { background:#2541c0; }
+    QPushButton#btn_search:disabled{ background:#adb5bd; }
+
+    QPushButton#btn_folder {
+        background:#ffffff;
+        color:#4361ee;
+        border:2px solid #4361ee;
+        border-radius:8px;
+        padding:8px 18px;
+        font-size:13px;
+    }
+    QPushButton#btn_folder:hover { background:#eef0fd; }
+
+    QTableWidget {
+        background:#ffffff;
+        border:1px solid #dee2e6;
+        border-radius:8px;
+        gridline-color:#f1f3f5;
+        font-size:13px;
+    }
+    QTableWidget::item          { padding:8px 10px; }
+    QTableWidget::item:selected { background:#4361ee; color:#ffffff; }
+    QHeaderView::section {
+        background:#f8f9fa;
+        font-weight:600;
+        padding:8px 10px;
+        border:none;
+        border-bottom:2px solid #dee2e6;
+    }
+
+    QProgressBar {
+        border:1px solid #dee2e6;
+        border-radius:6px;
+        text-align:center;
+        font-size:11px;
+        height:18px;
+    }
+    QProgressBar::chunk { background:#4361ee; border-radius:5px; }
+
+    QStatusBar { font-size:12px; color:#6c757d; }
+    """
+
+    COLS = ["#", "File Name", "Score", "Semantic", "Time", "Freq", "Type", "Full Path"]
+
+    def __init__(self, service: DesktopService):
         super().__init__()
-        self.setWindowTitle("DeepSeekFS – Semantic File Search")
-        self.resize(900, 620)
-        self._service = None
-        self._search_thread = None
-        self._index_thread = None
-        self._init_ui()
-        self._init_tray()
-        self._load_service()
+        self._svc          = service
+        self._idx_thread   : IndexThread  | None = None
+        self._srch_thread  : SearchThread | None = None
+        self._indexed_count = 0
 
-    # ── UI setup ─────────────────────────────────────────────────────────────
-    def _init_ui(self):
-        central = QWidget()
+        self.setWindowTitle("DeepSeekFS — Semantic File Search")
+        self.resize(1100, 700)
+        self.setMinimumSize(800, 500)
+        self.setStyleSheet(self.APP_STYLE)
+
+        self._build_ui()
+        self._build_tray()
+        self._kick_indexing()
+
+    # ── UI construction ───────────────────────────────────────────────────────
+    def _build_ui(self):
+        central = QWidget(objectName="central")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setSpacing(10)
-        root.setContentsMargins(16, 16, 16, 16)
+        root.setContentsMargins(20, 16, 20, 8)
+        root.setSpacing(12)
 
         # Header
-        header = QLabel("🔍 DeepSeekFS – Semantic File Search")
-        header.setStyleSheet("font-size:20px; font-weight:bold; color:#2d6cdf;")
-        root.addWidget(header)
+        hdr = QHBoxLayout()
+        title    = QLabel("🔍  DeepSeekFS", objectName="title")
+        subtitle = QLabel("Semantic file search — local, offline, instant",
+                          objectName="subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignBottom)
+        hdr.addWidget(title)
+        hdr.addSpacing(12)
+        hdr.addWidget(subtitle)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
-        # Search bar
+        # Search row
         search_row = QHBoxLayout()
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search your files semantically…")
-        self.search_input.setMinimumHeight(36)
-        self.search_input.returnPressed.connect(self._do_search)
-        self.btn_search = QPushButton("Search")
-        self.btn_search.setMinimumHeight(36)
-        self.btn_search.clicked.connect(self._do_search)
-        search_row.addWidget(self.search_input)
+        self.inp_query = QLineEdit()
+        self.inp_query.setPlaceholderText(
+            "Search ‘resume’, ‘python project’, ‘SWOT analysis’…  (Enter to search)"
+        )
+        self.inp_query.setMinimumHeight(44)
+        self.inp_query.returnPressed.connect(self._on_search)
+
+        self.btn_search = QPushButton("🔍  Search", objectName="btn_search")
+        self.btn_search.setMinimumHeight(44)
+        self.btn_search.setMinimumWidth(130)
+        self.btn_search.clicked.connect(self._on_search)
+        self.btn_search.setEnabled(False)   # enabled once index is ready
+
+        self.btn_folder = QPushButton("📁  Add Folder", objectName="btn_folder")
+        self.btn_folder.setMinimumHeight(44)
+        self.btn_folder.clicked.connect(self._on_add_folder)
+
+        search_row.addWidget(self.inp_query, 1)
         search_row.addWidget(self.btn_search)
+        search_row.addWidget(self.btn_folder)
         root.addLayout(search_row)
 
-        # Results list
-        self.result_list = QListWidget()
-        self.result_list.setAlternatingRowColors(True)
-        self.result_list.itemDoubleClicked.connect(self._open_file)
-        root.addWidget(self.result_list, 1)
+        # Results table
+        self.table = QTableWidget(0, len(self.COLS))
+        self.table.setHorizontalHeaderLabels(self.COLS)
+        self.table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(
+            7, QHeaderView.ResizeMode.Stretch)      # Path column stretches
+        self.table.doubleClicked.connect(self._on_open_file)
+        # column widths
+        for c, w in [(0,35),(1,220),(2,70),(3,80),(4,60),(5,50),(6,55)]:
+            self.table.setColumnWidth(c, w)
+        root.addWidget(self.table, 1)
 
-        # Status + progress
-        self.status_label = QLabel("Ready.")
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        root.addWidget(self.status_label)
-        root.addWidget(self.progress_bar)
+        # Progress bar (hidden during normal search)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setVisible(True)
+        self.progress.setFormat("Indexing…  %p%")
+        root.addWidget(self.progress)
 
-        # Bottom buttons
-        btn_row = QHBoxLayout()
-        self.btn_index = QPushButton("📁 Index Folder")
-        self.btn_index.clicked.connect(self._pick_folder)
-        self.btn_rebuild = QPushButton("🔄 Rebuild Index")
-        self.btn_rebuild.clicked.connect(self._rebuild)
-        self.btn_stats = QPushButton("📊 Index Stats")
-        self.btn_stats.clicked.connect(self._show_stats)
-        btn_row.addWidget(self.btn_index)
-        btn_row.addWidget(self.btn_rebuild)
-        btn_row.addWidget(self.btn_stats)
-        root.addLayout(btn_row)
+        # Status bar
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
+        self.status.showMessage("⏳  Starting up…")
 
-        # Stylesheet
-        self.setStyleSheet("""
-            QMainWindow { background: #f5f5f5; }
-            QPushButton {
-                background: #2d6cdf; color: white;
-                border-radius: 6px; padding: 6px 14px;
-                font-size: 13px;
-            }
-            QPushButton:hover { background: #1a4fad; }
-            QLineEdit {
-                border: 1px solid #ccc; border-radius: 6px;
-                padding: 4px 10px; font-size: 13px;
-            }
-            QListWidget { border: 1px solid #ddd; border-radius: 6px; }
-        """)
-
-    def _init_tray(self):
-        self.tray = QSystemTrayIcon(self)
+    def _build_tray(self):
+        """System tray: double-click to show/hide; right-click to quit."""
+        self._tray = QSystemTrayIcon(self)
         menu = QMenu()
-        menu.addAction("Show", self.show)
-        menu.addAction("Quit", QApplication.quit)
-        self.tray.setContextMenu(menu)
-        self.tray.show()
-
-    # ── Service loading ───────────────────────────────────────────────────────
-    def _load_service(self):
-        try:
-            from services_desktop import get_service
-            self._service = get_service()
-            self.status_label.setText("Service loaded. Ready to search.")
-        except Exception as e:
-            self.status_label.setText(f"Service error: {e}")
-
-    # ── Search ────────────────────────────────────────────────────────────────
-    def _do_search(self):
-        query = self.search_input.text().strip()
-        if not query or not self._service:
-            return
-        self.result_list.clear()
-        self.status_label.setText("Searching…")
-        self._search_thread = SearchThread(self._service, query)
-        self._search_thread.results_ready.connect(self._show_results)
-        self._search_thread.error.connect(lambda e: self.status_label.setText(f"Error: {e}"))
-        self._search_thread.start()
-
-    def _show_results(self, results):
-        self.result_list.clear()
-        for r in results:
-            score = r.get("score", 0)
-            path = r.get("path", "")
-            item = QListWidgetItem(f"[{score:.2f}]  {path}")
-            if score >= 0.75:
-                item.setForeground(QColor("#2a9d2a"))
-            elif score >= 0.5:
-                item.setForeground(QColor("#e6a817"))
-            else:
-                item.setForeground(QColor("#cc3333"))
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            self.result_list.addItem(item)
-        self.status_label.setText(f"{len(results)} result(s) found.")
-
-    def _open_file(self, item):
-        path = item.data(Qt.ItemDataRole.UserRole)
-        if path and self._service:
-            self._service.open_file(path)
+        menu.addAction("Show / Hide", self._toggle_window)
+        menu.addSeparator()
+        menu.addAction("Quit DeepSeekFS", self._quit)
+        self._tray.setContextMenu(menu)
+        self._tray.activated.connect(self._on_tray_click)
+        self._tray.show()
 
     # ── Indexing ──────────────────────────────────────────────────────────────
-    def _pick_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder to Index")
-        if folder:
-            self._start_indexing([folder])
+    def _kick_indexing(self):
+        self.btn_search.setEnabled(False)
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+        self.status.showMessage("📂  Scanning your files in the background…")
 
-    def _rebuild(self):
-        if self._service:
-            self._service.rebuild_index()
-            self.status_label.setText("Index rebuilt.")
+        self._idx_thread = IndexThread(self._svc)
+        self._idx_thread.status.connect(self.status.showMessage)
+        self._idx_thread.progress.connect(self._on_index_progress)
+        self._idx_thread.finished.connect(self._on_index_done)
+        self._idx_thread.start()
 
-    def _start_indexing(self, paths):
-        if not self._service:
-            return
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self._index_thread = IndexingThread(self._service, paths)
-        self._index_thread.progress.connect(
-            lambda p, m: (self.progress_bar.setValue(p), self.status_label.setText(m))
+    def _on_index_progress(self, done: int, total: int):
+        if total > 0:
+            pct = min(int(done / total * 100), 99)
+            self.progress.setValue(pct)
+            self.progress.setFormat(f"Indexing…  {done}/{total}  ({pct}%)")
+
+    def _on_index_done(self, new_files: int):
+        self._indexed_count = self._svc.total_indexed()
+        self.progress.setValue(100)
+        self.progress.setFormat(f"✅  {self._indexed_count:,} files indexed")
+        self.status.showMessage(
+            f"✅  Ready — {self._indexed_count:,} files in index  •  "
+            f"{new_files} new this session  •  double-click a result to open"
         )
-        self._index_thread.finished.connect(self._on_index_done)
-        self._index_thread.start()
+        self.btn_search.setEnabled(True)
+        self.inp_query.setFocus()
 
-    def _on_index_done(self, ok, msg):
-        self.progress_bar.setVisible(False)
-        self.status_label.setText(msg)
+    def _on_add_folder(self):
+        """Let user pick an extra folder and index it on the fly."""
+        folder = QFileDialog.getExistingDirectory(self, "Choose folder to index")
+        if not folder:
+            return
+        config.WATCH_PATHS.append(folder)
+        self.status.showMessage(f"📁  Indexing {folder}…")
+        self.progress.setValue(0)
+        self.progress.setVisible(True)
+        self._kick_indexing()
 
-    def _show_stats(self):
-        if self._service:
-            stats = self._service.get_index_stats()
-            QMessageBox.information(self, "Index Stats", str(stats))
+    # ── Search ────────────────────────────────────────────────────────────────
+    def _on_search(self):
+        query = self.inp_query.text().strip()
+        if not query:
+            return
+        if self._indexed_count == 0:
+            self.status.showMessage("⏳  Indexing still in progress — try again shortly")
+            return
+        self.table.setRowCount(0)
+        self.btn_search.setEnabled(False)
+        self.status.showMessage(f"🔍  Searching for ‘{query}’…")
+
+        self._srch_thread = SearchThread(self._svc, query)
+        self._srch_thread.results.connect(self._on_results)
+        self._srch_thread.error.connect(
+            lambda e: (self.status.showMessage(f"⚠️  Search error: {e}"),
+                       self.btn_search.setEnabled(True))
+        )
+        self._srch_thread.start()
+
+    def _on_results(self, hits: list):
+        self.table.setRowCount(0)
+        for row_idx, h in enumerate(hits):
+            self.table.insertRow(row_idx)
+            score = h.get("combined_score", h.get("score", 0.0))
+            color = (
+                QColor("#2d6a4f") if score >= 0.75 else
+                QColor("#b5500a") if score >= 0.50 else
+                QColor("#c0392b")
+            )
+            cells = [
+                str(row_idx + 1),
+                h.get("name",  Path(h.get("path","")).name),
+                f"{score*100:.1f}%",
+                f"{h.get('semantic_score', 0)*100:.1f}%",
+                f"{h.get('time_score',     0)*100:.1f}%",
+                f"{h.get('frequency_score',0)*100:.1f}%",
+                h.get("extension", Path(h.get("path","")).suffix),
+                h.get("path", ""),
+            ]
+            for col, val in enumerate(cells):
+                item = QTableWidgetItem(val)
+                item.setData(Qt.ItemDataRole.UserRole, h.get("path", ""))
+                if col == 2:                  # score column: colour-coded
+                    item.setForeground(color)
+                    item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                self.table.setItem(row_idx, col, item)
+
+        n = len(hits)
+        self.status.showMessage(
+            f"✅  {n} result{'s' if n!=1 else ''} for ‘{self.inp_query.text().strip()}’"
+            f"   —  double-click to open"
+        )
+        self.btn_search.setEnabled(True)
+
+    # ── Open file ─────────────────────────────────────────────────────────────
+    def _on_open_file(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        path = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if not path or not Path(path).exists():
+            QMessageBox.warning(self, "Not found", f"File no longer exists:\n{path}")
+            return
+        try:
+            if platform.system() == "Windows":
+                os.startfile(path)
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as exc:
+            QMessageBox.critical(self, "Open failed", str(exc))
+
+    # ── Tray ─────────────────────────────────────────────────────────────────
+    def _toggle_window(self):
+        self.hide() if self.isVisible() else self.show()
+
+    def _on_tray_click(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._toggle_window()
+
+    def _quit(self):
+        self._tray.hide()
+        QApplication.quit()
+
+    def closeEvent(self, event):
+        """Minimise to tray instead of quitting."""
+        if self._tray.isVisible():
+            self.hide()
+            event.ignore()
+        else:
+            event.accept()
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DeepSeekFS")
-    win = DeepSeekFSWindow()
+    app.setApplicationVersion("2.0.0")
+    app.setStyle("Fusion")           # crisp on every OS
+
+    service = DesktopService()
+    win = MainWindow(service)
     win.show()
     sys.exit(app.exec())
 
