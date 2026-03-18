@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY . .
 
+# Bind to all interfaces inside the container
+ENV API_HOST=0.0.0.0
+
 # Create sample documents
 RUN mkdir -p sample_documents && \
     echo "Invoice from last week for Q1 budget analysis" > sample_documents/sample1.txt && \
@@ -28,5 +31,5 @@ RUN python -m app.scripts.initial_index --path /app/sample_documents
 # Expose API port
 EXPOSE 8000
 
-# Run API
-CMD ["python", "-m", "app.main"]
+# Run API with uvicorn, binding to all interfaces
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
