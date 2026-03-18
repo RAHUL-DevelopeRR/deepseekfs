@@ -74,7 +74,7 @@ class SemanticSearch:
                 })
 
             results.sort(key=lambda x: x["combined_score"], reverse=True)
-            logger.info(f"Query: '{query}' → {len(results)} results")
+            logger.info(f"Query: '{query}' -> {len(results)} results")
             return results
 
         except Exception as e:
