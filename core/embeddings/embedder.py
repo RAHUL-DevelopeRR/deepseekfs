@@ -1,4 +1,10 @@
 """Sentence Transformer Wrapper for Embeddings"""
+
+# ── Force CPU-only mode & prevent Windows DLL conflicts ──────────
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"       # FIX 1: disable GPU
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"     # FIX 4: prevent MKL/OpenMP crash
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import List, Union
@@ -10,7 +16,7 @@ class Embedder:
     
     def __init__(self, model_name: str = config.MODEL_NAME):
         logger.info(f"Loading model: {model_name}")
-        self.model = SentenceTransformer(model_name)
+        self.model = SentenceTransformer(model_name, device="cpu")  # FIX 2: force CPU
         self.model_name = model_name
         logger.info(f"Model loaded. Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
     

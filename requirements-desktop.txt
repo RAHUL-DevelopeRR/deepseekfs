@@ -6,10 +6,12 @@
 # ── Desktop UI (replaces pywebview) ──────────────────────────────
 PyQt6>=6.6.0
 
-# ── ML core (unchanged from v1.0) ───────────────────────────────
-sentence-transformers>=2.2.2
+# ── ML core (pinned to stable CPU-only combo) ───────────────────
+torch==2.2.2
+transformers==4.41.2
+sentence-transformers==2.7.0
 faiss-cpu>=1.7.4
-numpy>=1.24.0
+numpy==1.26.4
 scikit-learn>=1.3.0
 
 # ── File ingestion (unchanged) ─────────────────────────────────
