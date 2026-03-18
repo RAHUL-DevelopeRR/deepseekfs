@@ -22,7 +22,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 def get_user_watch_paths() -> list:
     home = Path.home()
     candidates = [
-        home / "Downloads",
+        home / "Downloads" / "Telegram Desktop",
     ]
     return [str(p) for p in candidates if p.exists()]
 
