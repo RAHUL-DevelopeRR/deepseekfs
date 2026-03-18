@@ -18,7 +18,7 @@ def start_api():
 
 
 def start_ui():
-    time.sleep(2)  # Wait for API
+    time.sleep(3)  # Wait for API to fully start
     try:
         import webview
 
@@ -30,10 +30,10 @@ def start_ui():
             <title>DeepSeekFS</title>
             <style>
                 * { margin:0; padding:0; box-sizing:border-box; }
+                html, body { width:100%; height:100%; }
                 body {
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
                     display: flex;
                     align-items: center;
                     justify-content: center;
@@ -44,26 +44,31 @@ def start_ui():
                     border-radius: 12px;
                     box-shadow: 0 20px 60px rgba(0,0,0,0.3);
                     width: 100%;
-                    max-width: 860px;
+                    max-width: 900px;
+                    max-height: 85vh;
                     padding: 40px;
+                    display: flex;
+                    flex-direction: column;
+                    overflow: hidden;
                 }
                 h1 { color:#333; margin-bottom:6px; font-size:30px; }
-                .subtitle { color:#888; font-size:13px; margin-bottom:6px; }
+                .subtitle { color:#888; font-size:13px; margin-bottom:16px; }
                 .status-bar {
                     background: #f0f7ff;
                     border: 1px solid #c8e0ff;
                     border-radius: 8px;
-                    padding: 8px 14px;
+                    padding: 10px 14px;
                     font-size: 12px;
                     color: #3a6fc4;
-                    margin-bottom: 22px;
+                    margin-bottom: 20px;
                     display: flex;
                     align-items: center;
                     gap: 8px;
+                    min-height: 24px;
                 }
                 .dot { width:8px; height:8px; background:#3a6fc4; border-radius:50%; animation: pulse 1.5s infinite; }
                 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-                .search-box { display:flex; gap:10px; margin-bottom:24px; }
+                .search-box { display:flex; gap:10px; margin-bottom:20px; }
                 input {
                     flex:1; padding:12px 16px;
                     border:2px solid #e0e0e0; border-radius:8px;
@@ -78,7 +83,8 @@ def start_ui():
                     transition:transform 0.2s;
                 }
                 button:hover { transform:translateY(-2px); }
-                .results { display:flex; flex-direction:column; gap:10px; max-height:420px; overflow-y:auto; }
+                button:active { transform:translateY(0); }
+                .results { display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1; }
                 .result-item {
                     padding:12px 16px;
                     background:#f7f7f7; border-radius:8px;
@@ -87,63 +93,40 @@ def start_ui():
                 }
                 .result-item:hover { background:#efefef; }
                 .result-name { font-weight:600; color:#333; font-size:14px; }
-                .result-path { font-size:11px; color:#aaa; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-                .result-scores { display:flex; gap:14px; margin-top:6px; font-size:11px; color:#666; }
-                .badge {
-                    display:inline-block; padding:2px 8px;
-                    border-radius:12px; font-size:10px; font-weight:600;
-                    background:#ede9fe; color:#6d28d9;
-                }
-                .loading { text-align:center; padding:24px; color:#aaa; }
-                .indexing-note {
-                    background:#fff8e1; border:1px solid #ffe082;
-                    border-radius:8px; padding:10px 14px;
-                    font-size:12px; color:#856404; margin-bottom:16px;
-                }
+                .result-path { font-size:11px; color:#aaa; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+                .result-scores { display:flex; gap:14px; margin-top:6px; font-size:11px; color:#666; flex-wrap:wrap; }
+                .loading { text-align:center; padding:20px; color:#aaa; }
+                .error { color:#c62828; background:#ffebee; padding:10px; border-radius:6px; font-size:12px; }
             </style>
         </head>
         <body>
         <div class="container">
-            <h1>&#128269; DeepSeekFS</h1>
-            <p class="subtitle">Elite semantic file search engine &mdash; powered by AI</p>
-
-            <div class="status-bar">
-                <div class="dot"></div>
-                <span id="status">Checking index status...</span>
-            </div>
-
-            <div class="indexing-note" id="indexNote" style="display:none">
-                &#9888;&#65039; Background indexing is in progress. Results will grow as more files are indexed.
-            </div>
-
+            <h1>\ud83d\udd0d DeepSeekFS</h1>
+            <p class="subtitle">Elite semantic file search engine</p>
+            <div class="status-bar"><div class="dot"></div><span id="status">Connecting...</span></div>
             <div class="search-box">
-                <input
-                    type="text" id="query"
-                    placeholder="Search: 'invoice last week', 'python project', 'resume'..."
-                    onkeypress="if(event.key==='Enter') search()"
-                >
+                <input type="text" id="query" placeholder="Search: 'SWOT analysis', 'python project', 'resume'..."
+                    onkeypress="if(event.key==='Enter') search()" autofocus>
                 <button onclick="search()">Search</button>
             </div>
-
             <div id="results" class="results"></div>
         </div>
-
         <script>
             const API = 'http://localhost:8000';
+            let statusUpdateInterval = null;
 
             async function updateStatus() {
                 try {
-                    const r = await fetch(`${API}/health`);
+                    const r = await fetch(API + '/health');
+                    if (!r.ok) throw new Error('API returned ' + r.status);
                     const d = await r.json();
-                    const stats = d.index_stats;
-                    const paths = (stats.watch_paths || []).join(', ');
-                    document.getElementById('status').textContent =
-                        `&#128196; ${stats.total_documents} files indexed  |  Watching: ${paths || 'scanning...'}` ;
-                    if (stats.total_documents === 0) {
-                        document.getElementById('indexNote').style.display = 'block';
-                    }
+                    const stats = d.index_stats || {};
+                    const count = stats.total_documents || 0;
+                    document.getElementById('status').textContent = count > 0
+                        ? '\ud83d\udcc4 ' + count + ' files indexed'
+                        : '\u23f3 Indexing in progress...';
                 } catch(e) {
-                    document.getElementById('status').textContent = 'API starting...';
+                    document.getElementById('status').textContent = '\u26a0\ufe0f API connecting...';
                 }
             }
 
@@ -151,48 +134,46 @@ def start_ui():
                 const query = document.getElementById('query').value.trim();
                 if (!query) return;
                 const resultsDiv = document.getElementById('results');
-                resultsDiv.innerHTML = '<div class="loading">&#9203; Searching...</div>';
+                resultsDiv.innerHTML = '<div class="loading">\u23f3 Searching...</div>';
                 try {
-                    const r = await fetch(`${API}/search/`, {
+                    const r = await fetch(API + '/search/', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({query, top_k: 10, use_time_ranking: true})
                     });
+                    if (!r.ok) throw new Error('Search failed: ' + r.status);
                     const data = await r.json();
                     if (!data.results || data.results.length === 0) {
                         resultsDiv.innerHTML = '<div class="loading">No results found. Indexing may still be running.</div>';
                         return;
                     }
                     resultsDiv.innerHTML = data.results.map(res => `
-                        <div class="result-item" onclick="openFile('${res.path.replace(/\\/g, '\\\\')}')">
+                        <div class="result-item" onclick="openFile('${res.path.replace(/\\/g, '\\\\').replace(/'/g, \"\\\"\")}')"
+                            title="${res.path}">
                             <div style="display:flex;align-items:center;gap:8px">
-                                <span class="badge">${res.extension}</span>
+                                <span style="background:#e8e8ff;color:#3a3a7a;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">${res.extension}</span>
                                 <span class="result-name">${res.name}</span>
                             </div>
                             <div class="result-path">${res.path}</div>
                             <div class="result-scores">
-                                <span>&#128202; Combined: ${(res.combined_score*100).toFixed(1)}%</span>
-                                <span>&#129504; Semantic: ${(res.semantic_score*100).toFixed(1)}%</span>
-                                <span>&#8987;&#65039; Time: ${(res.time_score*100).toFixed(1)}%</span>
-                                <span>&#128190; ${(res.size/1024).toFixed(1)} KB</span>
+                                <span>\ud83d\udcca Score: ${(res.combined_score*100).toFixed(1)}%</span>
+                                <span>\ud83e\udde0 Semantic: ${(res.semantic_score*100).toFixed(1)}%</span>
+                                <span>\u23f1\ufe0f Time: ${(res.time_score*100).toFixed(1)}%</span>
                             </div>
                         </div>
                     `).join('');
                 } catch(e) {
-                    resultsDiv.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+                    resultsDiv.innerHTML = '<div class="error">Error: ' + e.message + '</div>';
                 }
             }
 
-            function openFile(path) {
-                // Opens file location via API
-                fetch(`${API}/open?path=${encodeURIComponent(path)}`).catch(() => {});
-            }
-
-            // Update status every 5 seconds
+            // Update status every 2 seconds
             updateStatus();
-            setInterval(updateStatus, 5000);
+            statusUpdateInterval = setInterval(updateStatus, 2000);
 
-            window.addEventListener('load', () => document.getElementById('query').focus());
+            function openFile(path) {
+                fetch(API + '/open?path=' + encodeURIComponent(path)).catch(() => {});
+            }
         </script>
         </body>
         </html>
@@ -205,7 +186,7 @@ def start_ui():
         webview.start()
     except Exception as e:
         logger.error(f"UI error: {e}")
-        logger.info(f"Open browser manually: http://localhost:{config.API_PORT}/docs")
+        logger.info(f"Open browser: http://localhost:{config.API_PORT}")
 
 
 if __name__ == "__main__":
