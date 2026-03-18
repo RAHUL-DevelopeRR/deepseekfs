@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         border-radius:8px;
         padding:10px 14px;
         font-size:14px;
+        color: #1a1a2e;
         background:#ffffff;
     }
     QLineEdit:focus { border-color:#4361ee; background:#fafbff; }

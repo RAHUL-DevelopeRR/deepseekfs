@@ -87,11 +87,23 @@ class IndexBuilder:
             logger.warning(f"Directory not found: {directory}")
             return 0
 
-        pattern = "**/*" if recursive else "*"
-        files = [
-            f for f in path.glob(pattern)
-            if f.is_file() and f.suffix.lower() in config.SUPPORTED_EXTENSIONS
-        ]
+        files = []
+        if recursive:
+            for root, dirs, fnames in os.walk(directory):
+                for fname in fnames:
+                    ext = Path(fname).suffix.lower()
+                    if ext in config.SUPPORTED_EXTENSIONS:
+                        fpath = os.path.join(root, fname)
+                        try:
+                            if os.path.getsize(fpath) <= config.MAX_FILE_SIZE_BYTES:
+                                files.append(fpath)
+                        except Exception:
+                            pass
+        else:
+            for p in path.glob("*"):
+                if p.is_file() and p.suffix.lower() in config.SUPPORTED_EXTENSIONS:
+                    files.append(str(p))
+
         logger.info(f"Found {len(files)} candidate files in {directory}")
         for f in files:
             if self.add_file(str(f)):

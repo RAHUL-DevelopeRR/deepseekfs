@@ -46,8 +46,35 @@ def get_time_multiplier(query: str) -> float:
     }
     
     max_multiplier = 1.0
-    for keyword, multiplier in recency_keywords.items():
-        if keyword in query_lower:
-            max_multiplier = max(max_multiplier, multiplier)
+def extract_time_target(query: str):
+    """
+    Extracts explicit date from query using dateparser.
+    Returns: (target_timestamp_float or None, cleaned_query_string)
+    """
+    try:
+        from dateparser.search import search_dates
+        dates = search_dates(query)
+        if not dates:
+            return None, query
+        
+        date_str, date_obj = dates[0]
+        
+        # Remove the date string from the query so it doesn't skew semantic search
+        import re
+        cleaned = re.sub(re.escape(date_str), "", query, flags=re.IGNORECASE).strip()
+        cleaned = " ".join(cleaned.split())
+        
+        return date_obj.timestamp(), cleaned
+    except Exception:
+        return None, query
+
+def calculate_target_time_score(file_timestamp: float, target_timestamp: float) -> float:
+    """Give 1.0 for files very close to target date, decaying outside a 24-hour window."""
+    diff_seconds = abs(file_timestamp - target_timestamp)
+    diff_days = diff_seconds / (24 * 3600)
     
-    return max_multiplier
+    if diff_days <= 1.5:
+        return 1.0
+    
+    score = np.exp(-(diff_days - 1.5) / 5)
+    return float(np.clip(score, 0, 1))

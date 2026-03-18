@@ -20,19 +20,13 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # AUTO-DETECT real user folders (cross-platform)
 # ─────────────────────────────────────────────────────────────
 def get_user_watch_paths() -> list:
-    """Detect real user folders to index automatically"""
-    home = Path.home()
-    candidates = [
-        home / "Documents",
-        home / "Downloads",
-        home / "Desktop",
-        home / "OneDrive",
-        home / "OneDrive" / "Documents",
-        home / "Pictures",
-        home / "Videos",
-    ]
-    # Only include paths that actually exist
-    return [str(p) for p in candidates if p.exists()]
+    import string
+    paths = []
+    for d in string.ascii_uppercase:
+        drive = f"{d}:\\"
+        if os.path.exists(drive):
+            paths.append(drive)
+    return paths
 
 
 WATCH_PATHS = get_user_watch_paths()

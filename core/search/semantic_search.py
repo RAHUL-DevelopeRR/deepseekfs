@@ -4,7 +4,7 @@ from typing import List, Dict
 import app.config as config
 from app.logger import logger
 from core.embeddings.embedder import get_embedder
-from core.time.scoring import calculate_time_score, get_time_multiplier
+from core.time.scoring import calculate_time_score, get_time_multiplier, extract_time_target, calculate_target_time_score
 from core.indexing.index_builder import get_index
 
 
@@ -28,10 +28,15 @@ class SemanticSearch:
             return []
 
         try:
-            query_embedding = self.embedder.encode_single(query)
+            # Intercept date queries
+            target_time, cleaned_query = extract_time_target(query)
+            
+            # Use cleaned query for embedding, if it became empty just use original
+            search_text = cleaned_query if len(cleaned_query) >= 3 else query
+            query_embedding = self.embedder.encode_single(search_text)
             query_embedding = np.array([query_embedding], dtype=np.float32)
 
-            distances, indices = index_builder.search_raw(query_embedding, top_k)
+            distances, indices = index_builder.search_raw(query_embedding, top_k * 2)
 
             results = []
             time_multiplier = get_time_multiplier(query) if use_time_ranking else 1.0
@@ -43,13 +48,19 @@ class SemanticSearch:
                 meta = index_builder.metadata[idx]
                 distance = float(distances[i])
                 similarity = 1 / (1 + distance)
-                time_score = calculate_time_score(meta.get("modified_time", 0))
-
-                combined_score = (
-                    0.6 * similarity
-                    + 0.25 * time_score * time_multiplier
-                    + 0.15 * (1.0 if meta.get("size", 0) > 1000 else 0.5)
-                )
+                if target_time is not None:
+                    # Strict target-based time scoring
+                    time_score = calculate_target_time_score(meta.get("modified_time", 0), target_time)
+                    # If it heavily mismatches the date, penalize the combined score significantly
+                    time_penalty = 1.0 if time_score > 0.5 else 0.1
+                    combined_score = (0.7 * similarity * time_penalty) + (0.3 * time_score)
+                else:
+                    time_score = calculate_time_score(meta.get("modified_time", 0))
+                    combined_score = (
+                        0.6 * similarity
+                        + 0.25 * time_score * time_multiplier
+                        + 0.15 * (1.0 if meta.get("size", 0) > 1000 else 0.5)
+                    )
 
                 results.append({
                     "path": meta["path"],

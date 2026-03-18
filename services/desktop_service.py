@@ -15,6 +15,7 @@ from typing import Callable, List
 
 import app.config as config
 from app.logger import logger
+import os
 from core.indexing.index_builder import get_index
 from services.startup_indexer import StartupIndexer
 
@@ -30,6 +31,11 @@ class DesktopService:
         self._idx = get_index()
         self._lock = threading.Lock()
         logger.info("DesktopService: index singleton loaded")
+        
+        # Start the file watcher for real-time indexing of new files
+        from core.watcher.file_watcher import FileWatcher
+        self.watcher = FileWatcher(self._idx)
+        self.watcher.start()
 
     # ── Indexing ──────────────────────────────────────────────────────────────
     def run_indexing(
@@ -65,13 +71,24 @@ class DesktopService:
             if not folder_path.exists():
                 continue
 
-            # Count files first so we can report percentage
-            all_files = [
-                f for f in folder_path.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in config.SUPPORTED_EXTENSIONS
-                and f.stat().st_size <= config.MAX_FILE_SIZE_BYTES
-            ]
+            # Count files first so we can report percentage, use os.walk to safely ignore PermissionError
+            all_files = []
+            for root, dirs, files in os.walk(folder_path):
+                # Skip massive system directories and caches to speed up disk-wide scanning
+                for skip in ["Windows", "$Recycle.Bin", "ProgramData", "AppData", "node_modules", ".git", ".cache"]:
+                    if skip in dirs:
+                        dirs.remove(skip)
+                        
+                for fname in files:
+                    ext = Path(fname).suffix.lower()
+                    if ext in config.SUPPORTED_EXTENSIONS:
+                        fpath = os.path.join(root, fname)
+                        try:
+                            if os.path.getsize(fpath) <= config.MAX_FILE_SIZE_BYTES:
+                                all_files.append(Path(fpath))
+                        except Exception:
+                            pass
+
             n_total = len(all_files)
 
             if on_status:
@@ -81,7 +98,7 @@ class DesktopService:
             n_done = 0
             for fpath in all_files:
                 with self._lock:
-                    added = idx.index_file(str(fpath))
+                    added = 1 if idx.add_file(str(fpath)) else 0
                 total_new += added
                 n_done += 1
                 if on_progress and n_total > 0:
@@ -107,8 +124,8 @@ class DesktopService:
         Direct call into core/search — no HTTP round-trip.
         Returns a list of result dicts (same schema the web API returned).
         """
-        from core.search.search_engine import SearchEngine
-        engine = SearchEngine(get_index())
+        from core.search.semantic_search import SemanticSearch
+        engine = SemanticSearch()
         return engine.search(query, top_k=top_k, use_time_ranking=True)
 
     # ── Stats ─────────────────────────────────────────────────────────────────
