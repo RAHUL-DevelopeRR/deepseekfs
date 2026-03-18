@@ -1,94 +1,71 @@
-"""Semantic search using FAISS"""
-import faiss
+"""Semantic search - uses the shared global index"""
 import numpy as np
-import pickle
-from typing import List, Dict, Tuple
-from pathlib import Path
+from typing import List, Dict
 import app.config as config
 from app.logger import logger
 from core.embeddings.embedder import get_embedder
 from core.time.scoring import calculate_time_score, get_time_multiplier
+from core.indexing.index_builder import get_index
+
 
 class SemanticSearch:
-    """Semantic search engine"""
-    
+    """Search engine that always reads from the shared singleton index"""
+
     def __init__(self):
         self.embedder = get_embedder()
-        self.index = None
-        self.metadata = []
-        self.load_index()
-    
-    def load_index(self):
-        """Load FAISS index and metadata"""
-        index_path = config.FAISS_INDEX_PATH
-        metadata_path = config.METADATA_PATH
-        
-        if Path(index_path).exists() and Path(metadata_path).exists():
-            self.index = faiss.read_index(index_path)
-            with open(metadata_path, 'rb') as f:
-                self.metadata = pickle.load(f)
-            logger.info(f"Search index loaded. Documents: {len(self.metadata)}")
-        else:
-            logger.warning("No index found. Please run initial_index.py first.")
-    
+
     def search(
         self,
         query: str,
         top_k: int = config.TOP_K,
         use_time_ranking: bool = True
     ) -> List[Dict]:
-        """Search for files"""
-        if self.index is None or len(self.metadata) == 0:
+        # Always fetch the live singleton index
+        index_builder = get_index()
+
+        if index_builder.index is None or len(index_builder.metadata) == 0:
+            logger.warning("Index is empty. Indexing may still be running.")
             return []
-        
+
         try:
-            # Generate query embedding
             query_embedding = self.embedder.encode_single(query)
             query_embedding = np.array([query_embedding], dtype=np.float32)
-            
-            # FAISS search
-            distances, indices = self.index.search(query_embedding, min(top_k, len(self.metadata)))
-            
+
+            distances, indices = index_builder.search_raw(query_embedding, top_k)
+
             results = []
             time_multiplier = get_time_multiplier(query) if use_time_ranking else 1.0
-            
-            for i, idx in enumerate(indices[0]):
-                if idx >= len(self.metadata):
+
+            for i, idx in enumerate(indices):
+                if idx < 0 or idx >= len(index_builder.metadata):
                     continue
-                
-                metadata = self.metadata[idx]
-                distance = float(distances[0][i])
-                
-                # Convert L2 distance to similarity score (0-1)
+
+                meta = index_builder.metadata[idx]
+                distance = float(distances[i])
                 similarity = 1 / (1 + distance)
-                
-                # Calculate time score
-                modified_time = metadata.get('modified_time', 0)
-                time_score = calculate_time_score(modified_time)
-                
-                # Combined score
+                time_score = calculate_time_score(meta.get("modified_time", 0))
+
                 combined_score = (
-                    0.6 * similarity +
-                    0.25 * time_score * time_multiplier +
-                    0.15 * (1.0 if metadata.get('size', 0) > 1000 else 0.5)  # Frequency proxy
+                    0.6 * similarity
+                    + 0.25 * time_score * time_multiplier
+                    + 0.15 * (1.0 if meta.get("size", 0) > 1000 else 0.5)
                 )
-                
+
                 results.append({
-                    "path": metadata["path"],
-                    "name": metadata["name"],
-                    "extension": metadata["extension"],
-                    "size": metadata["size"],
-                    "modified_time": metadata["modified_time"],
+                    "path": meta["path"],
+                    "name": meta["name"],
+                    "extension": meta["extension"],
+                    "size": meta["size"],
+                    "modified_time": meta["modified_time"],
                     "semantic_score": round(similarity, 4),
                     "time_score": round(time_score, 4),
                     "combined_score": round(combined_score, 4),
                 })
-            
-            # Sort by combined score
+
             results.sort(key=lambda x: x["combined_score"], reverse=True)
-            
-            logger.info(f"Search query: '{query}' - Found {len(results)} results")
+            logger.info(f"Query: '{query}' → {len(results)} results")
             return results
+
         except Exception as e:
             logger.error(f"Search error: {e}")
             return []
