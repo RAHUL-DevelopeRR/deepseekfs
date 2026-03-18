@@ -38,14 +38,12 @@ class FileWatcher:
     
     def start(self):
         """Start watching"""
-        # Watchdog crashes on C:\ root due to Permission/OS limits. 
-        # Only watch the user's home directory live.
-        safe_path = str(Path.home())
-        try:
-            self.observer.schedule(self.event_handler, safe_path, recursive=True)
-            logger.info(f"Watching: {safe_path}")
-        except Exception as e:
-            logger.error(f"Could not watch {safe_path}: {e}")
+        for path in self.watch_paths:
+            try:
+                self.observer.schedule(self.event_handler, path, recursive=True)
+                logger.info(f"Watching: {path}")
+            except Exception as e:
+                logger.error(f"Could not watch {path}: {e}")
         
         self.observer.start()
         logger.info("File watcher started")

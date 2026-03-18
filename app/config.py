@@ -22,7 +22,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 def get_user_watch_paths() -> list:
     home = Path.home()
     candidates = [
-        home / "Downloads" / "Telegram Desktop",
+        home / "Downloads",
     ]
     return [str(p) for p in candidates if p.exists()]
 
@@ -33,7 +33,8 @@ WATCH_PATHS = get_user_watch_paths()
 SUPPORTED_EXTENSIONS = {
     ".txt", ".pdf", ".docx", ".doc",
     ".md", ".json", ".csv", ".py", ".js",
-    ".pptx", ".xlsx", ".xls", ".html"
+    ".pptx", ".xlsx", ".xls", ".html",
+    ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"
 }
 
 # Model configuration
@@ -57,5 +58,5 @@ UI_TITLE = "DeepSeekFS - Semantic File Search"
 UI_WIDTH = 1000
 UI_HEIGHT = 700
 
-# Max file size to index (5 MB)
-MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
+# Max file size to index (100 GB)
+MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024 * 1024

@@ -26,6 +26,8 @@ class FileParser:
                 return FileParser._parse_csv(file_path)
             elif ext in [".py", ".js"]:
                 return FileParser._parse_code(file_path)
+            elif ext in [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"]:
+                return FileParser._parse_video_metadata(file_path)
             else:
                 return None
         except Exception as e:
@@ -91,6 +93,13 @@ class FileParser:
     def _parse_code(file_path: str) -> str:
         """Parse code files"""
         return FileParser._parse_text(file_path)
+        
+    @staticmethod
+    def _parse_video_metadata(file_path: str) -> str:
+        """Parse video files based on filename metadata"""
+        name = os.path.basename(file_path)
+        name_clean = name.replace("_", " ").replace("-", " ").replace(".", " ")
+        return f"Video file: {name_clean}"
     
     @staticmethod
     def get_file_metadata(file_path: str) -> dict:
