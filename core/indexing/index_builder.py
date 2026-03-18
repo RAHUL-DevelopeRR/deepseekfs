@@ -2,6 +2,7 @@
 import faiss
 import numpy as np
 import pickle
+import threading
 from typing import List, Dict, Set
 from pathlib import Path
 import app.config as config
@@ -18,6 +19,7 @@ class IndexBuilder:
         self.index = None
         self.metadata: List[Dict] = []
         self.indexed_paths: Set[str] = set()
+        self.lock = threading.RLock()
         self.load_or_create_index()
 
     def load_or_create_index(self):
@@ -52,33 +54,34 @@ class IndexBuilder:
         self.indexed_paths = set()
 
     def add_file(self, file_path: str) -> bool:
-        norm_path = str(Path(file_path).resolve())
+        with self.lock:
+            norm_path = str(Path(file_path).resolve())
 
-        if norm_path in self.indexed_paths:
-            return False
-
-        try:
-            p = Path(norm_path)
-            if not p.exists():
-                return False
-            if p.stat().st_size > config.MAX_FILE_SIZE_BYTES:
+            if norm_path in self.indexed_paths:
                 return False
 
-            text = FileParser.parse(norm_path)
-            if not text or len(text.strip()) < 10:
+            try:
+                p = Path(norm_path)
+                if not p.exists():
+                    return False
+                if p.stat().st_size > config.MAX_FILE_SIZE_BYTES:
+                    return False
+
+                text = FileParser.parse(norm_path)
+                if not text or len(text.strip()) < 10:
+                    return False
+
+                embedding = self.embedder.encode_single(text)
+                embedding = np.array([embedding], dtype=np.float32)
+                meta = FileParser.get_file_metadata(norm_path)
+
+                self.index.add(embedding)
+                self.metadata.append(meta)
+                self.indexed_paths.add(norm_path)
+                return True
+            except Exception as e:
+                logger.error(f"Error indexing {norm_path}: {e}")
                 return False
-
-            embedding = self.embedder.encode_single(text)
-            embedding = np.array([embedding], dtype=np.float32)
-            meta = FileParser.get_file_metadata(norm_path)
-
-            self.index.add(embedding)
-            self.metadata.append(meta)
-            self.indexed_paths.add(norm_path)
-            return True
-        except Exception as e:
-            logger.error(f"Error indexing {norm_path}: {e}")
-            return False
 
     def index_directory(self, directory: str, recursive: bool = True) -> int:
         path = Path(directory)
