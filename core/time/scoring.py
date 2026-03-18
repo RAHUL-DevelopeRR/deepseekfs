@@ -46,6 +46,11 @@ def get_time_multiplier(query: str) -> float:
     }
     
     max_multiplier = 1.0
+    for keyword, multiplier in recency_keywords.items():
+        if keyword in query_lower:
+            max_multiplier = max(max_multiplier, multiplier)
+            
+    return max_multiplier
 def extract_time_target(query: str):
     """
     Extracts explicit date from query using dateparser.
