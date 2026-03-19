@@ -74,8 +74,17 @@ class DesktopService:
             # Count files first so we can report percentage, use os.walk to safely ignore PermissionError
             all_files = []
             for root, dirs, files in os.walk(folder_path):
+                try:
+                    target_dir = Path(root).resolve()
+                    base_dir = config.BASE_DIR.resolve()
+                    if target_dir == base_dir or base_dir in target_dir.parents:
+                        dirs.clear()
+                        continue
+                except Exception:
+                    pass
+
                 # Skip massive system directories and caches to speed up disk-wide scanning
-                for skip in ["Windows", "$Recycle.Bin", "ProgramData", "AppData", "node_modules", ".git", ".cache"]:
+                for skip in ["Windows", "$Recycle.Bin", "ProgramData", "AppData", "node_modules", ".git", ".cache", "venv", ".venv", "env", ".env"]:
                     if skip in dirs:
                         dirs.remove(skip)
                         

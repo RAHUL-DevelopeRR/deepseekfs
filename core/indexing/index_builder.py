@@ -165,6 +165,14 @@ class IndexBuilder:
         with self.lock:
             norm_path = str(Path(file_path).resolve())
 
+            try:
+                p = Path(norm_path)
+                base_dir = config.BASE_DIR.resolve()
+                if p == base_dir or base_dir in p.parents:
+                    return False
+            except Exception:
+                pass
+
             if self._db.contains(norm_path):
                 return False
 
@@ -201,6 +209,19 @@ class IndexBuilder:
         files = []
         if recursive:
             for root, dirs, fnames in os.walk(directory):
+                try:
+                    target_dir = Path(root).resolve()
+                    base_dir = config.BASE_DIR.resolve()
+                    if target_dir == base_dir or base_dir in target_dir.parents:
+                        dirs.clear()
+                        continue
+                except Exception:
+                    pass
+
+                for skip in ["Windows", "$Recycle.Bin", "ProgramData", "AppData", "node_modules", ".git", ".cache", "venv", ".venv", "env", ".env"]:
+                    if skip in dirs:
+                        dirs.remove(skip)
+
                 for fname in fnames:
                     ext = Path(fname).suffix.lower()
                     if ext in config.SUPPORTED_EXTENSIONS:

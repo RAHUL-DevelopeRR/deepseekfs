@@ -9,6 +9,8 @@ Usage:
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import os
 import sys
 import platform
@@ -29,7 +31,7 @@ from PyQt6.QtWidgets import (
     QMenu, QMessageBox, QFileDialog,
 )
 from PyQt6.QtCore  import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui   import QFont, QColor, QIcon
+from PyQt6.QtGui   import QFont, QColor, QIcon, QPalette
 
 import app.config as config
 from app.logger import logger
@@ -106,74 +108,209 @@ class MainWindow(QMainWindow):
     """
 
     APP_STYLE = """
-    QMainWindow, QWidget#central { background:#f0f2f5; }
+    /* ── Global: transparent so acrylic shows through ────────────── */
+    QMainWindow {
+        background: transparent;
+    }
+    QWidget#central {
+        background: rgba(20, 20, 30, 180);
+    }
 
+    /* ── Header labels ──────────────────────────────────────────── */
     QLabel#title {
-        font-size:22px; font-weight:700; color:#1a1a2e;
+        font-size: 22px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.95);
     }
-    QLabel#subtitle { font-size:12px; color:#6c757d; }
+    QLabel#subtitle {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.50);
+    }
 
+    /* ── Search input ───────────────────────────────────────────── */
     QLineEdit {
-        border:2px solid #dee2e6;
-        border-radius:8px;
-        padding:10px 14px;
-        font-size:14px;
-        color: #1a1a2e;
-        background:#ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.92);
+        background: rgba(255, 255, 255, 0.06);
+        selection-background-color: rgba(99, 140, 255, 0.45);
     }
-    QLineEdit:focus { border-color:#4361ee; background:#fafbff; }
+    QLineEdit:focus {
+        border-color: rgba(99, 140, 255, 0.60);
+        background: rgba(255, 255, 255, 0.10);
+    }
+    QLineEdit::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+    }
 
+    /* ── Search button ──────────────────────────────────────────── */
     QPushButton#btn_search {
-        background:#4361ee;
-        color:#ffffff;
-        border:none;
-        border-radius:8px;
-        padding:10px 28px;
-        font-size:14px;
-        font-weight:600;
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 rgba(67, 97, 238, 220),
+            stop:1 rgba(99, 140, 255, 220)
+        );
+        color: #ffffff;
+        border: 1px solid rgba(99, 140, 255, 0.30);
+        border-radius: 8px;
+        padding: 10px 28px;
+        font-size: 14px;
+        font-weight: 600;
     }
-    QPushButton#btn_search:hover   { background:#3451d1; }
-    QPushButton#btn_search:pressed { background:#2541c0; }
-    QPushButton#btn_search:disabled{ background:#adb5bd; }
+    QPushButton#btn_search:hover {
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 rgba(80, 115, 255, 240),
+            stop:1 rgba(120, 160, 255, 240)
+        );
+        border-color: rgba(120, 160, 255, 0.50);
+    }
+    QPushButton#btn_search:pressed {
+        background: rgba(50, 80, 200, 240);
+    }
+    QPushButton#btn_search:disabled {
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.30);
+        border-color: rgba(255, 255, 255, 0.06);
+    }
 
+    /* ── Folder button ──────────────────────────────────────────── */
     QPushButton#btn_folder {
-        background:#ffffff;
-        color:#4361ee;
-        border:2px solid #4361ee;
-        border-radius:8px;
-        padding:8px 18px;
-        font-size:13px;
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(150, 180, 255, 0.90);
+        border: 1px solid rgba(99, 140, 255, 0.30);
+        border-radius: 8px;
+        padding: 8px 18px;
+        font-size: 13px;
     }
-    QPushButton#btn_folder:hover { background:#eef0fd; }
+    QPushButton#btn_folder:hover {
+        background: rgba(99, 140, 255, 0.15);
+        border-color: rgba(99, 140, 255, 0.50);
+    }
 
+    /* ── Results table ──────────────────────────────────────────── */
     QTableWidget {
-        background:#ffffff;
-        color:#1a1a2e;
-        border:1px solid #dee2e6;
-        border-radius:8px;
-        gridline-color:#f1f3f5;
-        font-size:13px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        gridline-color: rgba(255, 255, 255, 0.06);
+        font-size: 13px;
+        alternate-background-color: rgba(255, 255, 255, 0.03);
     }
-    QTableWidget::item          { padding:8px 10px; }
-    QTableWidget::item:selected { background:#4361ee; color:#ffffff; }
+    QTableWidget::item {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    QTableWidget::item:selected {
+        background: rgba(99, 140, 255, 0.30);
+        color: #ffffff;
+    }
+    QTableWidget::item:hover {
+        background: rgba(255, 255, 255, 0.06);
+    }
     QHeaderView::section {
-        background:#f8f9fa;
-        font-weight:600;
-        padding:8px 10px;
-        border:none;
-        border-bottom:2px solid #dee2e6;
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.70);
+        font-weight: 600;
+        padding: 8px 10px;
+        border: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.10);
     }
 
+    /* ── Progress bar ───────────────────────────────────────────── */
     QProgressBar {
-        border:1px solid #dee2e6;
-        border-radius:6px;
-        text-align:center;
-        font-size:11px;
-        height:18px;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 6px;
+        text-align: center;
+        font-size: 11px;
+        height: 18px;
+        color: rgba(255, 255, 255, 0.80);
+        background: rgba(255, 255, 255, 0.05);
     }
-    QProgressBar::chunk { background:#4361ee; border-radius:5px; }
+    QProgressBar::chunk {
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 rgba(67, 97, 238, 200),
+            stop:1 rgba(120, 160, 255, 200)
+        );
+        border-radius: 5px;
+    }
 
-    QStatusBar { font-size:12px; color:#6c757d; }
+    /* ── Status bar ─────────────────────────────────────────────── */
+    QStatusBar {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.55);
+        background: transparent;
+    }
+
+    /* ── Scrollbars ─────────────────────────────────────────────── */
+    QScrollBar:vertical {
+        background: transparent;
+        width: 8px;
+        margin: 0;
+    }
+    QScrollBar::handle:vertical {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+        min-height: 30px;
+    }
+    QScrollBar::handle:vertical:hover {
+        background: rgba(255, 255, 255, 0.25);
+    }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+        background: transparent;
+        height: 0;
+    }
+    QScrollBar:horizontal {
+        background: transparent;
+        height: 8px;
+        margin: 0;
+    }
+    QScrollBar::handle:horizontal {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+        min-width: 30px;
+    }
+    QScrollBar::handle:horizontal:hover {
+        background: rgba(255, 255, 255, 0.25);
+    }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+        background: transparent;
+        width: 0;
+    }
+
+    /* ── Tooltips ───────────────────────────────────────────────── */
+    QToolTip {
+        background: rgba(30, 30, 45, 230);
+        color: rgba(255, 255, 255, 0.90);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 4px;
+        padding: 4px 8px;
+    }
+
+    /* ── Message box ────────────────────────────────────────────── */
+    QMessageBox {
+        background: rgba(25, 25, 40, 245);
+        color: rgba(255, 255, 255, 0.90);
+    }
+    QMessageBox QLabel {
+        color: rgba(255, 255, 255, 0.90);
+    }
+    QMessageBox QPushButton {
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.90);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        padding: 6px 20px;
+    }
+    QMessageBox QPushButton:hover {
+        background: rgba(99, 140, 255, 0.20);
+    }
     """
 
     COLS = ["#", "File Name", "Score", "Semantic", "Time", "Freq", "Type", "Full Path"]
@@ -188,6 +325,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("DeepSeekFS — Semantic File Search")
         self.resize(1100, 700)
         self.setMinimumSize(800, 500)
+
+        # Enable translucent background
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet(self.APP_STYLE)
 
         self._build_ui()
@@ -245,7 +385,7 @@ class MainWindow(QMainWindow):
             QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setAlternatingRowColors(False)
+        self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(
             7, QHeaderView.ResizeMode.Stretch)      # Path column stretches
@@ -346,9 +486,9 @@ class MainWindow(QMainWindow):
             self.table.insertRow(row_idx)
             score = h.get("combined_score", h.get("score", 0.0))
             color = (
-                QColor("#2d6a4f") if score >= 0.75 else
-                QColor("#b5500a") if score >= 0.50 else
-                QColor("#c0392b")
+                QColor("#6fcf97") if score >= 0.75 else
+                QColor("#f2c94c") if score >= 0.50 else
+                QColor("#eb5757")
             )
             cells = [
                 str(row_idx + 1),
@@ -366,6 +506,8 @@ class MainWindow(QMainWindow):
                 if col == 2:                  # score column: colour-coded
                     item.setForeground(color)
                     item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                elif col == 1:                # file name: brighter
+                    item.setForeground(QColor(255, 255, 255, 230))
                 self.table.setItem(row_idx, col, item)
 
         n = len(hits)
@@ -413,6 +555,75 @@ class MainWindow(QMainWindow):
             event.ignore()
         else:
             event.accept()
+
+    def showEvent(self, event):
+        """Apply acrylic effect once the window has a valid HWND."""
+        super().showEvent(event)
+        if platform.system() == "Windows":
+            try:
+                self._enable_acrylic(int(self.winId()))
+            except Exception as exc:
+                logger.warning(f"Acrylic effect unavailable: {exc}")
+
+    # ── Windows DWM Acrylic ───────────────────────────────────────────────────
+    @staticmethod
+    def _enable_acrylic(hwnd: int):
+        """
+        Enable the Windows 10/11 acrylic (or Mica) blur-behind effect
+        using DwmSetWindowAttribute.  Falls back gracefully.
+        """
+        # --- attempt 1: Windows 11 Mica / Mica Alt (build 22621+) -----------
+        DWMWA_SYSTEMBACKDROP_TYPE = 38
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        dwm = ctypes.windll.dwmapi
+
+        # Turn on dark mode for the title bar
+        val = ctypes.c_int(1)
+        dwm.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ctypes.byref(val), ctypes.sizeof(val),
+        )
+
+        # Try Mica Alt (value 4) → falls back to Acrylic (3) → Mica (2)
+        for backdrop in (4, 3, 2):
+            val = ctypes.c_int(backdrop)
+            hr = dwm.DwmSetWindowAttribute(
+                hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
+                ctypes.byref(val), ctypes.sizeof(val),
+            )
+            if hr == 0:  # S_OK
+                return
+
+        # --- attempt 2: SetWindowCompositionAttribute (Win 10 acrylic) ------
+        class ACCENT_POLICY(ctypes.Structure):
+            _fields_ = [
+                ("AccentState",   ctypes.c_int),
+                ("AccentFlags",   ctypes.c_int),
+                ("GradientColor", ctypes.c_uint),
+                ("AnimationId",   ctypes.c_int),
+            ]
+
+        class WINDOWCOMPOSITIONATTDATA(ctypes.Structure):
+            _fields_ = [
+                ("Attribute", ctypes.c_int),
+                ("Data",      ctypes.POINTER(ACCENT_POLICY)),
+                ("SizeOfData", ctypes.c_uint),
+            ]
+
+        ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
+        WCA_ACCENT_POLICY = 19
+        # ABGR tint: 0xB0_14141E  →  dark navy at ~69 % opacity
+        accent = ACCENT_POLICY(
+            ACCENT_ENABLE_ACRYLICBLURBEHIND, 2, 0xB014141E, 0
+        )
+        data = WINDOWCOMPOSITIONATTDATA(
+            WCA_ACCENT_POLICY,
+            ctypes.pointer(accent),
+            ctypes.sizeof(accent),
+        )
+        ctypes.windll.user32.SetWindowCompositionAttribute(
+            hwnd, ctypes.byref(data)
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
