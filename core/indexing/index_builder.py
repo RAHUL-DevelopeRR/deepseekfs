@@ -218,7 +218,7 @@ class IndexBuilder:
                 except Exception:
                     pass
 
-                for skip in ["Windows", "$Recycle.Bin", "ProgramData", "AppData", "node_modules", ".git", ".cache", "venv", ".venv", "env", ".env"]:
+                for skip in list(config.SKIP_DIRS):
                     if skip in dirs:
                         dirs.remove(skip)
 

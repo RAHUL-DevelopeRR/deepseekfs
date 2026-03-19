@@ -84,7 +84,7 @@ class DesktopService:
                     pass
 
                 # Skip massive system directories and caches to speed up disk-wide scanning
-                for skip in ["Windows", "$Recycle.Bin", "ProgramData", "AppData", "node_modules", ".git", ".cache", "venv", ".venv", "env", ".env"]:
+                for skip in list(config.SKIP_DIRS):
                     if skip in dirs:
                         dirs.remove(skip)
                         

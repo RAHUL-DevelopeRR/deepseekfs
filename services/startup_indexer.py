@@ -25,12 +25,22 @@ class StartupIndexer:
         Path(config.FIRST_RUN_FLAG).touch()
 
     def _index_has_only_samples(self) -> bool:
-        """Returns True if every indexed file is inside sample_documents/"""
+        """Returns True if every indexed file is inside sample_documents/ or
+        is a library/venv file (site-packages, Lib, etc.) — meaning the index
+        is stale and needs a full re-scan of real user folders."""
         idx = get_index()
         if len(idx.metadata) == 0:
             return False  # Empty index is fine
         sample_root = str(config.BASE_DIR / "sample_documents")
-        return all(m["path"].startswith(sample_root) for m in idx.metadata)
+        LIBRARY_MARKERS = ("site-packages", "\\Lib\\", "/lib/python", "\\venv\\", "/.venv/")
+        for m in idx.metadata:
+            p = m["path"]
+            if p.startswith(sample_root):
+                continue  # sample file — still counts as stale
+            if any(marker in p for marker in LIBRARY_MARKERS):
+                continue  # library file — still counts as stale
+            return False  # found a real user file → index is fine
+        return True  # every file is either sample or library → wipe it
 
     def _wipe_index(self):
         """Delete all index files so a fresh scan starts"""

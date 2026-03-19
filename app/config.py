@@ -1,4 +1,5 @@
 """Configuration Management"""
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -11,23 +12,95 @@ STORAGE_DIR = BASE_DIR / "storage"
 FAISS_INDEX_DIR = STORAGE_DIR / "faiss_index"
 CACHE_DIR = STORAGE_DIR / "cache"
 FIRST_RUN_FLAG = STORAGE_DIR / ".first_run_complete"
+CUSTOM_PATHS_FILE = STORAGE_DIR / "custom_watch_paths.json"
 
 # Create directories
 FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────
+# Directories to SKIP during scanning (centralized)
+# ─────────────────────────────────────────────────────────────
+SKIP_DIRS = {
+    # Python virtual environments & packaging
+    "venv", ".venv", "env", ".env", "__pycache__",
+    "site-packages", "dist-packages",
+    "Lib", "lib", "Scripts", "bin",
+    ".eggs", "*.egg-info",
+    # Node / JS
+    "node_modules", "bower_components",
+    # VCS & IDE
+    ".git", ".hg", ".svn",
+    ".idea", ".vscode", ".vs",
+    # OS / system
+    "Windows", "$Recycle.Bin", "ProgramData",
+    "AppData", "System Volume Information",
+    # Caches & build artefacts
+    ".cache", ".tox", ".nox", ".mypy_cache",
+    ".pytest_cache", "build", "dist",
+    "__pypackages__",
+}
+
+# ─────────────────────────────────────────────────────────────
 # AUTO-DETECT real user folders (cross-platform)
 # ─────────────────────────────────────────────────────────────
 def get_user_watch_paths() -> list:
+    """Return common user content folders that exist on this machine."""
     home = Path.home()
     candidates = [
-        home / "Downloads" / "Telegram Desktop",
+        home / "Desktop",
+        home / "Documents",
+        home / "Downloads",
+        home / "Pictures",
+        home / "Videos",
+        home / "Music",
+        home / "OneDrive" / "Desktop",
+        home / "OneDrive" / "Documents",
     ]
     return [str(p) for p in candidates if p.exists()]
 
 
-WATCH_PATHS = get_user_watch_paths()
+# ─────────────────────────────────────────────────────────────
+# Persist user-added folders across restarts
+# ─────────────────────────────────────────────────────────────
+def load_custom_paths() -> list:
+    """Load user-added watch paths from disk."""
+    if CUSTOM_PATHS_FILE.exists():
+        try:
+            data = json.loads(CUSTOM_PATHS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [p for p in data if Path(p).exists()]
+        except Exception:
+            pass
+    return []
+
+
+def save_custom_paths(paths: list):
+    """Save the list of user-added watch paths to disk."""
+    try:
+        CUSTOM_PATHS_FILE.write_text(
+            json.dumps(paths, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _build_watch_paths() -> list:
+    """Merge default user folders + persisted custom folders (deduplicated)."""
+    defaults = get_user_watch_paths()
+    custom = load_custom_paths()
+    seen = set()
+    merged = []
+    for p in defaults + custom:
+        norm = str(Path(p).resolve())
+        if norm not in seen:
+            seen.add(norm)
+            merged.append(p)
+    return merged
+
+
+WATCH_PATHS = _build_watch_paths()
 
 # Supported file types
 SUPPORTED_EXTENSIONS = {

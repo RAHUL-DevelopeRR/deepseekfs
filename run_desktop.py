@@ -454,7 +454,16 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Choose folder to index")
         if not folder:
             return
-        config.WATCH_PATHS.append(folder)
+        # Add to runtime watch paths
+        if folder not in config.WATCH_PATHS:
+            config.WATCH_PATHS.append(folder)
+        # Persist the custom folder so it survives restarts
+        custom = config.load_custom_paths()
+        norm = str(Path(folder).resolve())
+        existing = {str(Path(p).resolve()) for p in custom}
+        if norm not in existing:
+            custom.append(folder)
+            config.save_custom_paths(custom)
         self.status.showMessage(f"📁  Indexing {folder}…")
         self.progress.setValue(0)
         self.progress.setVisible(True)
