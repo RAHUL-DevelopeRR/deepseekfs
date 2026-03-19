@@ -23,7 +23,7 @@ class SemanticSearch:
         # Always fetch the live singleton index
         index_builder = get_index()
 
-        if index_builder.index is None or len(index_builder.metadata) == 0:
+        if index_builder.index is None or index_builder.index.ntotal == 0:
             logger.warning("Index is empty. Indexing may still be running.")
             return []
 
@@ -42,12 +42,31 @@ class SemanticSearch:
             time_multiplier = get_time_multiplier(query) if use_time_ranking else 1.0
 
             for i, idx in enumerate(indices):
-                if idx < 0 or idx >= len(index_builder.metadata):
+                if idx < 0:
                     continue
 
-                meta = index_builder.metadata[idx]
+                meta = index_builder.get_metadata_by_faiss_id(int(idx))
+                if meta is None:
+                    continue
+
                 distance = float(distances[i])
-                similarity = 1 / (1 + distance)
+                base_similarity = 1 / (1 + distance)
+                
+                # --- HYBRID SEARCH: Keyword Bonus ---
+                name_lower = meta.get("name", "").lower()
+                query_lower = search_text.lower().strip()
+                query_words = [w for w in query_lower.split() if len(w) > 2]
+                
+                keyword_bonus = 0.0
+                if query_lower and query_lower in name_lower:
+                    keyword_bonus = 0.40  # Massive boost for exact phrase match
+                elif query_words and all(w in name_lower for w in query_words):
+                    keyword_bonus = 0.25  # All words present in filename
+                elif query_words and any(w in name_lower for w in query_words):
+                    keyword_bonus = 0.10  # At least one word present
+                    
+                similarity = min(1.0, base_similarity + keyword_bonus)
+
                 if target_time is not None:
                     # Strict target-based time scoring
                     time_score = calculate_target_time_score(meta.get("modified_time", 0), target_time)

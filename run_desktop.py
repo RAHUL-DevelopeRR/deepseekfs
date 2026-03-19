@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
 
     QTableWidget {
         background:#ffffff;
+        color:#1a1a2e;
         border:1px solid #dee2e6;
         border-radius:8px;
         gridline-color:#f1f3f5;
@@ -244,7 +245,7 @@ class MainWindow(QMainWindow):
             QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(
             7, QHeaderView.ResizeMode.Stretch)      # Path column stretches

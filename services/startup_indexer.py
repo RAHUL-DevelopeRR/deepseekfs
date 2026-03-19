@@ -39,6 +39,7 @@ class StartupIndexer:
             config.FAISS_INDEX_PATH,
             config.METADATA_PATH,
             config.INDEXED_PATHS_DB,
+            config.SQLITE_DB_PATH,
             str(config.FIRST_RUN_FLAG),
         ]:
             try:

@@ -42,7 +42,8 @@ MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 FAISS_INDEX_PATH = str(FAISS_INDEX_DIR / "index.bin")
 METADATA_PATH = str(CACHE_DIR / "metadata.pkl")
-INDEXED_PATHS_DB = str(CACHE_DIR / "indexed_paths.pkl")  # duplicate guard
+INDEXED_PATHS_DB = str(CACHE_DIR / "indexed_paths.pkl")  # duplicate guard (deprecated)
+SQLITE_DB_PATH = str(CACHE_DIR / "metadata.db")           # NEW: replaces pkl files
 
 # Search configuration
 TOP_K = 10
