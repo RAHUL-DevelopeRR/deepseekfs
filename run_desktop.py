@@ -1,8 +1,11 @@
 """
-DeepSeekFS – Desktop Entry Point (v2.0 PyQt6 Monolithic)
-=========================================================
-Replaces run.py + FastAPI + pywebview with a single native PyQt6 window.
-All business logic is called directly — zero HTTP, zero network sockets.
+DeepSeekFS – Desktop Entry Point (v3.0  Start-Menu Style)
+==========================================================
+Windows 11 Start Menu–inspired floating search panel.
+• Shift+Space  → toggle panel  (system-wide hotkey)
+• Click outside → auto-hide
+• Translucent acrylic/Mica blur-behind
+• Card-based search results
 
 Usage:
     python run_desktop.py
@@ -14,6 +17,7 @@ import ctypes.wintypes
 import os
 import sys
 import platform
+import struct
 import subprocess
 from pathlib import Path
 from typing import List
@@ -22,33 +26,74 @@ from typing import List
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget,
-    QVBoxLayout, QHBoxLayout,
-    QLineEdit, QPushButton, QLabel,
-    QProgressBar, QTableWidget, QTableWidgetItem,
-    QHeaderView, QStatusBar, QSystemTrayIcon,
-    QMenu, QMessageBox, QFileDialog,
-)
-from PyQt6.QtCore  import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui   import QFont, QColor, QIcon, QPalette
-
+# ── IMPORTANT: Import core/torch modules BEFORE PyQt6 ────────────────────────
 import app.config as config
 from app.logger import logger
 from services.desktop_service import DesktopService
+
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QLineEdit, QLabel, QScrollArea, QFrame,
+    QSystemTrayIcon, QMenu,
+    QSizePolicy,
+)
+from PyQt6.QtCore import (
+    Qt, QThread, pyqtSignal, QSize, QTimer,
+    QPropertyAnimation, QEasingCurve, QPoint, QRect,
+    QAbstractNativeEventFilter, QByteArray,
+)
+from PyQt6.QtGui import (
+    QFont, QColor, QIcon, QPainter, QPainterPath,
+    QBrush, QPen, QFontDatabase, QGuiApplication,
+    QCursor,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────────────────────────────────────
+PANEL_WIDTH  = 640
+PANEL_HEIGHT = 700
+CORNER_RADIUS = 12
+TASKBAR_OFFSET = 60          # pixels above the bottom of the screen
+HOTKEY_ID = 0xBFFF           # unique id for RegisterHotKey
+MOD_SHIFT = 0x0004
+VK_SPACE  = 0x20
+WM_HOTKEY = 0x0312
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Win32 hotkey native event filter
+# ─────────────────────────────────────────────────────────────────────────────
+class HotkeyFilter(QAbstractNativeEventFilter):
+    """Intercept WM_HOTKEY from the Windows message queue."""
+
+    def __init__(self, callback):
+        super().__init__()
+        self._callback = callback
+
+    def nativeEventFilter(self, event_type: QByteArray | bytes, message):
+        if event_type == b"windows_generic_MSG" or event_type == b"windows_dispatcher_MSG":
+            # message is a sip.voidptr wrapping a MSG*
+            # MSG: HWND(8) + UINT(4) + WPARAM(8) + LPARAM(8) ...  on 64-bit
+            try:
+                msg_ptr = int(message)
+                # Offsets: HWND=0(8), message=8(4), wParam=16(8)
+                msg_id = ctypes.c_uint.from_address(msg_ptr + 8).value
+                if msg_id == WM_HOTKEY:
+                    wparam = ctypes.c_ulonglong.from_address(msg_ptr + 16).value
+                    if wparam == HOTKEY_ID:
+                        self._callback()
+                        return True, 0
+            except Exception:
+                pass
+        return False, 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Background worker: initial indexing
 # ─────────────────────────────────────────────────────────────────────────────
 class IndexThread(QThread):
-    """
-    Runs StartupIndexer._run() in a background thread.
-    Emits:
-      status(str)       – human-readable message for the status bar
-      progress(int,int) – (files_done, files_total) for the progress bar
-      finished(int)     – total new files indexed
-    """
     status   = pyqtSignal(str)
     progress = pyqtSignal(int, int)
     finished = pyqtSignal(int)
@@ -74,12 +119,6 @@ class IndexThread(QThread):
 # Background worker: search
 # ─────────────────────────────────────────────────────────────────────────────
 class SearchThread(QThread):
-    """
-    Calls the search engine in a background thread so the UI never blocks.
-    Emits:
-      results(list)  – list of result dicts
-      error(str)     – on failure
-    """
     results = pyqtSignal(list)
     error   = pyqtSignal(str)
 
@@ -99,441 +138,448 @@ class SearchThread(QThread):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main window
+# Result card widget
 # ─────────────────────────────────────────────────────────────────────────────
-class MainWindow(QMainWindow):
+class ResultCard(QFrame):
+    """A single search-result card styled like a Windows 11 list item."""
+
+    clicked = pyqtSignal(str)   # emits file path
+
+    # ── file-type icons ────────────────────────────────────────────────────
+    _ICONS = {
+        ".pdf": "📄", ".docx": "📝", ".doc": "📝", ".txt": "📃",
+        ".py": "🐍", ".js": "⚡", ".json": "🔧", ".csv": "📊",
+        ".xlsx": "📊", ".xls": "📊", ".pptx": "📽️", ".html": "🌐",
+        ".md": "📑", ".mp4": "🎬", ".mkv": "🎬", ".avi": "🎬",
+        ".mov": "🎬", ".wmv": "🎬", ".flv": "🎬", ".webm": "🎬",
+    }
+
+    def __init__(self, hit: dict, rank: int, parent=None):
+        super().__init__(parent)
+        self._path = hit.get("path", "")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setObjectName("resultCard")
+
+        ext  = hit.get("extension", Path(self._path).suffix).lower()
+        icon = self._ICONS.get(ext, "📁")
+        name = hit.get("name", Path(self._path).name)
+        score = hit.get("combined_score", hit.get("score", 0.0))
+        semantic = hit.get("semantic_score", 0.0)
+        time_s = hit.get("time_score", 0.0)
+
+        # ── layout ────────────────────────────────────────────────────────
+        root = QHBoxLayout(self)
+        root.setContentsMargins(14, 10, 14, 10)
+        root.setSpacing(12)
+
+        # icon
+        icon_lbl = QLabel(icon)
+        icon_lbl.setFixedSize(36, 36)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("font-size: 22px; background: transparent;")
+        root.addWidget(icon_lbl)
+
+        # text column
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+
+        name_lbl = QLabel(name)
+        name_lbl.setObjectName("cardName")
+        name_lbl.setStyleSheet(
+            "font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.95); background: transparent;"
+        )
+        text_col.addWidget(name_lbl)
+
+        # show shortened path
+        path_display = self._path
+        try:
+            home = str(Path.home())
+            if path_display.startswith(home):
+                path_display = "~" + path_display[len(home):]
+        except Exception:
+            pass
+        path_lbl = QLabel(path_display)
+        path_lbl.setObjectName("cardPath")
+        path_lbl.setStyleSheet(
+            "font-size: 11px; color: rgba(255,255,255,0.40); background: transparent;"
+        )
+        path_lbl.setMaximumWidth(380)
+        text_col.addWidget(path_lbl)
+
+        root.addLayout(text_col, 1)
+
+        # score badge
+        score_pct = int(score * 100)
+        badge_color = (
+            "#4CC764" if score >= 0.75 else
+            "#FFB940" if score >= 0.50 else
+            "#FF6B6B"
+        )
+        score_lbl = QLabel(f"{score_pct}%")
+        score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        score_lbl.setFixedSize(48, 26)
+        score_lbl.setStyleSheet(f"""
+            font-size: 12px; font-weight: 700;
+            color: {badge_color};
+            background: rgba(255,255,255,0.06);
+            border: 1px solid {badge_color}40;
+            border-radius: 6px;
+        """)
+        root.addWidget(score_lbl)
+
+        # extension badge
+        ext_lbl = QLabel(ext.upper().replace(".", ""))
+        ext_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ext_lbl.setFixedSize(42, 26)
+        ext_lbl.setStyleSheet("""
+            font-size: 10px; font-weight: 700;
+            color: rgba(120,170,255,0.90);
+            background: rgba(0,120,212,0.15);
+            border: 1px solid rgba(0,120,212,0.25);
+            border-radius: 6px;
+        """)
+        root.addWidget(ext_lbl)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._path)
+        super().mousePressEvent(event)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main panel (Start-menu style)
+# ─────────────────────────────────────────────────────────────────────────────
+class SearchPanel(QWidget):
     """
-    Single monolithic window: search box + results table + progress bar + tray.
-    No HTTP, no localhost, no browser. Everything is a direct Python call.
+    Frameless, translucent overlay panel — appears/disappears like the
+    Windows 11 Start Menu.
     """
-
-    APP_STYLE = """
-    /* ── Global: transparent so acrylic shows through ────────────── */
-    QMainWindow {
-        background: transparent;
-    }
-    QWidget#central {
-        background: rgba(20, 20, 30, 180);
-    }
-
-    /* ── Header labels ──────────────────────────────────────────── */
-    QLabel#title {
-        font-size: 22px;
-        font-weight: 700;
-        color: rgba(255, 255, 255, 0.95);
-    }
-    QLabel#subtitle {
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.50);
-    }
-
-    /* ── Search input ───────────────────────────────────────────── */
-    QLineEdit {
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 8px;
-        padding: 10px 14px;
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.92);
-        background: rgba(255, 255, 255, 0.06);
-        selection-background-color: rgba(99, 140, 255, 0.45);
-    }
-    QLineEdit:focus {
-        border-color: rgba(99, 140, 255, 0.60);
-        background: rgba(255, 255, 255, 0.10);
-    }
-    QLineEdit::placeholder {
-        color: rgba(255, 255, 255, 0.35);
-    }
-
-    /* ── Search button ──────────────────────────────────────────── */
-    QPushButton#btn_search {
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:1,
-            stop:0 rgba(67, 97, 238, 220),
-            stop:1 rgba(99, 140, 255, 220)
-        );
-        color: #ffffff;
-        border: 1px solid rgba(99, 140, 255, 0.30);
-        border-radius: 8px;
-        padding: 10px 28px;
-        font-size: 14px;
-        font-weight: 600;
-    }
-    QPushButton#btn_search:hover {
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:1,
-            stop:0 rgba(80, 115, 255, 240),
-            stop:1 rgba(120, 160, 255, 240)
-        );
-        border-color: rgba(120, 160, 255, 0.50);
-    }
-    QPushButton#btn_search:pressed {
-        background: rgba(50, 80, 200, 240);
-    }
-    QPushButton#btn_search:disabled {
-        background: rgba(255, 255, 255, 0.08);
-        color: rgba(255, 255, 255, 0.30);
-        border-color: rgba(255, 255, 255, 0.06);
-    }
-
-    /* ── Folder button ──────────────────────────────────────────── */
-    QPushButton#btn_folder {
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(150, 180, 255, 0.90);
-        border: 1px solid rgba(99, 140, 255, 0.30);
-        border-radius: 8px;
-        padding: 8px 18px;
-        font-size: 13px;
-    }
-    QPushButton#btn_folder:hover {
-        background: rgba(99, 140, 255, 0.15);
-        border-color: rgba(99, 140, 255, 0.50);
-    }
-
-    /* ── Results table ──────────────────────────────────────────── */
-    QTableWidget {
-        background: rgba(255, 255, 255, 0.04);
-        color: rgba(255, 255, 255, 0.88);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 8px;
-        gridline-color: rgba(255, 255, 255, 0.06);
-        font-size: 13px;
-        alternate-background-color: rgba(255, 255, 255, 0.03);
-    }
-    QTableWidget::item {
-        padding: 8px 10px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    }
-    QTableWidget::item:selected {
-        background: rgba(99, 140, 255, 0.30);
-        color: #ffffff;
-    }
-    QTableWidget::item:hover {
-        background: rgba(255, 255, 255, 0.06);
-    }
-    QHeaderView::section {
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(255, 255, 255, 0.70);
-        font-weight: 600;
-        padding: 8px 10px;
-        border: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    }
-
-    /* ── Progress bar ───────────────────────────────────────────── */
-    QProgressBar {
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-radius: 6px;
-        text-align: center;
-        font-size: 11px;
-        height: 18px;
-        color: rgba(255, 255, 255, 0.80);
-        background: rgba(255, 255, 255, 0.05);
-    }
-    QProgressBar::chunk {
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:0,
-            stop:0 rgba(67, 97, 238, 200),
-            stop:1 rgba(120, 160, 255, 200)
-        );
-        border-radius: 5px;
-    }
-
-    /* ── Status bar ─────────────────────────────────────────────── */
-    QStatusBar {
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.55);
-        background: transparent;
-    }
-
-    /* ── Scrollbars ─────────────────────────────────────────────── */
-    QScrollBar:vertical {
-        background: transparent;
-        width: 8px;
-        margin: 0;
-    }
-    QScrollBar::handle:vertical {
-        background: rgba(255, 255, 255, 0.15);
-        border-radius: 4px;
-        min-height: 30px;
-    }
-    QScrollBar::handle:vertical:hover {
-        background: rgba(255, 255, 255, 0.25);
-    }
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-        background: transparent;
-        height: 0;
-    }
-    QScrollBar:horizontal {
-        background: transparent;
-        height: 8px;
-        margin: 0;
-    }
-    QScrollBar::handle:horizontal {
-        background: rgba(255, 255, 255, 0.15);
-        border-radius: 4px;
-        min-width: 30px;
-    }
-    QScrollBar::handle:horizontal:hover {
-        background: rgba(255, 255, 255, 0.25);
-    }
-    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
-    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-        background: transparent;
-        width: 0;
-    }
-
-    /* ── Tooltips ───────────────────────────────────────────────── */
-    QToolTip {
-        background: rgba(30, 30, 45, 230);
-        color: rgba(255, 255, 255, 0.90);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 4px;
-        padding: 4px 8px;
-    }
-
-    /* ── Message box ────────────────────────────────────────────── */
-    QMessageBox {
-        background: rgba(25, 25, 40, 245);
-        color: rgba(255, 255, 255, 0.90);
-    }
-    QMessageBox QLabel {
-        color: rgba(255, 255, 255, 0.90);
-    }
-    QMessageBox QPushButton {
-        background: rgba(255, 255, 255, 0.08);
-        color: rgba(255, 255, 255, 0.90);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 6px;
-        padding: 6px 20px;
-    }
-    QMessageBox QPushButton:hover {
-        background: rgba(99, 140, 255, 0.20);
-    }
-    """
-
-    COLS = ["#", "File Name", "Score", "Semantic", "Time", "Freq", "Type", "Full Path"]
 
     def __init__(self, service: DesktopService):
         super().__init__()
-        self._svc          = service
-        self._idx_thread   : IndexThread  | None = None
-        self._srch_thread  : SearchThread | None = None
+        self._svc = service
+        self._idx_thread: IndexThread | None = None
+        self._srch_thread: SearchThread | None = None
         self._indexed_count = 0
+        self._visible = False
 
-        self.setWindowTitle("DeepSeekFS — Semantic File Search")
-        self.resize(1100, 700)
-        self.setMinimumSize(800, 500)
+        # ── Window flags: frameless tool window, always on top ────────────
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(PANEL_WIDTH, PANEL_HEIGHT)
 
-        # Enable translucent background
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setStyleSheet(self.APP_STYLE)
-
+        # ── Build UI ─────────────────────────────────────────────────────
         self._build_ui()
         self._build_tray()
+
+        # NOTE: QGraphicsDropShadowEffect removed — it is incompatible
+        # with WA_TranslucentBackground and causes UpdateLayeredWindow errors.
+
+        # ── Fade animation ───────────────────────────────────────────────
+        self._fade = QPropertyAnimation(self, b"windowOpacity")
+        self._fade.setDuration(150)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        # ── Start indexing ───────────────────────────────────────────────
         self._kick_indexing()
 
-    # ── UI construction ───────────────────────────────────────────────────────
-    def _build_ui(self):
-        central = QWidget(objectName="central")
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(20, 16, 20, 8)
-        root.setSpacing(12)
+    # ── Paint: fully transparent so DWM acrylic blur shows through ─────
+    def paintEvent(self, event):
+        # Do NOT paint any opaque fill — the DWM acrylic/Mica backdrop
+        # IS the background.  We only draw a subtle rounded border.
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Header
-        hdr = QHBoxLayout()
-        title    = QLabel("🔍  DeepSeekFS", objectName="title")
-        subtitle = QLabel("Semantic file search — local, offline, instant",
-                          objectName="subtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignBottom)
-        hdr.addWidget(title)
-        hdr.addSpacing(12)
-        hdr.addWidget(subtitle)
-        hdr.addStretch()
-        root.addLayout(hdr)
-
-        # Search row
-        search_row = QHBoxLayout()
-        self.inp_query = QLineEdit()
-        self.inp_query.setPlaceholderText(
-            "Search ‘resume’, ‘python project’, ‘SWOT analysis’…  (Enter to search)"
+        path = QPainterPath()
+        path.addRoundedRect(
+            1.0, 1.0,
+            float(self.width()) - 2.0, float(self.height()) - 2.0,
+            CORNER_RADIUS, CORNER_RADIUS,
         )
-        self.inp_query.setMinimumHeight(44)
+        # Subtle 1px border only
+        painter.setPen(QPen(QColor(255, 255, 255, 30), 1.0))
+        painter.drawPath(path)
+        painter.end()
+
+    # ── UI construction ──────────────────────────────────────────────────
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 22, 20, 16)
+        root.setSpacing(0)
+
+        # ── Search bar ───────────────────────────────────────────────────
+        search_container = QFrame()
+        search_container.setObjectName("searchContainer")
+        search_container.setStyleSheet("""
+            #searchContainer {
+                background: rgba(255,255,255,0.06);
+                border: 1px solid rgba(255,255,255,0.10);
+                border-radius: 10px;
+            }
+            #searchContainer:focus-within {
+                border-color: rgba(0,120,212,0.60);
+            }
+        """)
+        search_layout = QHBoxLayout(search_container)
+        search_layout.setContentsMargins(14, 0, 14, 0)
+        search_layout.setSpacing(10)
+
+        search_icon = QLabel("🔍")
+        search_icon.setStyleSheet("font-size: 16px; color: rgba(255,255,255,0.45); background: transparent;")
+        search_icon.setFixedWidth(24)
+        search_layout.addWidget(search_icon)
+
+        self.inp_query = QLineEdit()
+        self.inp_query.setPlaceholderText("Search for files, documents, and projects…")
+        self.inp_query.setObjectName("searchInput")
+        self.inp_query.setStyleSheet("""
+            #searchInput {
+                border: none;
+                background: transparent;
+                color: rgba(255,255,255,0.92);
+                font-size: 14px;
+                padding: 12px 0;
+                selection-background-color: rgba(0,120,212,0.40);
+            }
+            #searchInput::placeholder {
+                color: rgba(255,255,255,0.35);
+            }
+        """)
         self.inp_query.returnPressed.connect(self._on_search)
+        search_layout.addWidget(self.inp_query, 1)
 
-        self.btn_search = QPushButton("🔍  Search", objectName="btn_search")
-        self.btn_search.setMinimumHeight(44)
-        self.btn_search.setMinimumWidth(130)
-        self.btn_search.clicked.connect(self._on_search)
-        self.btn_search.setEnabled(False)   # enabled once index is ready
+        root.addWidget(search_container)
+        root.addSpacing(14)
 
-        self.btn_folder = QPushButton("📁  Add Folder", objectName="btn_folder")
-        self.btn_folder.setMinimumHeight(44)
-        self.btn_folder.clicked.connect(self._on_add_folder)
+        # ── Divider line ─────────────────────────────────────────────────
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background: rgba(255,255,255,0.08);")
+        root.addWidget(divider)
+        root.addSpacing(10)
 
-        search_row.addWidget(self.inp_query, 1)
-        search_row.addWidget(self.btn_search)
-        search_row.addWidget(self.btn_folder)
-        root.addLayout(search_row)
+        # ── Index status label ───────────────────────────────────────────
+        self.lbl_status = QLabel("⏳  Indexing your files…")
+        self.lbl_status.setObjectName("statusLabel")
+        self.lbl_status.setStyleSheet("""
+            #statusLabel {
+                font-size: 12px;
+                color: rgba(255,255,255,0.45);
+                background: transparent;
+                padding: 0 4px;
+            }
+        """)
+        root.addWidget(self.lbl_status)
+        root.addSpacing(8)
 
-        # Results table
-        self.table = QTableWidget(0, len(self.COLS))
-        self.table.setHorizontalHeaderLabels(self.COLS)
-        self.table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(
-            7, QHeaderView.ResizeMode.Stretch)      # Path column stretches
-        self.table.doubleClicked.connect(self._on_open_file)
-        # column widths
-        for c, w in [(0,35),(1,220),(2,70),(3,80),(4,60),(5,50),(6,55)]:
-            self.table.setColumnWidth(c, w)
-        root.addWidget(self.table, 1)
+        # ── Scrollable results area ──────────────────────────────────────
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 6px;
+                margin: 4px 0;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,0.15);
+                border-radius: 3px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255,255,255,0.25);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+                height: 0;
+            }
+        """)
 
-        # Progress bar (hidden during normal search)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setVisible(True)
-        self.progress.setFormat("Indexing…  %p%")
-        root.addWidget(self.progress)
+        self.results_widget = QWidget()
+        self.results_widget.setStyleSheet("background: transparent;")
+        self.results_layout = QVBoxLayout(self.results_widget)
+        self.results_layout.setContentsMargins(0, 0, 0, 0)
+        self.results_layout.setSpacing(4)
+        self.results_layout.addStretch()
 
-        # Status bar
-        self.status = QStatusBar()
-        self.setStatusBar(self.status)
-        self.status.showMessage("⏳  Starting up…")
+        self.scroll.setWidget(self.results_widget)
+        root.addWidget(self.scroll, 1)
 
+        # ── Welcome / empty state ────────────────────────────────────────
+        self.lbl_empty = QLabel("Type a query above to search your files")
+        self.lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_empty.setStyleSheet("""
+            font-size: 13px;
+            color: rgba(255,255,255,0.25);
+            padding: 60px 0;
+            background: transparent;
+        """)
+
+        # ── Bottom bar ───────────────────────────────────────────────────
+        root.addSpacing(8)
+        bottom_divider = QFrame()
+        bottom_divider.setFixedHeight(1)
+        bottom_divider.setStyleSheet("background: rgba(255,255,255,0.06);")
+        root.addWidget(bottom_divider)
+        root.addSpacing(6)
+
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(4, 0, 4, 0)
+
+        self.lbl_footer = QLabel("DeepSeekFS")
+        self.lbl_footer.setStyleSheet("""
+            font-size: 11px; font-weight: 600;
+            color: rgba(255,255,255,0.30);
+            background: transparent;
+        """)
+        bottom.addWidget(self.lbl_footer)
+
+        bottom.addStretch()
+
+        hint = QLabel("Shift+Space to toggle  •  Esc to hide")
+        hint.setStyleSheet("""
+            font-size: 11px;
+            color: rgba(255,255,255,0.20);
+            background: transparent;
+        """)
+        bottom.addWidget(hint)
+
+        root.addLayout(bottom)
+
+        # Show the empty-state on first load
+        self._show_empty_state()
+
+    def _show_empty_state(self):
+        """Clear results and show welcome text."""
+        self._clear_results()
+        self.results_layout.insertWidget(0, self.lbl_empty)
+        self.lbl_empty.show()
+
+    def _clear_results(self):
+        """Remove all result cards."""
+        while self.results_layout.count() > 0:
+            item = self.results_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    # ── Result card styling (applied to all cards via parent stylesheet) ──
+    _CARD_STYLE = """
+        #resultCard {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+        }
+        #resultCard:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(0,120,212,0.30);
+        }
+    """
+
+    # ── System tray ──────────────────────────────────────────────────────
     def _build_tray(self):
-        """System tray: double-click to show/hide; right-click to quit."""
         self._tray = QSystemTrayIcon(self)
         menu = QMenu()
-        menu.addAction("Show / Hide", self._toggle_window)
+        show_action = menu.addAction("🔍  Show   (Shift+Space)")
+        show_action.triggered.connect(self.toggle_panel)
         menu.addSeparator()
-        menu.addAction("Quit DeepSeekFS", self._quit)
+        quit_action = menu.addAction("❌  Quit DeepSeekFS")
+        quit_action.triggered.connect(self._quit)
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._on_tray_click)
+        self._tray.setToolTip("DeepSeekFS — Shift+Space to search")
         self._tray.show()
 
-    # ── Indexing ──────────────────────────────────────────────────────────────
+    # ── Indexing ─────────────────────────────────────────────────────────
     def _kick_indexing(self):
-        self.btn_search.setEnabled(False)
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-        self.status.showMessage("📂  Scanning your files in the background…")
-
+        self.lbl_status.setText("⏳  Indexing your files…")
         self._idx_thread = IndexThread(self._svc)
-        self._idx_thread.status.connect(self.status.showMessage)
+        self._idx_thread.status.connect(self._on_index_status)
         self._idx_thread.progress.connect(self._on_index_progress)
         self._idx_thread.finished.connect(self._on_index_done)
         self._idx_thread.start()
 
+    def _on_index_status(self, msg: str):
+        self.lbl_status.setText(msg)
+
     def _on_index_progress(self, done: int, total: int):
         if total > 0:
             pct = min(int(done / total * 100), 99)
-            self.progress.setValue(pct)
-            self.progress.setFormat(f"Indexing…  {done}/{total}  ({pct}%)")
+            self.lbl_status.setText(f"⏳  Indexing… {done}/{total}  ({pct}%)")
 
     def _on_index_done(self, new_files: int):
         self._indexed_count = self._svc.total_indexed()
-        self.progress.setValue(100)
-        self.progress.setFormat(f"✅  {self._indexed_count:,} files indexed")
-        self.status.showMessage(
-            f"✅  Ready — {self._indexed_count:,} files in index  •  "
-            f"{new_files} new this session  •  double-click a result to open"
+        self.lbl_status.setText(
+            f"📄 {self._indexed_count:,} files indexed  •  {new_files} new"
         )
-        self.btn_search.setEnabled(True)
-        self.inp_query.setFocus()
 
-    def _on_add_folder(self):
-        """Let user pick an extra folder and index it on the fly."""
-        folder = QFileDialog.getExistingDirectory(self, "Choose folder to index")
-        if not folder:
-            return
-        # Add to runtime watch paths
-        if folder not in config.WATCH_PATHS:
-            config.WATCH_PATHS.append(folder)
-        # Persist the custom folder so it survives restarts
-        custom = config.load_custom_paths()
-        norm = str(Path(folder).resolve())
-        existing = {str(Path(p).resolve()) for p in custom}
-        if norm not in existing:
-            custom.append(folder)
-            config.save_custom_paths(custom)
-        self.status.showMessage(f"📁  Indexing {folder}…")
-        self.progress.setValue(0)
-        self.progress.setVisible(True)
-        self._kick_indexing()
-
-    # ── Search ────────────────────────────────────────────────────────────────
+    # ── Search ───────────────────────────────────────────────────────────
     def _on_search(self):
         query = self.inp_query.text().strip()
         if not query:
             return
         if self._indexed_count == 0:
-            self.status.showMessage("⏳  Indexing still in progress — try again shortly")
+            self.lbl_status.setText("⏳  Indexing still in progress — try again shortly")
             return
-        self.table.setRowCount(0)
-        self.btn_search.setEnabled(False)
-        self.status.showMessage(f"🔍  Searching for ‘{query}’…")
+
+        self.lbl_status.setText(f"🔍  Searching '{query}'…")
+        self._clear_results()
 
         self._srch_thread = SearchThread(self._svc, query)
         self._srch_thread.results.connect(self._on_results)
         self._srch_thread.error.connect(
-            lambda e: (self.status.showMessage(f"⚠️  Search error: {e}"),
-                       self.btn_search.setEnabled(True))
+            lambda e: self.lbl_status.setText(f"⚠️  Search error: {e}")
         )
         self._srch_thread.start()
 
     def _on_results(self, hits: list):
-        self.table.setRowCount(0)
-        for row_idx, h in enumerate(hits):
-            self.table.insertRow(row_idx)
-            score = h.get("combined_score", h.get("score", 0.0))
-            color = (
-                QColor("#6fcf97") if score >= 0.75 else
-                QColor("#f2c94c") if score >= 0.50 else
-                QColor("#eb5757")
-            )
-            cells = [
-                str(row_idx + 1),
-                h.get("name",  Path(h.get("path","")).name),
-                f"{score*100:.1f}%",
-                f"{h.get('semantic_score', 0)*100:.1f}%",
-                f"{h.get('time_score',     0)*100:.1f}%",
-                f"{h.get('frequency_score',0)*100:.1f}%",
-                h.get("extension", Path(h.get("path","")).suffix),
-                h.get("path", ""),
-            ]
-            for col, val in enumerate(cells):
-                item = QTableWidgetItem(val)
-                item.setData(Qt.ItemDataRole.UserRole, h.get("path", ""))
-                if col == 2:                  # score column: colour-coded
-                    item.setForeground(color)
-                    item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-                elif col == 1:                # file name: brighter
-                    item.setForeground(QColor(255, 255, 255, 230))
-                self.table.setItem(row_idx, col, item)
+        self._clear_results()
+
+        if not hits:
+            self.lbl_status.setText("No results found")
+            self._show_empty_state()
+            self.lbl_empty.setText("No results found — try a different query")
+            return
+
+        self.setStyleSheet(self._CARD_STYLE)
+
+        for rank, hit in enumerate(hits):
+            card = ResultCard(hit, rank, parent=self.results_widget)
+            card.clicked.connect(self._open_file)
+            self.results_layout.insertWidget(rank, card)
+
+        # Add stretch at end
+        self.results_layout.addStretch()
 
         n = len(hits)
-        self.status.showMessage(
-            f"✅  {n} result{'s' if n!=1 else ''} for ‘{self.inp_query.text().strip()}’"
-            f"   —  double-click to open"
+        q = self.inp_query.text().strip()
+        self.lbl_status.setText(
+            f"✅  {n} result{'s' if n != 1 else ''} for '{q}'"
         )
-        self.btn_search.setEnabled(True)
 
-    # ── Open file ─────────────────────────────────────────────────────────────
-    def _on_open_file(self):
-        row = self.table.currentRow()
-        if row < 0:
-            return
-        path = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+    # ── Open file ────────────────────────────────────────────────────────
+    def _open_file(self, path: str):
         if not path or not Path(path).exists():
-            QMessageBox.warning(self, "Not found", f"File no longer exists:\n{path}")
+            self.lbl_status.setText(f"⚠️  File not found: {path}")
             return
         try:
             if platform.system() == "Windows":
@@ -542,68 +588,157 @@ class MainWindow(QMainWindow):
                 subprocess.Popen(["open", path])
             else:
                 subprocess.Popen(["xdg-open", path])
+            # Hide panel after opening (like Start Menu)
+            self._hide_panel()
         except Exception as exc:
-            QMessageBox.critical(self, "Open failed", str(exc))
+            self.lbl_status.setText(f"⚠️  Open failed: {exc}")
 
-    # ── Tray ─────────────────────────────────────────────────────────────────
-    def _toggle_window(self):
-        self.hide() if self.isVisible() else self.show()
+    # ── Show / hide / toggle ─────────────────────────────────────────────
+    def toggle_panel(self):
+        if self._visible:
+            self._hide_panel()
+        else:
+            self._show_panel()
 
+    def _show_panel(self):
+        # Position: centered horizontally, above the taskbar
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            geom = screen.availableGeometry()
+            x = geom.x() + (geom.width() - PANEL_WIDTH) // 2
+            y = geom.y() + geom.height() - PANEL_HEIGHT - TASKBAR_OFFSET
+            self.move(x, y)
+
+        self.setWindowOpacity(0.0)
+        self.show()
+        self.activateWindow()
+        self.inp_query.setFocus()
+        self.inp_query.selectAll()
+
+        # Apply acrylic AFTER the window is mapped
+        if platform.system() == "Windows":
+            QTimer.singleShot(30, self._apply_acrylic)
+
+        # Fade in
+        self._fade.stop()
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._fade.start()
+        self._visible = True
+
+    def _hide_panel(self):
+        self._fade.stop()
+        self._fade.setStartValue(self.windowOpacity())
+        self._fade.setEndValue(0.0)
+        self._fade.finished.connect(self._on_fade_out_done)
+        self._fade.start()
+        self._visible = False
+
+    def _on_fade_out_done(self):
+        self.hide()
+        try:
+            self._fade.finished.disconnect(self._on_fade_out_done)
+        except Exception:
+            pass
+
+    # ── Click-away dismiss ───────────────────────────────────────────────
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if (event.type() == event.Type.ActivationChange
+                and not self.isActiveWindow()
+                and self._visible):
+            # Small delay to avoid conflicts with tray menu interactions
+            QTimer.singleShot(100, self._deactivation_check)
+
+    def _deactivation_check(self):
+        if not self.isActiveWindow() and self._visible:
+            self._hide_panel()
+
+    # ── Escape key ───────────────────────────────────────────────────────
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self._hide_panel()
+        else:
+            super().keyPressEvent(event)
+
+    # ── Tray events ──────────────────────────────────────────────────────
     def _on_tray_click(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            self._toggle_window()
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.toggle_panel()
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.toggle_panel()
 
     def _quit(self):
+        # Unregister the hotkey
+        try:
+            ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+        except Exception:
+            pass
         self._tray.hide()
         QApplication.quit()
 
-    def closeEvent(self, event):
-        """Minimise to tray instead of quitting."""
-        if self._tray.isVisible():
-            self.hide()
-            event.ignore()
-        else:
-            event.accept()
+    # ── Windows DWM Acrylic ──────────────────────────────────────────────
+    def _apply_acrylic(self):
+        """Apply acrylic/Mica blur-behind using DWM."""
+        try:
+            hwnd = int(self.winId())
+            self._enable_acrylic(hwnd)
+        except Exception as exc:
+            logger.warning(f"Acrylic effect unavailable: {exc}")
 
-    def showEvent(self, event):
-        """Apply acrylic effect once the window has a valid HWND."""
-        super().showEvent(event)
-        if platform.system() == "Windows":
-            try:
-                self._enable_acrylic(int(self.winId()))
-            except Exception as exc:
-                logger.warning(f"Acrylic effect unavailable: {exc}")
-
-    # ── Windows DWM Acrylic ───────────────────────────────────────────────────
     @staticmethod
     def _enable_acrylic(hwnd: int):
         """
-        Enable the Windows 10/11 acrylic (or Mica) blur-behind effect
-        using DwmSetWindowAttribute.  Falls back gracefully.
+        Enable the Windows 10/11 acrylic blur-behind effect.
+        For frameless windows, we must extend the DWM frame into the
+        client area first, then request a backdrop type.
         """
-        # --- attempt 1: Windows 11 Mica / Mica Alt (build 22621+) -----------
-        DWMWA_SYSTEMBACKDROP_TYPE = 38
-        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         dwm = ctypes.windll.dwmapi
 
-        # Turn on dark mode for the title bar
+        # ── Step 1: Extend DWM frame into entire client area ──────────────
+        # This is REQUIRED for Mica / Acrylic to work on frameless windows.
+        class MARGINS(ctypes.Structure):
+            _fields_ = [
+                ("cxLeftWidth",    ctypes.c_int),
+                ("cxRightWidth",   ctypes.c_int),
+                ("cyTopHeight",    ctypes.c_int),
+                ("cyBottomHeight", ctypes.c_int),
+            ]
+
+        margins = MARGINS(-1, -1, -1, -1)   # -1 = extend into full client
+        dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
+
+        # ── Step 2: Dark mode ─────────────────────────────────────────────
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         val = ctypes.c_int(1)
         dwm.DwmSetWindowAttribute(
             hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
             ctypes.byref(val), ctypes.sizeof(val),
         )
 
-        # Try Mica Alt (value 4) → falls back to Acrylic (3) → Mica (2)
-        for backdrop in (4, 3, 2):
+        # ── Step 3: Rounded corners (Win 11) ──────────────────────────────
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        val = ctypes.c_int(2)  # DWMWCP_ROUND
+        dwm.DwmSetWindowAttribute(
+            hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(val), ctypes.sizeof(val),
+        )
+
+        # ── Step 4: Request backdrop — Acrylic (3) preferred over Mica ────
+        DWMWA_SYSTEMBACKDROP_TYPE = 38
+        for backdrop in (3, 4, 2):     # Acrylic → MicaAlt → Mica
             val = ctypes.c_int(backdrop)
             hr = dwm.DwmSetWindowAttribute(
                 hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
                 ctypes.byref(val), ctypes.sizeof(val),
             )
-            if hr == 0:  # S_OK
+            if hr == 0:
+                logger.info(f"DWM backdrop type {backdrop} applied successfully")
                 return
 
-        # --- attempt 2: SetWindowCompositionAttribute (Win 10 acrylic) ------
+        # ── Fallback: Win 10 SetWindowCompositionAttribute ────────────────
+        logger.info("Using Win10 SetWindowCompositionAttribute fallback")
+
         class ACCENT_POLICY(ctypes.Structure):
             _fields_ = [
                 ("AccentState",   ctypes.c_int),
@@ -614,16 +749,16 @@ class MainWindow(QMainWindow):
 
         class WINDOWCOMPOSITIONATTDATA(ctypes.Structure):
             _fields_ = [
-                ("Attribute", ctypes.c_int),
-                ("Data",      ctypes.POINTER(ACCENT_POLICY)),
+                ("Attribute",  ctypes.c_int),
+                ("Data",       ctypes.POINTER(ACCENT_POLICY)),
                 ("SizeOfData", ctypes.c_uint),
             ]
 
         ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
         WCA_ACCENT_POLICY = 19
-        # ABGR tint: 0xB0_14141E  →  dark navy at ~69 % opacity
+        # ABGR tint: 0x64_202020 → dark grey at ~40% opacity (glass-like)
         accent = ACCENT_POLICY(
-            ACCENT_ENABLE_ACRYLICBLURBEHIND, 2, 0xB014141E, 0
+            ACCENT_ENABLE_ACRYLICBLURBEHIND, 2, 0x64202020, 0
         )
         data = WINDOWCOMPOSITIONATTDATA(
             WCA_ACCENT_POLICY,
@@ -641,13 +776,37 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DeepSeekFS")
-    app.setApplicationVersion("2.0.0")
-    app.setStyle("Fusion")           # crisp on every OS
+    app.setApplicationVersion("3.0.0")
+    app.setStyle("Fusion")
+    app.setQuitOnLastWindowClosed(False)    # keep running in tray
 
     service = DesktopService()
-    win = MainWindow(service)
-    win.show()
-    sys.exit(app.exec())
+    panel = SearchPanel(service)
+
+    # ── Register global hotkey: Shift+Space ───────────────────────────────
+    hotkey_ok = False
+    if platform.system() == "Windows":
+        hotkey_ok = ctypes.windll.user32.RegisterHotKey(
+            None, HOTKEY_ID, MOD_SHIFT, VK_SPACE
+        )
+        if hotkey_ok:
+            logger.info("✅ Global hotkey registered: Shift+Space")
+            event_filter = HotkeyFilter(panel.toggle_panel)
+            app.installNativeEventFilter(event_filter)
+        else:
+            logger.warning("⚠️  Failed to register Shift+Space hotkey "
+                           "(may already be in use)")
+
+    # Show once on first launch, then it lives in the tray
+    panel._show_panel()
+
+    ret = app.exec()
+
+    # Cleanup
+    if hotkey_ok:
+        ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+
+    sys.exit(ret)
 
 
 if __name__ == "__main__":
