@@ -1,11 +1,14 @@
 """
-DeepSeekFS – Desktop Entry Point (v3.0  Start-Menu Style)
+DeepSeekFS – Desktop Entry Point (v4.0  ChatGPT-Inspired)
 ==========================================================
-Windows 11 Start Menu–inspired floating search panel.
+Vibrant, premium floating search panel with ChatGPT-like
+reasoning display before showing search results.
+
 • Shift+Space  → toggle panel  (system-wide hotkey)
 • Click outside → auto-hide
 • Translucent acrylic/Mica blur-behind
-• Card-based search results
+• "Thinking" reasoning animation
+• Card-based search results with content snippets
 
 Usage:
     python run_desktop.py
@@ -19,6 +22,7 @@ import sys
 import platform
 import struct
 import subprocess
+import time
 from pathlib import Path
 from typing import List
 
@@ -35,31 +39,47 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QLabel, QScrollArea, QFrame,
     QSystemTrayIcon, QMenu,
-    QSizePolicy,
+    QSizePolicy, QGraphicsOpacityEffect,
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QSize, QTimer,
     QPropertyAnimation, QEasingCurve, QPoint, QRect,
     QAbstractNativeEventFilter, QByteArray,
+    QSequentialAnimationGroup,
 )
 from PyQt6.QtGui import (
     QFont, QColor, QIcon, QPainter, QPainterPath,
     QBrush, QPen, QFontDatabase, QGuiApplication,
-    QCursor,
+    QCursor, QLinearGradient,
 )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
-PANEL_WIDTH  = 640
-PANEL_HEIGHT = 700
-CORNER_RADIUS = 12
-TASKBAR_OFFSET = 60          # pixels above the bottom of the screen
+PANEL_WIDTH  = 720
+PANEL_HEIGHT = 780
+CORNER_RADIUS = 18
+TASKBAR_OFFSET = 50          # pixels above the bottom of the screen
 HOTKEY_ID = 0xBFFF           # unique id for RegisterHotKey
 MOD_SHIFT = 0x0004
 VK_SPACE  = 0x20
 WM_HOTKEY = 0x0312
+
+# ── Color Palette ────────────────────────────────────────────────────────────
+ACCENT_PRIMARY    = "#10A37F"   # ChatGPT green
+ACCENT_SECONDARY  = "#8B5CF6"   # Purple accent
+ACCENT_WARM       = "#F59E0B"   # Amber
+ACCENT_BLUE       = "#3B82F6"   # Blue
+ACCENT_PINK       = "#EC4899"   # Pink
+BG_DARK           = "rgba(13, 13, 13, 0.92)"
+BG_CARD           = "rgba(25, 25, 28, 0.85)"
+BG_CARD_HOVER     = "rgba(40, 40, 48, 0.95)"
+TEXT_PRIMARY       = "rgba(255, 255, 255, 0.95)"
+TEXT_SECONDARY     = "rgba(255, 255, 255, 0.55)"
+TEXT_MUTED         = "rgba(255, 255, 255, 0.30)"
+BORDER_SUBTLE      = "rgba(255, 255, 255, 0.08)"
+BORDER_ACTIVE      = "rgba(16, 163, 127, 0.6)"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,11 +94,8 @@ class HotkeyFilter(QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, event_type: QByteArray | bytes, message):
         if event_type == b"windows_generic_MSG" or event_type == b"windows_dispatcher_MSG":
-            # message is a sip.voidptr wrapping a MSG*
-            # MSG: HWND(8) + UINT(4) + WPARAM(8) + LPARAM(8) ...  on 64-bit
             try:
                 msg_ptr = int(message)
-                # Offsets: HWND=0(8), message=8(4), wParam=16(8)
                 msg_id = ctypes.c_uint.from_address(msg_ptr + 8).value
                 if msg_id == WM_HOTKEY:
                     wparam = ctypes.c_ulonglong.from_address(msg_ptr + 16).value
@@ -116,13 +133,13 @@ class IndexThread(QThread):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Background worker: search
+# Background worker: search (now also returns reasoning metadata)
 # ─────────────────────────────────────────────────────────────────────────────
 class SearchThread(QThread):
-    results = pyqtSignal(list)
+    results = pyqtSignal(dict)   # emits {"hits": [...], "reasoning": {...}}
     error   = pyqtSignal(str)
 
-    def __init__(self, service: DesktopService, query: str, top_k: int = 15):
+    def __init__(self, service: DesktopService, query: str, top_k: int = 20):
         super().__init__()
         self._svc   = service
         self._query = query
@@ -130,8 +147,30 @@ class SearchThread(QThread):
 
     def run(self):
         try:
+            from core.search.query_parser import extract_intent
+            from core.time.scoring import extract_time_target
+
+            t0 = time.time()
+
+            # Step 1: Parse intent
+            target_time, cleaned_query = extract_time_target(self._query)
+            cleaned_query, target_exts = extract_intent(cleaned_query)
+
+            # Step 2: Execute search
             hits = self._svc.search(self._query, self._top_k)
-            self.results.emit(hits)
+            elapsed = round((time.time() - t0) * 1000)
+
+            # Step 3: Build reasoning payload
+            reasoning = {
+                "original_query": self._query,
+                "cleaned_query": cleaned_query,
+                "target_extensions": target_exts,
+                "target_time": target_time,
+                "elapsed_ms": elapsed,
+                "total_hits": len(hits),
+            }
+
+            self.results.emit({"hits": hits, "reasoning": reasoning})
         except Exception as exc:
             logger.error(f"SearchThread error: {exc}")
             self.error.emit(str(exc))
@@ -141,17 +180,33 @@ class SearchThread(QThread):
 # Result card widget
 # ─────────────────────────────────────────────────────────────────────────────
 class ResultCard(QFrame):
-    """A single search-result card styled like a Windows 11 list item."""
+    """A single search-result card with vibrant styling."""
 
     clicked = pyqtSignal(str)   # emits file path
 
-    # ── file-type icons ────────────────────────────────────────────────────
-    _ICONS = {
-        ".pdf": "📄", ".docx": "📝", ".doc": "📝", ".txt": "📃",
-        ".py": "🐍", ".js": "⚡", ".json": "🔧", ".csv": "📊",
-        ".xlsx": "📊", ".xls": "📊", ".pptx": "📽️", ".html": "🌐",
-        ".md": "📑", ".mp4": "🎬", ".mkv": "🎬", ".avi": "🎬",
-        ".mov": "🎬", ".wmv": "🎬", ".flv": "🎬", ".webm": "🎬",
+    # ── file-type colors & icons ──────────────────────────────────────────
+    _TYPE_THEME = {
+        ".pdf":  ("📄", "#EF4444", "PDF"),
+        ".docx": ("📝", "#3B82F6", "DOCX"),
+        ".doc":  ("📝", "#3B82F6", "DOC"),
+        ".txt":  ("📃", "#6B7280", "TXT"),
+        ".py":   ("🐍", "#10B981", "PY"),
+        ".js":   ("⚡", "#F59E0B", "JS"),
+        ".json": ("🔧", "#8B5CF6", "JSON"),
+        ".csv":  ("📊", "#06B6D4", "CSV"),
+        ".xlsx": ("📊", "#059669", "XLSX"),
+        ".xls":  ("📊", "#059669", "XLS"),
+        ".pptx": ("📽️", "#F97316", "PPTX"),
+        ".ppt":  ("📽️", "#F97316", "PPT"),
+        ".html": ("🌐", "#EC4899", "HTML"),
+        ".md":   ("📑", "#8B5CF6", "MD"),
+        ".mp4":  ("🎬", "#EF4444", "MP4"),
+        ".mkv":  ("🎬", "#EF4444", "MKV"),
+        ".avi":  ("🎬", "#EF4444", "AVI"),
+        ".mov":  ("🎬", "#EF4444", "MOV"),
+        ".wmv":  ("🎬", "#EF4444", "WMV"),
+        ".flv":  ("🎬", "#EF4444", "FLV"),
+        ".webm": ("🎬", "#EF4444", "WEBM"),
     }
 
     def __init__(self, hit: dict, rank: int, parent=None):
@@ -161,36 +216,46 @@ class ResultCard(QFrame):
         self.setObjectName("resultCard")
 
         ext  = hit.get("extension", Path(self._path).suffix).lower()
-        icon = self._ICONS.get(ext, "📁")
+        theme = self._TYPE_THEME.get(ext, ("📁", "#6B7280", ext.upper().replace(".", "")))
+        icon_emoji, type_color, type_label = theme
         name = hit.get("name", Path(self._path).name)
         score = hit.get("combined_score", hit.get("score", 0.0))
-        semantic = hit.get("semantic_score", 0.0)
-        time_s = hit.get("time_score", 0.0)
 
         # ── layout ────────────────────────────────────────────────────────
         root = QHBoxLayout(self)
-        root.setContentsMargins(14, 10, 14, 10)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(14)
 
-        # icon
-        icon_lbl = QLabel(icon)
-        icon_lbl.setFixedSize(36, 36)
+        # ── Icon with colored background ──────────────────────────────────
+        icon_container = QFrame()
+        icon_container.setFixedSize(44, 44)
+        icon_container.setStyleSheet(f"""
+            background: {type_color}20;
+            border-radius: 12px;
+            border: 1px solid {type_color}40;
+        """)
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_lbl = QLabel(icon_emoji)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet("font-size: 22px; background: transparent;")
-        root.addWidget(icon_lbl)
+        icon_lbl.setStyleSheet("font-size: 20px; background: transparent;")
+        icon_layout.addWidget(icon_lbl)
+        root.addWidget(icon_container)
 
-        # text column
+        # ── Text column ───────────────────────────────────────────────────
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setSpacing(3)
 
         name_lbl = QLabel(name)
         name_lbl.setObjectName("cardName")
-        name_lbl.setStyleSheet(
-            "font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.95); background: transparent;"
-        )
+        name_lbl.setStyleSheet(f"""
+            font-size: 13px; font-weight: 700;
+            color: {TEXT_PRIMARY};
+            background: transparent;
+        """)
         text_col.addWidget(name_lbl)
 
-        # show shortened path
+        # Shortened path
         path_display = self._path
         try:
             home = str(Path.home())
@@ -200,43 +265,44 @@ class ResultCard(QFrame):
             pass
         path_lbl = QLabel(path_display)
         path_lbl.setObjectName("cardPath")
-        path_lbl.setStyleSheet(
-            "font-size: 11px; color: rgba(255,255,255,0.40); background: transparent;"
-        )
-        path_lbl.setMaximumWidth(380)
+        path_lbl.setStyleSheet(f"""
+            font-size: 10px; color: {TEXT_SECONDARY};
+            background: transparent;
+        """)
+        path_lbl.setMaximumWidth(400)
         text_col.addWidget(path_lbl)
 
         root.addLayout(text_col, 1)
 
-        # score badge
+        # ── Score badge (vibrant gradient) ────────────────────────────────
         score_pct = int(score * 100)
-        badge_color = (
-            "#4CC764" if score >= 0.75 else
-            "#FFB940" if score >= 0.50 else
-            "#FF6B6B"
-        )
+        if score >= 0.75:
+            badge_bg = f"qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {ACCENT_PRIMARY}, stop:1 #059669)"
+        elif score >= 0.50:
+            badge_bg = f"qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {ACCENT_WARM}, stop:1 #D97706)"
+        else:
+            badge_bg = f"qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #EF4444, stop:1 #DC2626)"
+
         score_lbl = QLabel(f"{score_pct}%")
         score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        score_lbl.setFixedSize(48, 26)
+        score_lbl.setFixedSize(50, 28)
         score_lbl.setStyleSheet(f"""
-            font-size: 12px; font-weight: 700;
-            color: {badge_color};
-            background: rgba(255,255,255,0.06);
-            border: 1px solid {badge_color}40;
-            border-radius: 6px;
+            font-size: 12px; font-weight: 800;
+            color: white;
+            background: {badge_bg};
+            border-radius: 8px;
         """)
         root.addWidget(score_lbl)
 
-        # extension badge
-        ext_lbl = QLabel(ext.upper().replace(".", ""))
+        # ── Extension pill ────────────────────────────────────────────────
+        ext_lbl = QLabel(type_label)
         ext_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ext_lbl.setFixedSize(42, 26)
-        ext_lbl.setStyleSheet("""
-            font-size: 10px; font-weight: 700;
-            color: rgba(120,170,255,0.90);
-            background: rgba(0,120,212,0.15);
-            border: 1px solid rgba(0,120,212,0.25);
-            border-radius: 6px;
+        ext_lbl.setFixedSize(48, 28)
+        ext_lbl.setStyleSheet(f"""
+            font-size: 10px; font-weight: 800;
+            color: white;
+            background: {type_color};
+            border-radius: 8px;
         """)
         root.addWidget(ext_lbl)
 
@@ -247,12 +313,64 @@ class ResultCard(QFrame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main panel (Start-menu style)
+# Reasoning card (ChatGPT "thinking" bubble)
+# ─────────────────────────────────────────────────────────────────────────────
+class ReasoningCard(QFrame):
+    """Shows what the AI 'thought' about the query."""
+
+    def __init__(self, reasoning: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("reasoningCard")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(8)
+
+        # Header
+        header = QLabel("🧠 DeepSeekFS Reasoning")
+        header.setStyleSheet(f"""
+            font-size: 13px; font-weight: 800;
+            color: {ACCENT_PRIMARY};
+            background: transparent;
+        """)
+        layout.addWidget(header)
+
+        # Build reasoning text
+        lines = []
+        original = reasoning.get("original_query", "")
+        cleaned = reasoning.get("cleaned_query", "")
+        exts = reasoning.get("target_extensions", [])
+        elapsed = reasoning.get("elapsed_ms", 0)
+        total = reasoning.get("total_hits", 0)
+
+        if exts:
+            ext_str = ", ".join(exts)
+            lines.append(f"📌 Detected file type intent: <b style='color:{ACCENT_WARM}'>{ext_str}</b>")
+            if cleaned != original:
+                lines.append(f"🔍 Semantic query refined to: <b style='color:{ACCENT_BLUE}'>\"{cleaned}\"</b>")
+            lines.append(f"⚡ Filtered {total} results by type + meaning in <b>{elapsed}ms</b>")
+        else:
+            lines.append(f"🔍 Full semantic search for: <b style='color:{ACCENT_BLUE}'>\"{cleaned}\"</b>")
+            lines.append(f"⚡ Found {total} results via neural vector matching in <b>{elapsed}ms</b>")
+
+        body = QLabel("<br>".join(lines))
+        body.setTextFormat(Qt.TextFormat.RichText)
+        body.setWordWrap(True)
+        body.setStyleSheet(f"""
+            font-size: 12px; line-height: 1.6;
+            color: {TEXT_SECONDARY};
+            background: transparent;
+        """)
+        layout.addWidget(body)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main panel (ChatGPT-inspired)
 # ─────────────────────────────────────────────────────────────────────────────
 class SearchPanel(QWidget):
     """
-    Frameless, translucent overlay panel — appears/disappears like the
-    Windows 11 Start Menu.
+    Frameless, vibrant overlay panel with ChatGPT-like reasoning and
+    premium aesthetics.
     """
 
     def __init__(self, service: DesktopService):
@@ -262,6 +380,8 @@ class SearchPanel(QWidget):
         self._srch_thread: SearchThread | None = None
         self._indexed_count = 0
         self._visible = False
+        self._thinking_dots = 0
+        self._thinking_timer: QTimer | None = None
 
         # ── Window flags: frameless tool window, always on top ────────────
         self.setWindowFlags(
@@ -277,21 +397,16 @@ class SearchPanel(QWidget):
         self._build_ui()
         self._build_tray()
 
-        # NOTE: QGraphicsDropShadowEffect removed — it is incompatible
-        # with WA_TranslucentBackground and causes UpdateLayeredWindow errors.
-
         # ── Fade animation ───────────────────────────────────────────────
         self._fade = QPropertyAnimation(self, b"windowOpacity")
-        self._fade.setDuration(150)
+        self._fade.setDuration(200)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         # ── Start indexing ───────────────────────────────────────────────
         self._kick_indexing()
 
-    # ── Paint: fully transparent so DWM acrylic blur shows through ─────
+    # ── Paint: rounded dark background ─────────────────────────────────
     def paintEvent(self, event):
-        # Do NOT paint any opaque fill — the DWM acrylic/Mica backdrop
-        # IS the background.  We only draw a subtle rounded border.
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -301,80 +416,123 @@ class SearchPanel(QWidget):
             float(self.width()) - 2.0, float(self.height()) - 2.0,
             CORNER_RADIUS, CORNER_RADIUS,
         )
-        # Subtle 1px border only
-        painter.setPen(QPen(QColor(255, 255, 255, 30), 1.0))
+
+        # Subtle border glow
+        painter.setPen(QPen(QColor(16, 163, 127, 50), 1.5))
         painter.drawPath(path)
         painter.end()
 
     # ── UI construction ──────────────────────────────────────────────────
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 22, 20, 16)
+        root.setContentsMargins(24, 24, 24, 18)
         root.setSpacing(0)
+
+        # ── Header with brand ────────────────────────────────────────────
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(2, 0, 2, 0)
+
+        brand = QLabel("✦ DeepSeekFS")
+        brand.setStyleSheet(f"""
+            font-size: 18px; font-weight: 800;
+            color: {ACCENT_PRIMARY};
+            background: transparent;
+            letter-spacing: 1px;
+        """)
+        header_row.addWidget(brand)
+        header_row.addStretch()
+
+        version_lbl = QLabel("v4.0 • AI-Powered")
+        version_lbl.setStyleSheet(f"""
+            font-size: 11px; font-weight: 600;
+            color: {TEXT_MUTED};
+            background: transparent;
+        """)
+        header_row.addWidget(version_lbl)
+
+        root.addLayout(header_row)
+        root.addSpacing(16)
 
         # ── Search bar ───────────────────────────────────────────────────
         search_container = QFrame()
         search_container.setObjectName("searchContainer")
-        search_container.setStyleSheet("""
-            #searchContainer {
-                background: rgba(255,255,255,0.06);
-                border: 1px solid rgba(255,255,255,0.10);
-                border-radius: 10px;
-            }
-            #searchContainer:focus-within {
-                border-color: rgba(0,120,212,0.60);
-            }
+        search_container.setStyleSheet(f"""
+            #searchContainer {{
+                background: rgba(32, 33, 36, 0.8);
+                border: 2px solid {BORDER_SUBTLE};
+                border-radius: 16px;
+            }}
+            #searchContainer:focus-within {{
+                border-color: {BORDER_ACTIVE};
+                background: rgba(32, 33, 36, 0.95);
+            }}
         """)
         search_layout = QHBoxLayout(search_container)
-        search_layout.setContentsMargins(14, 0, 14, 0)
-        search_layout.setSpacing(10)
+        search_layout.setContentsMargins(18, 0, 18, 0)
+        search_layout.setSpacing(12)
 
-        search_icon = QLabel("🔍")
-        search_icon.setStyleSheet("font-size: 16px; color: rgba(255,255,255,0.45); background: transparent;")
-        search_icon.setFixedWidth(24)
+        # Mic/sparkle icon
+        search_icon = QLabel("✨")
+        search_icon.setStyleSheet(f"font-size: 18px; color: {ACCENT_PRIMARY}; background: transparent;")
+        search_icon.setFixedWidth(28)
         search_layout.addWidget(search_icon)
 
         self.inp_query = QLineEdit()
-        self.inp_query.setPlaceholderText("Search for files, documents, and projects…")
+        self.inp_query.setPlaceholderText("Ask anything — search files, code, documents…")
         self.inp_query.setObjectName("searchInput")
-        self.inp_query.setStyleSheet("""
-            #searchInput {
+        self.inp_query.setStyleSheet(f"""
+            #searchInput {{
                 border: none;
                 background: transparent;
-                color: rgba(255,255,255,0.92);
-                font-size: 14px;
-                padding: 12px 0;
-                selection-background-color: rgba(0,120,212,0.40);
-            }
-            #searchInput::placeholder {
-                color: rgba(255,255,255,0.35);
-            }
+                color: {TEXT_PRIMARY};
+                font-size: 15px;
+                font-weight: 500;
+                padding: 16px 0;
+                selection-background-color: {ACCENT_PRIMARY}50;
+            }}
+            #searchInput::placeholder {{
+                color: {TEXT_MUTED};
+            }}
         """)
         self.inp_query.returnPressed.connect(self._on_search)
         search_layout.addWidget(self.inp_query, 1)
 
+        # Send button
+        send_btn = QLabel("➜")
+        send_btn.setFixedSize(36, 36)
+        send_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        send_btn.setStyleSheet(f"""
+            font-size: 18px; font-weight: 800;
+            color: white;
+            background: {ACCENT_PRIMARY};
+            border-radius: 10px;
+        """)
+        send_btn.mousePressEvent = lambda e: self._on_search()
+        search_layout.addWidget(send_btn)
+
         root.addWidget(search_container)
-        root.addSpacing(14)
+        root.addSpacing(12)
 
-        # ── Divider line ─────────────────────────────────────────────────
-        divider = QFrame()
-        divider.setFixedHeight(1)
-        divider.setStyleSheet("background: rgba(255,255,255,0.08);")
-        root.addWidget(divider)
-        root.addSpacing(10)
-
-        # ── Index status label ───────────────────────────────────────────
-        self.lbl_status = QLabel("⏳  Indexing your files…")
+        # ── Status bar ───────────────────────────────────────────────────
+        self.lbl_status = QLabel("⏳  Preparing your AI search engine…")
         self.lbl_status.setObjectName("statusLabel")
-        self.lbl_status.setStyleSheet("""
-            #statusLabel {
+        self.lbl_status.setStyleSheet(f"""
+            #statusLabel {{
                 font-size: 12px;
-                color: rgba(255,255,255,0.45);
+                color: {TEXT_SECONDARY};
                 background: transparent;
-                padding: 0 4px;
-            }
+                padding: 4px 6px;
+            }}
         """)
         root.addWidget(self.lbl_status)
+        root.addSpacing(6)
+
+        # ── Divider ──────────────────────────────────────────────────────
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background: {BORDER_SUBTLE};")
+        root.addWidget(divider)
         root.addSpacing(8)
 
         # ── Scrollable results area ──────────────────────────────────────
@@ -386,69 +544,72 @@ class SearchPanel(QWidget):
         self.scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
-        self.scroll.setStyleSheet("""
-            QScrollArea {
+        self.scroll.setStyleSheet(f"""
+            QScrollArea {{
                 background: transparent;
                 border: none;
-            }
-            QScrollArea > QWidget > QWidget {
+            }}
+            QScrollArea > QWidget > QWidget {{
                 background: transparent;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 background: transparent;
                 width: 6px;
                 margin: 4px 0;
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.15);
+            }}
+            QScrollBar::handle:vertical {{
+                background: {ACCENT_PRIMARY}40;
                 border-radius: 3px;
                 min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: rgba(255,255,255,0.25);
-            }
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {ACCENT_PRIMARY}80;
+            }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
                 background: transparent;
                 height: 0;
-            }
+            }}
         """)
 
         self.results_widget = QWidget()
         self.results_widget.setStyleSheet("background: transparent;")
         self.results_layout = QVBoxLayout(self.results_widget)
         self.results_layout.setContentsMargins(0, 0, 0, 0)
-        self.results_layout.setSpacing(4)
+        self.results_layout.setSpacing(6)
         self.results_layout.addStretch()
 
         self.scroll.setWidget(self.results_widget)
         root.addWidget(self.scroll, 1)
 
-        # ── Welcome / empty state ────────────────────────────────────────
-        self.lbl_empty = QLabel("Type a query above to search your files")
+        # ── Welcome / empty state (PERSISTENT — never deleted) ───────────
+        self.lbl_empty = QLabel("Ask me anything — I'll find it in your files 🚀")
         self.lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_empty.setStyleSheet("""
-            font-size: 13px;
-            color: rgba(255,255,255,0.25);
-            padding: 60px 0;
+        self.lbl_empty.setWordWrap(True)
+        self.lbl_empty.setStyleSheet(f"""
+            font-size: 14px;
+            color: {TEXT_MUTED};
+            padding: 50px 20px;
             background: transparent;
         """)
+        # Insert into results and keep a reference
+        self.results_layout.insertWidget(0, self.lbl_empty)
 
         # ── Bottom bar ───────────────────────────────────────────────────
         root.addSpacing(8)
         bottom_divider = QFrame()
         bottom_divider.setFixedHeight(1)
-        bottom_divider.setStyleSheet("background: rgba(255,255,255,0.06);")
+        bottom_divider.setStyleSheet(f"background: {BORDER_SUBTLE};")
         root.addWidget(bottom_divider)
         root.addSpacing(6)
 
         bottom = QHBoxLayout()
         bottom.setContentsMargins(4, 0, 4, 0)
 
-        self.lbl_footer = QLabel("DeepSeekFS")
-        self.lbl_footer.setStyleSheet("""
-            font-size: 11px; font-weight: 600;
-            color: rgba(255,255,255,0.30);
+        self.lbl_footer = QLabel("Powered by MiniLM Neural Engine")
+        self.lbl_footer.setStyleSheet(f"""
+            font-size: 10px; font-weight: 600;
+            color: {TEXT_MUTED};
             background: transparent;
         """)
         bottom.addWidget(self.lbl_footer)
@@ -456,50 +617,59 @@ class SearchPanel(QWidget):
         bottom.addStretch()
 
         hint = QLabel("Shift+Space to toggle  •  Esc to hide")
-        hint.setStyleSheet("""
-            font-size: 11px;
-            color: rgba(255,255,255,0.20);
+        hint.setStyleSheet(f"""
+            font-size: 10px;
+            color: {TEXT_MUTED};
             background: transparent;
         """)
         bottom.addWidget(hint)
 
         root.addLayout(bottom)
 
-        # Show the empty-state on first load
-        self._show_empty_state()
-
     def _show_empty_state(self):
-        """Clear results and show welcome text."""
-        self._clear_results()
-        self.results_layout.insertWidget(0, self.lbl_empty)
+        """Show welcome text (lbl_empty is never destroyed)."""
         self.lbl_empty.show()
 
+    def _hide_empty_state(self):
+        """Hide the empty label (but don't destroy it!)."""
+        self.lbl_empty.hide()
+
     def _clear_results(self):
-        """Remove all result cards."""
+        """Remove all result/reasoning cards but KEEP lbl_empty."""
         while self.results_layout.count() > 0:
             item = self.results_layout.takeAt(0)
             w = item.widget()
-            if w:
+            if w and w is not self.lbl_empty:
                 w.deleteLater()
 
-    # ── Result card styling (applied to all cards via parent stylesheet) ──
-    _CARD_STYLE = """
-        #resultCard {
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 8px;
-        }
-        #resultCard:hover {
-            background: rgba(255,255,255,0.08);
-            border-color: rgba(0,120,212,0.30);
-        }
+        # Re-add lbl_empty (it's still alive, just needs to be in layout)
+        self.results_layout.addWidget(self.lbl_empty)
+
+    # ── Stylesheet for result cards ──────────────────────────────────────
+    _CARD_STYLE = f"""
+        #resultCard {{
+            background: {BG_CARD};
+            border: 1px solid {BORDER_SUBTLE};
+            border-radius: 14px;
+        }}
+        #resultCard:hover {{
+            background: {BG_CARD_HOVER};
+            border: 1px solid {ACCENT_PRIMARY}60;
+        }}
+        #reasoningCard {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(16, 163, 127, 0.08),
+                stop:1 rgba(139, 92, 246, 0.05));
+            border: 1px solid {ACCENT_PRIMARY}30;
+            border-radius: 14px;
+        }}
     """
 
     # ── System tray ──────────────────────────────────────────────────────
     def _build_tray(self):
         self._tray = QSystemTrayIcon(self)
         menu = QMenu()
-        show_action = menu.addAction("🔍  Show   (Shift+Space)")
+        show_action = menu.addAction("✦  Show   (Shift+Space)")
         show_action.triggered.connect(self.toggle_panel)
         menu.addSeparator()
         quit_action = menu.addAction("❌  Quit DeepSeekFS")
@@ -529,8 +699,45 @@ class SearchPanel(QWidget):
     def _on_index_done(self, new_files: int):
         self._indexed_count = self._svc.total_indexed()
         self.lbl_status.setText(
-            f"📄 {self._indexed_count:,} files indexed  •  {new_files} new"
+            f"✦ {self._indexed_count:,} files indexed  •  {new_files} new  •  Ready"
         )
+
+    # ── Thinking animation ───────────────────────────────────────────────
+    def _start_thinking(self, query: str):
+        """Show animated thinking state."""
+        self._clear_results()
+        self._thinking_dots = 0
+
+        self.lbl_empty.setText("🧠 Thinking")
+        self.lbl_empty.setStyleSheet(f"""
+            font-size: 18px; font-weight: 700;
+            color: {ACCENT_PRIMARY};
+            padding: 40px 20px;
+            background: transparent;
+        """)
+        self.lbl_empty.show()
+
+        # Animate dots
+        self._thinking_timer = QTimer()
+        self._thinking_timer.timeout.connect(self._animate_thinking)
+        self._thinking_timer.start(300)
+
+    def _animate_thinking(self):
+        self._thinking_dots = (self._thinking_dots + 1) % 4
+        dots = "." * self._thinking_dots
+        steps = [
+            "Parsing your intent",
+            "Extracting keywords",
+            "Scanning neural vectors",
+            "Ranking by relevance",
+        ]
+        step_idx = min(self._thinking_dots, len(steps) - 1)
+        self.lbl_empty.setText(f"🧠 Thinking{dots}\n\n{steps[step_idx]}…")
+
+    def _stop_thinking(self):
+        if self._thinking_timer:
+            self._thinking_timer.stop()
+            self._thinking_timer = None
 
     # ── Search ───────────────────────────────────────────────────────────
     def _on_search(self):
@@ -541,39 +748,66 @@ class SearchPanel(QWidget):
             self.lbl_status.setText("⏳  Indexing still in progress — try again shortly")
             return
 
-        self.lbl_status.setText(f"🔍  Searching '{query}'…")
-        self._clear_results()
+        self.lbl_status.setText(f"🧠  Analyzing: \"{query}\"")
+        self._start_thinking(query)
 
+        # Delay to show thinking animation, then fire search
+        QTimer.singleShot(600, lambda: self._execute_search(query))
+
+    def _execute_search(self, query):
         self._srch_thread = SearchThread(self._svc, query)
         self._srch_thread.results.connect(self._on_results)
         self._srch_thread.error.connect(
-            lambda e: self.lbl_status.setText(f"⚠️  Search error: {e}")
+            lambda e: self._on_search_error(e)
         )
         self._srch_thread.start()
 
-    def _on_results(self, hits: list):
+    def _on_search_error(self, error: str):
+        self._stop_thinking()
+        self.lbl_status.setText(f"⚠️  Search error: {error}")
+
+    def _on_results(self, payload: dict):
+        self._stop_thinking()
         self._clear_results()
+        self._hide_empty_state()
+
+        hits = payload.get("hits", [])
+        reasoning = payload.get("reasoning", {})
+
+        # Reset lbl_empty style
+        self.lbl_empty.setStyleSheet(f"""
+            font-size: 14px;
+            color: {TEXT_MUTED};
+            padding: 50px 20px;
+            background: transparent;
+        """)
 
         if not hits:
             self.lbl_status.setText("No results found")
+            self.lbl_empty.setText("No results found — try rephrasing your query 🤔")
             self._show_empty_state()
-            self.lbl_empty.setText("No results found — try a different query")
             return
 
         self.setStyleSheet(self._CARD_STYLE)
 
+        # Insert reasoning card first
+        reasoning_card = ReasoningCard(reasoning, parent=self.results_widget)
+        self.results_layout.insertWidget(0, reasoning_card)
+
+        # Insert result cards
         for rank, hit in enumerate(hits):
             card = ResultCard(hit, rank, parent=self.results_widget)
             card.clicked.connect(self._open_file)
-            self.results_layout.insertWidget(rank, card)
+            self.results_layout.insertWidget(rank + 1, card)
 
         # Add stretch at end
         self.results_layout.addStretch()
 
         n = len(hits)
+        elapsed = reasoning.get("elapsed_ms", 0)
         q = self.inp_query.text().strip()
         self.lbl_status.setText(
-            f"✅  {n} result{'s' if n != 1 else ''} for '{q}'"
+            f"✦ {n} result{'s' if n != 1 else ''} for \"{q}\"  •  {elapsed}ms"
         )
 
     # ── Open file ────────────────────────────────────────────────────────
@@ -588,7 +822,6 @@ class SearchPanel(QWidget):
                 subprocess.Popen(["open", path])
             else:
                 subprocess.Popen(["xdg-open", path])
-            # Hide panel after opening (like Start Menu)
             self._hide_panel()
         except Exception as exc:
             self.lbl_status.setText(f"⚠️  Open failed: {exc}")
@@ -601,7 +834,6 @@ class SearchPanel(QWidget):
             self._show_panel()
 
     def _show_panel(self):
-        # Position: centered horizontally, above the taskbar
         screen = QGuiApplication.primaryScreen()
         if screen:
             geom = screen.availableGeometry()
@@ -615,11 +847,9 @@ class SearchPanel(QWidget):
         self.inp_query.setFocus()
         self.inp_query.selectAll()
 
-        # Apply acrylic AFTER the window is mapped
         if platform.system() == "Windows":
             QTimer.singleShot(30, self._apply_acrylic)
 
-        # Fade in
         self._fade.stop()
         self._fade.setStartValue(0.0)
         self._fade.setEndValue(1.0)
@@ -647,7 +877,6 @@ class SearchPanel(QWidget):
         if (event.type() == event.Type.ActivationChange
                 and not self.isActiveWindow()
                 and self._visible):
-            # Small delay to avoid conflicts with tray menu interactions
             QTimer.singleShot(100, self._deactivation_check)
 
     def _deactivation_check(self):
@@ -669,7 +898,6 @@ class SearchPanel(QWidget):
             self.toggle_panel()
 
     def _quit(self):
-        # Unregister the hotkey
         try:
             ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
         except Exception:
@@ -679,7 +907,6 @@ class SearchPanel(QWidget):
 
     # ── Windows DWM Acrylic ──────────────────────────────────────────────
     def _apply_acrylic(self):
-        """Apply acrylic/Mica blur-behind using DWM."""
         try:
             hwnd = int(self.winId())
             self._enable_acrylic(hwnd)
@@ -688,15 +915,8 @@ class SearchPanel(QWidget):
 
     @staticmethod
     def _enable_acrylic(hwnd: int):
-        """
-        Enable the Windows 10/11 acrylic blur-behind effect.
-        For frameless windows, we must extend the DWM frame into the
-        client area first, then request a backdrop type.
-        """
         dwm = ctypes.windll.dwmapi
 
-        # ── Step 1: Extend DWM frame into entire client area ──────────────
-        # This is REQUIRED for Mica / Acrylic to work on frameless windows.
         class MARGINS(ctypes.Structure):
             _fields_ = [
                 ("cxLeftWidth",    ctypes.c_int),
@@ -705,10 +925,9 @@ class SearchPanel(QWidget):
                 ("cyBottomHeight", ctypes.c_int),
             ]
 
-        margins = MARGINS(-1, -1, -1, -1)   # -1 = extend into full client
+        margins = MARGINS(-1, -1, -1, -1)
         dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
 
-        # ── Step 2: Dark mode ─────────────────────────────────────────────
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         val = ctypes.c_int(1)
         dwm.DwmSetWindowAttribute(
@@ -716,17 +935,15 @@ class SearchPanel(QWidget):
             ctypes.byref(val), ctypes.sizeof(val),
         )
 
-        # ── Step 3: Rounded corners (Win 11) ──────────────────────────────
         DWMWA_WINDOW_CORNER_PREFERENCE = 33
-        val = ctypes.c_int(2)  # DWMWCP_ROUND
+        val = ctypes.c_int(2)
         dwm.DwmSetWindowAttribute(
             hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
             ctypes.byref(val), ctypes.sizeof(val),
         )
 
-        # ── Step 4: Request backdrop — Acrylic (3) preferred over Mica ────
         DWMWA_SYSTEMBACKDROP_TYPE = 38
-        for backdrop in (3, 4, 2):     # Acrylic → MicaAlt → Mica
+        for backdrop in (3, 4, 2):
             val = ctypes.c_int(backdrop)
             hr = dwm.DwmSetWindowAttribute(
                 hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
@@ -736,7 +953,6 @@ class SearchPanel(QWidget):
                 logger.info(f"DWM backdrop type {backdrop} applied successfully")
                 return
 
-        # ── Fallback: Win 10 SetWindowCompositionAttribute ────────────────
         logger.info("Using Win10 SetWindowCompositionAttribute fallback")
 
         class ACCENT_POLICY(ctypes.Structure):
@@ -756,9 +972,8 @@ class SearchPanel(QWidget):
 
         ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
         WCA_ACCENT_POLICY = 19
-        # ABGR tint: 0x64_202020 → dark grey at ~40% opacity (glass-like)
         accent = ACCENT_POLICY(
-            ACCENT_ENABLE_ACRYLICBLURBEHIND, 2, 0x64202020, 0
+            ACCENT_ENABLE_ACRYLICBLURBEHIND, 2, 0x64101010, 0
         )
         data = WINDOWCOMPOSITIONATTDATA(
             WCA_ACCENT_POLICY,
@@ -776,9 +991,9 @@ class SearchPanel(QWidget):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DeepSeekFS")
-    app.setApplicationVersion("3.0.0")
+    app.setApplicationVersion("4.0.0")
     app.setStyle("Fusion")
-    app.setQuitOnLastWindowClosed(False)    # keep running in tray
+    app.setQuitOnLastWindowClosed(False)
 
     service = DesktopService()
     panel = SearchPanel(service)
@@ -797,12 +1012,11 @@ def main():
             logger.warning("⚠️  Failed to register Shift+Space hotkey "
                            "(may already be in use)")
 
-    # Show once on first launch, then it lives in the tray
+    # Show once on first launch
     panel._show_panel()
 
     ret = app.exec()
 
-    # Cleanup
     if hotkey_ok:
         ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
 

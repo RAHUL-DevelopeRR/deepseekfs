@@ -6,6 +6,7 @@ from app.logger import logger
 from core.embeddings.embedder import get_embedder
 from core.time.scoring import calculate_time_score, get_time_multiplier, extract_time_target, calculate_target_time_score
 from core.indexing.index_builder import get_index
+from core.search.query_parser import extract_intent
 
 
 class SemanticSearch:
@@ -31,12 +32,16 @@ class SemanticSearch:
             # Intercept date queries
             target_time, cleaned_query = extract_time_target(query)
             
+            # Intercept file type intents
+            cleaned_query, target_exts = extract_intent(cleaned_query)
+            
             # Use cleaned query for embedding, if it became empty just use original
             search_text = cleaned_query if len(cleaned_query) >= 3 else query
             query_embedding = self.embedder.encode_single(search_text)
             query_embedding = np.array([query_embedding], dtype=np.float32)
 
-            distances, indices = index_builder.search_raw(query_embedding, top_k * 2)
+            search_limit = top_k * 10 if target_exts else top_k * 2
+            distances, indices = index_builder.search_raw(query_embedding, search_limit)
 
             results = []
             time_multiplier = get_time_multiplier(query) if use_time_ranking else 1.0
@@ -47,6 +52,11 @@ class SemanticSearch:
 
                 meta = index_builder.get_metadata_by_faiss_id(int(idx))
                 if meta is None:
+                    continue
+                    
+                # Apply intent filtering
+                ext = meta.get("extension", "").lower()
+                if target_exts and ext not in target_exts:
                     continue
 
                 distance = float(distances[i])
@@ -93,6 +103,9 @@ class SemanticSearch:
                 })
 
             results.sort(key=lambda x: x["combined_score"], reverse=True)
+            # Trim to top_k after all filtering
+            results = results[:top_k]
+            
             logger.info(f"Query: '{query}' -> {len(results)} results")
             return results
 

@@ -28,6 +28,8 @@ class FileParser:
                 return FileParser._parse_code(file_path)
             elif ext in [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"]:
                 return FileParser._parse_video_metadata(file_path)
+            elif ext in [".pptx", ".ppt"]:
+                return FileParser._parse_pptx(file_path)
             else:
                 return None
         except Exception as e:
@@ -71,6 +73,22 @@ class FileParser:
         """Parse JSON files"""
         with open(file_path, 'r', encoding='utf-8') as f:
             return f.read()[:5000]
+            
+    @staticmethod
+    def _parse_pptx(file_path: str) -> Optional[str]:
+        """Parse .pptx files"""
+        try:
+            from pptx import Presentation
+            prs = Presentation(file_path)
+            text = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        text.append(shape.text)
+            return "\n".join(text)[:5000]
+        except Exception as e:
+            logger.debug(f"PPTX parse error: {e}")
+            return None
     
     @staticmethod
     def _parse_csv(file_path: str) -> str:

@@ -5,6 +5,13 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"       # FIX 1: disable GPU
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"     # FIX 4: prevent MKL/OpenMP crash
 
+# ── Bypass SSL verification for model download (Corporate Networks/Self-Signed) ──
+os.environ["CURL_CA_BUNDLE"] = ""
+os.environ["REQUESTS_CA_BUNDLE"] = ""
+os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import List, Union
