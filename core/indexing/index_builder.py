@@ -1,8 +1,9 @@
-"""FAISS Index Builder — HNSW + SQLite backed (v2.0)
+"""FAISS Index Builder — HNSW + SQLite backed (v3.0)
 
 Singleton pattern so ALL modules share ONE index.
 - IndexHNSWFlat for O(log n) approximate nearest-neighbour search
 - SQLite for metadata (row-level updates, no full-RAM pickle load)
+- open_count / last_opened tracking for access-frequency scoring
 """
 import faiss
 import numpy as np
@@ -32,15 +33,22 @@ class _MetadataDB:
         size         INTEGER,
         modified_time REAL,
         created_time  REAL,
-        extension    TEXT
+        extension    TEXT,
+        open_count   INTEGER DEFAULT 0,
+        last_opened  REAL
     );
     """
+
+    _MIGRATIONS = [
+        "ALTER TABLE files ADD COLUMN open_count INTEGER DEFAULT 0",
+        "ALTER TABLE files ADD COLUMN last_opened REAL",
+    ]
 
     def __init__(self, db_path: str):
         self._db_path = db_path
         self._local = threading.local()
-        # Initialise the table on the creating thread
         self._conn().execute("PRAGMA journal_mode=WAL;")
+        self._run_migrations()
 
     # ── connection per thread ──────────────────────────────────
     def _conn(self) -> sqlite3.Connection:
@@ -52,6 +60,15 @@ class _MetadataDB:
             conn.commit()
             self._local.conn = conn
         return conn
+
+    def _run_migrations(self):
+        """Add columns if they don't exist (safe for existing DBs)."""
+        for sql in self._MIGRATIONS:
+            try:
+                self._conn().execute(sql)
+                self._conn().commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     # ── public API ─────────────────────────────────────────────
     def contains(self, path: str) -> bool:
@@ -86,7 +103,6 @@ class _MetadataDB:
         return self._conn().execute("SELECT COUNT(*) FROM files").fetchone()[0]
 
     def all_rows(self) -> List[Dict]:
-        """Return all rows as list of dicts — backward compat with old .metadata list."""
         rows = self._conn().execute(
             "SELECT * FROM files ORDER BY faiss_id"
         ).fetchall()
@@ -95,6 +111,21 @@ class _MetadataDB:
     def all_paths(self) -> Set[str]:
         rows = self._conn().execute("SELECT path FROM files").fetchall()
         return {r[0] for r in rows}
+
+    def record_open(self, path: str):
+        """Increment open_count and set last_opened timestamp."""
+        import time
+        self._conn().execute(
+            "UPDATE files SET open_count = open_count + 1, last_opened = ? WHERE path = ?",
+            (time.time(), path),
+        )
+        self._conn().commit()
+
+    def get_open_count(self, faiss_id: int) -> int:
+        row = self._conn().execute(
+            "SELECT open_count FROM files WHERE faiss_id=? LIMIT 1", (faiss_id,)
+        ).fetchone()
+        return row[0] if row and row[0] else 0
 
     def drop_all(self):
         self._conn().execute("DELETE FROM files")
@@ -113,9 +144,9 @@ class _MetadataDB:
 class IndexBuilder:
     """Shared FAISS HNSW index with SQLite metadata store"""
 
-    HNSW_M = 32   # neighbours per graph node
-    HNSW_EF_CONSTRUCTION = 40   # build-time search depth (higher = better recall)
-    HNSW_EF_SEARCH = 64         # query-time search depth
+    HNSW_M = 32
+    HNSW_EF_CONSTRUCTION = 40
+    HNSW_EF_SEARCH = 64
 
     def __init__(self):
         self.embedder = get_embedder()
@@ -127,13 +158,10 @@ class IndexBuilder:
     # ── backward compatibility ─────────────────────────────────
     @property
     def metadata(self) -> List[Dict]:
-        """Backward-compatible property: returns all metadata rows as a list.
-        Indexed by position so that metadata[faiss_id] works."""
         return self._db.all_rows()
 
     @property
     def indexed_paths(self) -> Set[str]:
-        """Backward-compatible property."""
         return self._db.all_paths()
 
     # ── index lifecycle ────────────────────────────────────────
@@ -165,8 +193,9 @@ class IndexBuilder:
         with self.lock:
             norm_path = str(Path(file_path).resolve())
 
+            # Skip project's own directory (resolve both sides)
             try:
-                p = Path(norm_path)
+                p = Path(norm_path).resolve()
                 base_dir = config.BASE_DIR.resolve()
                 if p == base_dir or base_dir in p.parents:
                     return False
@@ -191,7 +220,7 @@ class IndexBuilder:
                 embedding = np.array([embedding], dtype=np.float32)
                 meta = FileParser.get_file_metadata(norm_path)
 
-                faiss_id = self.index.ntotal  # next slot
+                faiss_id = self.index.ntotal
                 self.index.add(embedding)
                 self._db.insert(faiss_id, meta)
                 return True
@@ -243,9 +272,17 @@ class IndexBuilder:
         logger.info(f"Indexed {count} NEW files from {directory}")
         return count
 
+    # ── access frequency ──────────────────────────────────────
+    def record_open(self, path: str):
+        """Record that a user opened a file."""
+        norm = str(Path(path).resolve())
+        self._db.record_open(norm)
+
+    def get_open_count(self, faiss_id: int) -> int:
+        return self._db.get_open_count(faiss_id)
+
     # ── persist / save ─────────────────────────────────────────
     def save(self):
-        """Save FAISS index to disk.  SQLite is already committed per-insert."""
         faiss.write_index(self.index, config.FAISS_INDEX_PATH)
         logger.info(f"HNSW index saved: {self._db.count()} total documents")
 
@@ -260,7 +297,6 @@ class IndexBuilder:
 
     # ── raw search ─────────────────────────────────────────────
     def search_raw(self, query_embedding: np.ndarray, top_k: int):
-        """Direct FAISS search on this index"""
         n_docs = self._db.count()
         if self.index is None or n_docs == 0:
             return [], []
@@ -269,12 +305,11 @@ class IndexBuilder:
         return distances[0], indices[0]
 
     def get_metadata_by_faiss_id(self, fid: int) -> dict | None:
-        """Efficient single-row lookup by FAISS vector index."""
         return self._db.get_by_faiss_id(fid)
 
 
 # ─────────────────────────────────────────────────────────────
-# GLOBAL SINGLETON  — import this everywhere
+# GLOBAL SINGLETON
 # ─────────────────────────────────────────────────────────────
 _global_index: IndexBuilder = None
 

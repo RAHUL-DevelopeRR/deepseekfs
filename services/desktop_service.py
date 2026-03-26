@@ -1,11 +1,8 @@
 """
-DeepSeekFS – Desktop Service Adapter (v2.0)
+DeepSeekFS – Desktop Service Adapter (v3.0)
 ===========================================
 Thin wrapper that exposes the existing core/ modules to the PyQt6 UI
-using **direct Python calls** — no HTTP, no sockets, no FastAPI.
-
-This is the only new file that touches core/; everything else in
-services/ and core/ is UNCHANGED.
+using direct Python calls — no HTTP, no sockets, no FastAPI.
 """
 from __future__ import annotations
 
@@ -14,6 +11,7 @@ from pathlib import Path
 from typing import Callable, List
 
 import app.config as config
+from app.config import UserConfig
 from app.logger import logger
 import os
 from core.indexing.index_builder import get_index
@@ -27,43 +25,37 @@ class DesktopService:
     """
 
     def __init__(self):
-        # Warm up the FAISS index singleton so the first search is fast
         self._idx = get_index()
         self._lock = threading.Lock()
         logger.info("DesktopService: index singleton loaded")
-        
-        # Start the file watcher for real-time indexing of new files
+
         from core.watcher.file_watcher import FileWatcher
         self.watcher = FileWatcher(self._idx)
         self.watcher.start()
 
-    # ── Indexing ──────────────────────────────────────────────────────────────
+    # ── Indexing ─────────────────────────────────────────────
     def run_indexing(
         self,
-        on_status   : Callable[[str],      None] | None = None,
-        on_progress : Callable[[int, int], None] | None = None,
+        on_status:   Callable[[str],      None] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> int:
-        """
-        Run the same StartupIndexer logic that the web app used,
-        but with live progress callbacks for the PyQt6 progress bar.
-
-        Returns the number of NEW files added this session.
-        """
+        """Run indexing with live progress callbacks. Returns new file count."""
         paths = config.WATCH_PATHS
         if not paths:
             if on_status:
-                on_status("⚠️  No watch folders found on this machine.")
+                on_status("No watch folders found on this machine.")
             return 0
 
         if on_status:
-            on_status(f"📂  Detected {len(paths)} folder(s) to index…")
+            on_status(f"Detected {len(paths)} folder(s) to index…")
 
-        # Auto-wipe sample-only index (same logic as StartupIndexer)
         si = StartupIndexer()
         if si._index_has_only_samples():
-            si._wipe_index()
+            si._wipe_index("sample-only index")
+        if si._watch_paths_changed():
+            si._wipe_index("watch paths changed")
 
-        idx   = get_index()
+        idx = get_index()
         total_new = 0
 
         for folder in paths:
@@ -71,7 +63,6 @@ class DesktopService:
             if not folder_path.exists():
                 continue
 
-            # Count files first so we can report percentage, use os.walk to safely ignore PermissionError
             all_files = []
             for root, dirs, files in os.walk(folder_path):
                 try:
@@ -83,11 +74,10 @@ class DesktopService:
                 except Exception:
                     pass
 
-                # Skip massive system directories and caches to speed up disk-wide scanning
                 for skip in list(config.SKIP_DIRS):
                     if skip in dirs:
                         dirs.remove(skip)
-                        
+
                 for fname in files:
                     ext = Path(fname).suffix.lower()
                     if ext in config.SUPPORTED_EXTENSIONS:
@@ -99,11 +89,9 @@ class DesktopService:
                             pass
 
             n_total = len(all_files)
-
             if on_status:
-                on_status(f"  📂  {folder}  ({n_total} eligible files)")
+                on_status(f"Scanning: {folder}  ({n_total} files)")
 
-            # Index one file at a time so we can report progress
             n_done = 0
             for fpath in all_files:
                 with self._lock:
@@ -113,34 +101,66 @@ class DesktopService:
                 if on_progress and n_total > 0:
                     on_progress(n_done, n_total)
 
-            # Persist after each folder
             if n_done > 0:
                 idx.save()
 
         if si.is_first_run():
             si.mark_first_run_complete()
+        si._save_indexed_roots(paths)
 
         if on_status:
             on_status(
-                f"✅  Indexing done — {self.total_indexed():,} files in index • "
+                f"Indexing done — {self.total_indexed():,} files in index · "
                 f"{total_new} new this session"
             )
         return total_new
 
-    # ── Search ────────────────────────────────────────────────────────────────
-    def search(self, query: str, top_k: int = 15) -> List[dict]:
-        """
-        Direct call into core/search — no HTTP round-trip.
-        Returns a list of result dicts (same schema the web API returned).
-        """
+    # ── Search ───────────────────────────────────────────────
+    def search(self, query: str, top_k: int = 20) -> List[dict]:
+        """Direct call into core/search — no HTTP round-trip."""
         from core.search.semantic_search import SemanticSearch
         engine = SemanticSearch()
         return engine.search(query, top_k=top_k, use_time_ranking=True)
 
-    # ── Stats ─────────────────────────────────────────────────────────────────
+    # ── Stats ────────────────────────────────────────────────
     def total_indexed(self) -> int:
-        """How many documents are currently in the FAISS index."""
         try:
             return len(get_index().metadata)
         except Exception:
             return 0
+
+    # ── Access tracking ──────────────────────────────────────
+    def record_file_open(self, path: str):
+        """Record that a user opened a file (for access-frequency scoring)."""
+        try:
+            get_index().record_open(path)
+        except Exception as e:
+            logger.warning(f"Could not record open for {path}: {e}")
+
+    # ── Watch paths management ───────────────────────────────
+    def get_watch_paths(self) -> list:
+        """Return current validated watch paths."""
+        return UserConfig.get_all_watch_paths()
+
+    def add_watch_path(self, path: str) -> bool:
+        """Add a user-specified watch path."""
+        result = UserConfig.add_watch_path(path)
+        if result:
+            # Update the module-level WATCH_PATHS
+            config.WATCH_PATHS = UserConfig.get_all_watch_paths()
+        return result
+
+    def remove_watch_path(self, path: str) -> bool:
+        """Remove a user-specified watch path."""
+        result = UserConfig.remove_watch_path(path)
+        if result:
+            config.WATCH_PATHS = UserConfig.get_all_watch_paths()
+        return result
+
+    # ── Config ───────────────────────────────────────────────
+    def get_config(self) -> dict:
+        return UserConfig.load()
+
+    def save_config(self, cfg: dict):
+        UserConfig.save(cfg)
+        config.WATCH_PATHS = UserConfig.get_all_watch_paths()
