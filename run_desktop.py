@@ -1103,12 +1103,19 @@ class SearchPanel(QWidget):
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Zero-X DFS")
+    app.setApplicationName("DeepSeekFS")
     app.setApplicationVersion("6.0.0")
     app.setStyle("Fusion")
-    app.setQuitOnLastWindowClosed(False)
+    app.setQuitOnLastWindowClosed(True)
 
     service = DesktopService()
+
+    # ── Launch the new full interface window ──────────────────
+    from ui.main_window import DeepSeekMainWindow
+    main_window = DeepSeekMainWindow()
+    main_window.show()
+
+    # ── Keep the Shift+Space search panel overlay ────────────
     panel = SearchPanel(service)
 
     # Register global hotkey: Shift+Space
@@ -1123,8 +1130,6 @@ def main():
             app.installNativeEventFilter(event_filter)
         else:
             logger.warning("Failed to register Shift+Space hotkey")
-
-    panel._show_panel()
 
     ret = app.exec()
 
