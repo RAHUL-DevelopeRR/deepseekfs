@@ -1,341 +1,1026 @@
 <!DOCTYPE html>
-<html class="dark" lang="en">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-  <title>DeepSeekFS | Core Filesystem</title>
-  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-  <script id="tailwind-config">
-    tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            "on-tertiary-fixed": "#3a0a00",
-            "on-primary": "#00382f",
-            "tertiary-container": "#ffd0c3",
-            "secondary-fixed": "#e5deff",
-            "on-secondary": "#2e009c",
-            "background": "#131317",
-            "on-primary-container": "#006c5c",
-            "primary-container": "#00f5d4",
-            "surface-bright": "#39393d",
-            "secondary-fixed-dim": "#c9bfff",
-            "on-tertiary-container": "#ad350a",
-            "surface-container": "#1f1f23",
-            "on-secondary-fixed": "#1a0063",
-            "inverse-on-surface": "#303034",
-            "surface": "#131317",
-            "inverse-primary": "#006b5b",
-            "inverse-surface": "#e4e1e7",
-            "on-secondary-container": "#baaeff",
-            "on-primary-fixed-variant": "#005144",
-            "tertiary": "#fff5f2",
-            "surface-container-lowest": "#0e0e12",
-            "on-surface": "#e4e1e7",
-            "error": "#ffb4ab",
-            "on-surface-variant": "#b9cac4",
-            "primary-fixed-dim": "#00dfc1",
-            "outline": "#83948f",
-            "surface-dim": "#131317",
-            "tertiary-fixed": "#ffdbd0",
-            "primary-fixed": "#26fedc",
-            "on-secondary-fixed-variant": "#441cc8",
-            "surface-variant": "#353439",
-            "on-error": "#690005",
-            "secondary-container": "#4720ca",
-            "surface-tint": "#00dfc1",
-            "surface-container-high": "#2a2a2e",
-            "surface-container-low": "#1b1b1f",
-            "error-container": "#93000a",
-            "on-error-container": "#ffdad6",
-            "secondary": "#c9bfff",
-            "primary": "#d7fff3",
-            "surface-container-highest": "#353439",
-            "tertiary-fixed-dim": "#ffb59f",
-            "on-background": "#e4e1e7",
-            "outline-variant": "#3a4a46",
-            "on-tertiary": "#5e1600",
-            "on-tertiary-fixed-variant": "#852300",
-            "on-primary-fixed": "#00201a"
-          },
-          fontFamily: {
-            "headline": ["Inter"],
-            "body": ["Inter"],
-            "label": ["Inter"],
-            "mono": ["JetBrains Mono"]
-          },
-          borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
-        },
-      },
-    }
-  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepSeekFS — Spotlight</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
-    .material-symbols-outlined {
-      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-      display: inline-block;
+    /* ═══════════════════════════════════════════════════════════
+       RESET & FOUNDATIONS
+       ═══════════════════════════════════════════════════════════ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      /* ── Liquid Glass tokens ──────────────────────────────── */
+      --glass-bg: rgba(30, 30, 32, 0.62);
+      --glass-bg-deep: rgba(18, 18, 20, 0.78);
+      --glass-border: rgba(255, 255, 255, 0.10);
+      --glass-border-bright: rgba(255, 255, 255, 0.16);
+      --glass-highlight: rgba(255, 255, 255, 0.06);
+      --glass-blur: 80px;
+      --glass-saturate: 1.8;
+
+      /* ── Radius ───────────────────────────────────────────── */
+      --radius-panel: 22px;
+      --radius-search: 14px;
+      --radius-row: 10px;
+      --radius-badge: 6px;
+      --radius-pill: 20px;
+
+      /* ── Text ─────────────────────────────────────────────── */
+      --text-primary: rgba(255, 255, 255, 0.92);
+      --text-secondary: rgba(255, 255, 255, 0.58);
+      --text-tertiary: rgba(255, 255, 255, 0.34);
+      --text-quaternary: rgba(255, 255, 255, 0.18);
+
+      /* ── Accent ───────────────────────────────────────────── */
+      --accent: #007AFF;
+      --accent-glow: rgba(0, 122, 255, 0.25);
+      --accent-subtle: rgba(0, 122, 255, 0.12);
+
+      /* ── Category colors ──────────────────────────────────── */
+      --cat-app: #30D158;
+      --cat-file: #5E5CE6;
+      --cat-folder: #FF9F0A;
+      --cat-action: #BF5AF2;
+      --cat-suggestion: #64D2FF;
+
+      /* ── Shadows ──────────────────────────────────────────── */
+      --shadow-panel: 
+        0 50px 100px rgba(0, 0, 0, 0.55),
+        0 20px 60px rgba(0, 0, 0, 0.35),
+        0 2px 8px rgba(0, 0, 0, 0.20);
+
+      /* ── Layout ───────────────────────────────────────────── */
+      --panel-w: 825px;
+      --panel-h: 955px;
+    }
+
+    body {
+      width: 100vw;
+      min-height: 100vh;
+      overflow-x: hidden;
+      overflow-y: auto;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0d0d12 0%, #1a1a24 35%, #12121a 70%, #0a0a10 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px 0 60px 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       AMBIENT BACKGROUND BLOBS
+       ═══════════════════════════════════════════════════════════ */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px; left: -200px;
+      width: 800px; height: 800px;
+      background: radial-gradient(circle, rgba(0,122,255,0.06) 0%, transparent 65%);
+      pointer-events: none;
+      animation: ambient-drift 25s ease-in-out infinite alternate;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -300px; right: -300px;
+      width: 900px; height: 900px;
+      background: radial-gradient(circle, rgba(94,92,230,0.05) 0%, transparent 60%);
+      pointer-events: none;
+      animation: ambient-drift 30s ease-in-out infinite alternate-reverse;
+    }
+
+    @keyframes ambient-drift {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(60px, 40px) scale(1.15); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       SPOTLIGHT PANEL
+       ═══════════════════════════════════════════════════════════ */
+    .spotlight-panel {
+      width: var(--panel-w);
+      height: var(--panel-h);
+      background: var(--glass-bg);
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+      border-radius: var(--radius-panel);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--shadow-panel);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+
+      /* Liquid Glass inset highlight */
+      animation: panel-appear 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      opacity: 0;
+      transform: translateY(18px) scale(0.985);
+    }
+
+    .spotlight-panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, 
+        transparent 5%, 
+        rgba(255,255,255,0.18) 30%, 
+        rgba(255,255,255,0.25) 50%, 
+        rgba(255,255,255,0.18) 70%, 
+        transparent 95%
+      );
+      z-index: 10;
+      border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+    }
+
+    .spotlight-panel::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 120px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%);
+      pointer-events: none;
+      border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+      z-index: 1;
+    }
+
+    @keyframes panel-appear {
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       SEARCH BAR
+       ═══════════════════════════════════════════════════════════ */
+    .search-section {
+      padding: 20px 22px 0 22px;
+      position: relative;
+      z-index: 5;
+    }
+
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 20px;
+      height: 58px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-search);
+      transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      position: relative;
+    }
+
+    .search-bar:focus-within {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(0, 122, 255, 0.35);
+      box-shadow: 
+        0 0 0 3px var(--accent-glow),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .search-icon {
+      width: 22px; height: 22px;
+      flex-shrink: 0;
+      opacity: 0.4;
+      transition: opacity 0.3s ease;
+    }
+
+    .search-bar:focus-within .search-icon { opacity: 0.7; }
+
+    .search-icon svg { width: 100%; height: 100%; }
+
+    .search-input {
+      flex: 1;
+      border: none;
+      background: none;
+      outline: none;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 18px;
+      font-weight: 400;
+      letter-spacing: -0.2px;
+      caret-color: var(--accent);
+    }
+
+    .search-input::placeholder {
+      color: var(--text-tertiary);
+      font-weight: 300;
+    }
+
+    .search-input::selection {
+      background: var(--accent-subtle);
+      color: white;
+    }
+
+    .search-shortcuts {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .search-shortcuts kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 22px;
+      padding: 0 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-tertiary);
       line-height: 1;
-      text-transform: none;
-      letter-spacing: normal;
-      word-wrap: normal;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       SCOPE PILLS (Quick Keys)
+       ═══════════════════════════════════════════════════════════ */
+    .scope-bar {
+      display: flex;
+      gap: 6px;
+      padding: 14px 24px 6px 24px;
+      position: relative;
+      z-index: 5;
+    }
+
+    .scope-pill {
+      padding: 5px 14px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      letter-spacing: 0.1px;
+      user-select: none;
+    }
+
+    .scope-pill:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+    }
+
+    .scope-pill.active {
+      background: rgba(0, 122, 255, 0.14);
+      color: #4db8ff;
+      border-color: rgba(0, 122, 255, 0.25);
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       DIVIDER
+       ═══════════════════════════════════════════════════════════ */
+    .divider {
+      height: 1px;
+      margin: 6px 22px;
+      background: linear-gradient(90deg, transparent 0%, var(--glass-border) 20%, var(--glass-border) 80%, transparent 100%);
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       RESULTS AREA
+       ═══════════════════════════════════════════════════════════ */
+    .results-area {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 4px 10px 12px 10px;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Custom scrollbar */
+    .results-area::-webkit-scrollbar { width: 6px; }
+    .results-area::-webkit-scrollbar-track { background: transparent; }
+    .results-area::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+    }
+    .results-area::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.15); }
+
+    /* ═══════════════════════════════════════════════════════════
+       CATEGORY SECTION
+       ═══════════════════════════════════════════════════════════ */
+    .category-section {
+      margin-bottom: 4px;
+    }
+
+    .category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px 6px 14px;
+    }
+
+    .category-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-tertiary);
+    }
+
+    .category-count {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-quaternary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       RESULT ROW
+       ═══════════════════════════════════════════════════════════ */
+    .result-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 9px 14px;
+      border-radius: var(--radius-row);
+      cursor: pointer;
+      transition: all 0.18s ease;
+      position: relative;
+      border: 1px solid transparent;
+    }
+
+    .result-row:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.04);
+    }
+
+    .result-row.selected {
+      background: var(--accent-subtle);
+      border-color: rgba(0, 122, 255, 0.22);
+    }
+
+    .result-row.selected .result-name { color: #fff; }
+    .result-row.selected .result-path { color: rgba(255,255,255,0.5); }
+
+    /* ── Top Hit (featured large row) ── */
+    .result-row.top-hit {
+      padding: 14px 16px;
+      gap: 16px;
+    }
+
+    .result-row.top-hit .result-icon-frame {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      font-size: 24px;
+    }
+
+    .result-row.top-hit .result-name {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .result-row.top-hit .result-path {
+      font-size: 12px;
+    }
+
+    /* ── Icon frame ── */
+    .result-icon-frame {
+      width: 36px; height: 36px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+
+    .result-row:hover .result-icon-frame {
+      transform: scale(1.05);
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .result-icon-frame.app    { background: rgba(48,209,88,0.10); border-color: rgba(48,209,88,0.12); }
+    .result-icon-frame.file   { background: rgba(94,92,230,0.10); border-color: rgba(94,92,230,0.12); }
+    .result-icon-frame.folder { background: rgba(255,159,10,0.10); border-color: rgba(255,159,10,0.12); }
+    .result-icon-frame.action { background: rgba(191,90,242,0.10); border-color: rgba(191,90,242,0.12); }
+    .result-icon-frame.suggest { background: rgba(100,210,255,0.10); border-color: rgba(100,210,255,0.12); }
+
+    /* ── Text column ── */
+    .result-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .result-name {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-primary);
       white-space: nowrap;
-      direction: ltr;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      letter-spacing: -0.1px;
     }
-    .glass-card {
-      background: rgba(31, 31, 35, 0.6);
-      backdrop-filter: blur(20px);
+
+    .result-path {
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      font-weight: 400;
+      letter-spacing: -0.3px;
     }
-    .ghost-border-cyan { box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15); }
-    .ghost-border-violet { box-shadow: 0 0 0 1px rgba(123, 97, 255, 0.15); }
-    .ghost-border-orange { box-shadow: 0 0 0 1px rgba(255, 181, 159, 0.15); }
+
+    /* ── Right meta ── */
+    .result-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .result-badge {
+      padding: 2px 8px;
+      border-radius: var(--radius-badge);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      line-height: 18px;
+    }
+
+    .badge-py   { background: rgba(53,114,165,0.18); color: #6EB5FF; }
+    .badge-json { background: rgba(245,158,11,0.15); color: #F5B74A; }
+    .badge-md   { background: rgba(107,114,128,0.18); color: #9CA3AF; }
+    .badge-png  { background: rgba(236,72,153,0.15); color: #F472B6; }
+    .badge-js   { background: rgba(247,223,30,0.12);  color: #FACC15; }
+    .badge-tsx  { background: rgba(49,120,198,0.18);  color: #60A5FA; }
+    .badge-rs   { background: rgba(222,164,132,0.15); color: #DEA584; }
+    .badge-go   { background: rgba(0,173,216,0.15);   color: #67E8F9; }
+    .badge-dir  { background: rgba(255,159,10,0.12);  color: #FBBF24; }
+    .badge-app  { background: rgba(48,209,88,0.12);   color: #4ADE80; }
+
+    .result-score {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 8px;
+      border-radius: var(--radius-badge);
+      font-variant-numeric: tabular-nums;
+      min-width: 38px;
+      text-align: center;
+    }
+
+    .result-arrow {
+      color: var(--text-quaternary);
+      font-size: 14px;
+      transition: transform 0.2s ease, color 0.2s ease;
+      margin-left: 2px;
+    }
+
+    .result-row:hover .result-arrow {
+      color: var(--text-secondary);
+      transform: translateX(2px);
+    }
+
+    .result-row.selected .result-arrow {
+      color: var(--accent);
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       ACTIONS ROW (inline action cards)
+       ═══════════════════════════════════════════════════════════ */
+    .action-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 4px 14px 6px 14px;
+    }
+
+    .action-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      padding: 14px 10px;
+      border-radius: var(--radius-row);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      cursor: pointer;
+      transition: all 0.22s ease;
+    }
+
+    .action-card:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.08);
+      transform: translateY(-1px);
+    }
+
+    .action-card-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .action-card-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-align: center;
+    }
+
+    .action-card-shortcut {
+      font-size: 9.5px;
+      color: var(--text-quaternary);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       BOTTOM BAR
+       ═══════════════════════════════════════════════════════════ */
+    .bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 22px 14px 22px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(0, 0, 0, 0.08);
+      position: relative;
+      z-index: 5;
+    }
+
+    .bottom-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .bottom-brand {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text-secondary);
+    }
+
+    .bottom-brand span {
+      background: linear-gradient(135deg, #007AFF, #5E5CE6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .bottom-status {
+      font-size: 10.5px;
+      color: var(--text-quaternary);
+      font-variant-numeric: tabular-nums;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--cat-app);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 0.6; box-shadow: 0 0 0 0 rgba(48,209,88,0.3); }
+      50% { opacity: 1; box-shadow: 0 0 0 4px rgba(48,209,88,0); }
+    }
+
+    .bottom-hints {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .hint {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-quaternary);
+    }
+
+    .hint kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 17px;
+      padding: 0 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 4px;
+      font-size: 9.5px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      font-family: 'Inter', sans-serif;
+      line-height: 1;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       SELECTION ANIMATION
+       ═══════════════════════════════════════════════════════════ */
+    @keyframes row-select-pulse {
+      0% { box-shadow: 0 0 0 0 var(--accent-glow); }
+      50% { box-shadow: 0 0 0 3px rgba(0,122,255,0.10); }
+      100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+    }
+
+    .result-row.selected {
+      animation: row-select-pulse 1.8s ease-in-out infinite;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       INTERACTIVE JS EFFECTS
+       ═══════════════════════════════════════════════════════════ */
+    .result-row {
+      animation: row-stagger 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @keyframes row-stagger {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* stagger delay per row */
+    .category-section:nth-child(1) .result-row:nth-child(1) { animation-delay: 0.06s; }
+    .category-section:nth-child(1) .result-row:nth-child(2) { animation-delay: 0.09s; }
+    .category-section:nth-child(1) .result-row:nth-child(3) { animation-delay: 0.12s; }
+    .category-section:nth-child(2) .result-row:nth-child(1) { animation-delay: 0.15s; }
+    .category-section:nth-child(2) .result-row:nth-child(2) { animation-delay: 0.18s; }
+    .category-section:nth-child(2) .result-row:nth-child(3) { animation-delay: 0.21s; }
+    .category-section:nth-child(2) .result-row:nth-child(4) { animation-delay: 0.24s; }
+    .category-section:nth-child(3) .result-row:nth-child(1) { animation-delay: 0.27s; }
+    .category-section:nth-child(3) .result-row:nth-child(2) { animation-delay: 0.30s; }
+    .category-section:nth-child(3) .result-row:nth-child(3) { animation-delay: 0.33s; }
+    .category-section:nth-child(4) .result-row:nth-child(1) { animation-delay: 0.36s; }
+    .category-section:nth-child(4) .result-row:nth-child(2) { animation-delay: 0.39s; }
+    .category-section:nth-child(4) .result-row:nth-child(3) { animation-delay: 0.42s; }
+    .category-section:nth-child(5) .result-row:nth-child(1) { animation-delay: 0.45s; }
+    .category-section:nth-child(5) .result-row:nth-child(2) { animation-delay: 0.48s; }
+
+    .action-card {
+      animation: row-stagger 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    .action-card:nth-child(1) { animation-delay: 0.36s; }
+    .action-card:nth-child(2) { animation-delay: 0.40s; }
+    .action-card:nth-child(3) { animation-delay: 0.44s; }
+
+    /* ═══════════════════════════════════════════════════════════
+       RESULT TYPE PREVIEW (hover detail)
+       ═══════════════════════════════════════════════════════════ */
+    .result-row .preview-hint {
+      position: absolute;
+      right: 14px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      font-size: 10px;
+      color: var(--text-quaternary);
+      pointer-events: none;
+    }
+
+    .result-row:hover .preview-hint { opacity: 1; }
+
+    /* ═══════════════════════════════════════════════════════════
+       RESPONSIVE (scale down for small viewports)
+       ═══════════════════════════════════════════════════════════ */
+    @media (max-height: 980px) {
+      body { padding-bottom: 20px; }
+    }
+
+    @media (max-width: 860px) {
+      .spotlight-panel { width: 96vw; }
+    }
   </style>
 </head>
-<body class="bg-surface text-on-surface font-body selection:bg-primary-container/30 overflow-hidden">
+<body>
+  <div class="spotlight-panel" id="spotlightPanel">
 
-  <!-- TopNavBar -->
-  <header class="fixed top-0 w-full z-50 flex items-center justify-between px-6 h-16 bg-[#131317]/80 backdrop-blur-xl shadow-[0_8px_32px_0_rgba(0,0,0,0.3)]">
-    <div class="flex items-center gap-8">
-      <span class="text-xl font-black tracking-tighter text-[#00F5D4]">DeepSeekFS</span>
-      <nav class="hidden md:flex items-center gap-1 font-['Inter'] font-medium text-sm tracking-tight">
-        <a class="bg-[#2D2D32] text-[#00F5D4] rounded-full px-4 py-1.5 backdrop-blur-md" href="#">Explorer</a>
-        <a class="text-slate-400 px-4 py-1.5 hover:text-[#00F5D4] transition-colors duration-200" href="#">Hybrid Search</a>
-        <a class="text-slate-400 px-4 py-1.5 hover:text-[#00F5D4] transition-colors duration-200" href="#">Recent</a>
-      </nav>
-    </div>
-    <div class="flex-1 max-w-md mx-8">
-      <div class="relative group">
-        <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-sm">search</span>
-        <input class="w-full bg-surface-container-highest/50 border border-outline-variant/30 rounded-full py-2 pl-10 pr-12 text-sm focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all" placeholder="Search filesystem..." type="text" />
-        <div class="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-          <kbd class="bg-surface-container px-1.5 py-0.5 rounded text-[10px] text-outline border border-outline-variant/50">⌘</kbd>
-          <kbd class="bg-surface-container px-1.5 py-0.5 rounded text-[10px] text-outline border border-outline-variant/50">K</kbd>
+    <!-- ══════════ SEARCH BAR ══════════ -->
+    <div class="search-section">
+      <div class="search-bar" id="searchBar">
+        <div class="search-icon">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: rgba(255,255,255,0.5)">
+            <circle cx="8.5" cy="8.5" r="6"/>
+            <line x1="13" y1="13" x2="18" y2="18"/>
+          </svg>
+        </div>
+        <input class="search-input" id="searchInput" type="text" placeholder="DeepSeekFS Search" autofocus spellcheck="false" autocomplete="off" />
+        <div class="search-shortcuts">
+          <kbd>⇧</kbd>
+          <kbd>Space</kbd>
         </div>
       </div>
     </div>
-    <div class="flex items-center gap-4">
-      <button class="text-slate-400 hover:text-[#00F5D4] transition-colors duration-200">
-        <span class="material-symbols-outlined" data-icon="settings">settings</span>
-      </button>
-      <div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant/50">
-        <img alt="User Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAP_iEhpaoLhgbjN4YJdHAYrzkckIaA5HT3WwxgRFWqrtNpV_MxbkxEQ9R41CiofutWlHFO6ZR5r9N0m9qNugfEPdLYljcNwkAEVCWzGMldXrjF6CkynqEzm1mJVYkaOmx3gIuIdy3DY_2OnzsZsdbblVs8U5FzkToacWeb2ZScDIfeHvyCVN_CAYmGuIzaSEgnrUZyQAhrxB6DXhTMbuKQvuqHNXnyCa7D_E_xncClT1b35HgU2rnaxdhiMicDYjJnw3RqrFj-3p84" />
+
+    <!-- ══════════ SCOPE PILLS ══════════ -->
+    <div class="scope-bar">
+      <div class="scope-pill active" data-scope="all">All</div>
+      <div class="scope-pill" data-scope="files">Files</div>
+      <div class="scope-pill" data-scope="folders">Folders</div>
+      <div class="scope-pill" data-scope="code">Code</div>
+      <div class="scope-pill" data-scope="docs">Documents</div>
+      <div class="scope-pill" data-scope="media">Media</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ══════════ RESULTS ══════════ -->
+    <div class="results-area" id="resultsArea">
+
+      <!-- ── TOP HIT ── -->
+      <div class="category-section">
+        <div class="category-header">
+          <span class="category-title">Top Hit</span>
+        </div>
+        <div class="result-row top-hit selected" data-index="0">
+          <div class="result-icon-frame app" style="background: rgba(53,114,165,0.14); border-color: rgba(53,114,165,0.18);">🐍</div>
+          <div class="result-text">
+            <div class="result-name">core_engine.py</div>
+            <div class="result-path">~/dev/deepseekfs/core/indexing/core_engine.py</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-py">PY</span>
+            <span class="result-score">97%</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── FILES ── -->
+      <div class="category-section">
+        <div class="category-header">
+          <span class="category-title">Files</span>
+          <span class="category-count">12 results</span>
+        </div>
+
+        <div class="result-row" data-index="1">
+          <div class="result-icon-frame file">🐍</div>
+          <div class="result-text">
+            <div class="result-name">semantic_search.py</div>
+            <div class="result-path">~/dev/deepseekfs/core/search/semantic_search.py</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-py">PY</span>
+            <span class="result-score">94%</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+
+        <div class="result-row" data-index="2">
+          <div class="result-icon-frame file">{}</div>
+          <div class="result-text">
+            <div class="result-name">user_config.json</div>
+            <div class="result-path">~/dev/deepseekfs/storage/user_config.json</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-json">JSON</span>
+            <span class="result-score">89%</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+
+        <div class="result-row" data-index="3">
+          <div class="result-icon-frame file">📄</div>
+          <div class="result-text">
+            <div class="result-name">README.md</div>
+            <div class="result-path">~/dev/deepseekfs/README.md</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-md">MD</span>
+            <span class="result-score">86%</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+
+        <div class="result-row" data-index="4">
+          <div class="result-icon-frame file">⚡</div>
+          <div class="result-text">
+            <div class="result-name">index_builder.py</div>
+            <div class="result-path">~/dev/deepseekfs/core/indexing/index_builder.py</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-py">PY</span>
+            <span class="result-score">82%</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── FOLDERS ── -->
+      <div class="category-section">
+        <div class="category-header">
+          <span class="category-title">Folders</span>
+          <span class="category-count">3 results</span>
+        </div>
+
+        <div class="result-row" data-index="5">
+          <div class="result-icon-frame folder">📁</div>
+          <div class="result-text">
+            <div class="result-name">core</div>
+            <div class="result-path">~/dev/deepseekfs/core/</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-dir">DIR</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+
+        <div class="result-row" data-index="6">
+          <div class="result-icon-frame folder">📁</div>
+          <div class="result-text">
+            <div class="result-name">storage</div>
+            <div class="result-path">~/dev/deepseekfs/storage/</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-dir">DIR</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+
+        <div class="result-row" data-index="7">
+          <div class="result-icon-frame folder">📁</div>
+          <div class="result-text">
+            <div class="result-name">aifs</div>
+            <div class="result-path">~/dev/deepseekfs/aifs/</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-badge badge-dir">DIR</span>
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ACTIONS ── -->
+      <div class="category-section">
+        <div class="category-header">
+          <span class="category-title">Quick Actions</span>
+        </div>
+        <div class="action-cards">
+          <div class="action-card">
+            <div class="action-card-icon" style="background: rgba(191,90,242,0.12); border-radius: 10px;">🔄</div>
+            <span class="action-card-label">Re-index</span>
+            <span class="action-card-shortcut">⌘ R</span>
+          </div>
+          <div class="action-card">
+            <div class="action-card-icon" style="background: rgba(0,122,255,0.12); border-radius: 10px;">📂</div>
+            <span class="action-card-label">Add Watch Path</span>
+            <span class="action-card-shortcut">⌘ O</span>
+          </div>
+          <div class="action-card">
+            <div class="action-card-icon" style="background: rgba(255,159,10,0.12); border-radius: 10px;">⚙️</div>
+            <span class="action-card-label">Settings</span>
+            <span class="action-card-shortcut">⌘ ,</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SUGGESTIONS ── -->
+      <div class="category-section">
+        <div class="category-header">
+          <span class="category-title">Suggestions</span>
+        </div>
+        <div class="result-row" data-index="8">
+          <div class="result-icon-frame suggest">💡</div>
+          <div class="result-text">
+            <div class="result-name">Search by semantic meaning</div>
+            <div class="result-path">Use natural language — "files about machine learning"</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+        <div class="result-row" data-index="9">
+          <div class="result-icon-frame suggest">🧠</div>
+          <div class="result-text">
+            <div class="result-name">Hybrid vector search</div>
+            <div class="result-path">Combines BM25 keyword + neural embedding retrieval</div>
+          </div>
+          <div class="result-meta">
+            <span class="result-arrow">›</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════ BOTTOM BAR ══════════ -->
+    <div class="bottom-bar">
+      <div class="bottom-left">
+        <div class="bottom-brand"><span>DeepSeekFS</span></div>
+        <div class="bottom-status">
+          <span class="status-dot"></span>
+          1,402,991 nodes indexed
+        </div>
+      </div>
+      <div class="bottom-hints">
+        <div class="hint"><kbd>↑</kbd><kbd>↓</kbd> navigate</div>
+        <div class="hint"><kbd>↵</kbd> open</div>
+        <div class="hint"><kbd>⌘</kbd><kbd>C</kbd> copy</div>
+        <div class="hint"><kbd>Esc</kbd> close</div>
       </div>
     </div>
-  </header>
-
-  <div class="flex h-screen pt-16 pb-8">
-
-    <!-- SideNavBar (Left Panel) -->
-    <aside class="w-64 fixed left-0 top-16 bottom-8 flex flex-col bg-[#2D2D32] font-['JetBrains_Mono'] text-xs uppercase tracking-widest overflow-y-auto border-r border-outline-variant/10">
-      <div class="p-6">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="material-symbols-outlined text-[#00F5D4] text-sm" data-icon="account_tree">account_tree</span>
-          <span class="text-[#00F5D4] font-bold">FILESYSTEM CORE</span>
-        </div>
-        <span class="text-slate-500 text-[10px]">v2.4.0-stable</span>
-      </div>
-      <nav class="flex-1 space-y-1">
-        <div class="border-l-2 border-[#00F5D4] bg-[#131317] text-[#00F5D4] font-bold py-3 px-6 flex items-center gap-3">
-          <span class="material-symbols-outlined text-sm" data-icon="folder">folder</span>
-          Root
-        </div>
-        <div class="text-slate-500 py-3 px-6 flex items-center gap-3 hover:bg-[#131317]/50 hover:text-slate-200 transition-all cursor-pointer">
-          <span class="material-symbols-outlined text-sm" data-icon="description">description</span>
-          Documents
-        </div>
-        <div class="text-slate-500 py-3 px-6 flex items-center gap-3 hover:bg-[#131317]/50 hover:text-slate-200 transition-all cursor-pointer">
-          <span class="material-symbols-outlined text-sm" data-icon="account_tree">account_tree</span>
-          Projects
-        </div>
-        <div class="text-slate-500 py-3 px-6 flex items-center gap-3 hover:bg-[#131317]/50 hover:text-slate-200 transition-all cursor-pointer">
-          <span class="material-symbols-outlined text-sm" data-icon="archive">archive</span>
-          Archives
-        </div>
-        <div class="mt-8 px-6 space-y-4">
-          <div class="flex items-center gap-3 text-slate-400 py-1 hover:text-white transition-colors cursor-pointer">
-            <span class="w-1.5 h-1.5 rounded-full bg-primary-container shadow-[0_0_8px_rgba(0,245,212,0.6)]"></span>
-            <span class="normal-case tracking-normal font-sans">main.py</span>
-          </div>
-          <div class="flex items-center gap-3 text-slate-400 py-1 hover:text-white transition-colors cursor-pointer">
-            <span class="w-1.5 h-1.5 rounded-full bg-secondary shadow-[0_0_8px_rgba(123,97,255,0.6)]"></span>
-            <span class="normal-case tracking-normal font-sans">config.json</span>
-          </div>
-        </div>
-      </nav>
-      <div class="p-6 mt-auto">
-        <button class="w-full py-2 bg-[#131317] border border-outline-variant/30 text-[#00F5D4] text-[10px] font-bold rounded hover:bg-[#00F5D4] hover:text-[#131317] transition-all">
-          NEW VOLUME
-        </button>
-      </div>
-    </aside>
-
-    <!-- Main Content (Center Panel) -->
-    <main class="ml-64 mr-72 flex-1 bg-[#1A1A1E] overflow-y-auto p-8">
-      <div class="flex items-center justify-between mb-8">
-        <div>
-          <h1 class="text-2xl font-bold tracking-tight mb-1">Project Obsidian</h1>
-          <div class="flex items-center gap-3">
-            <span class="px-2 py-0.5 rounded-full bg-primary-container/10 text-primary-container text-[10px] font-bold border border-primary-container/20">HYBRID INDEXED</span>
-            <span class="text-outline text-xs font-mono">/root/dev/obsidian-arch</span>
-          </div>
-        </div>
-        <div class="flex gap-2">
-          <button class="p-2 rounded bg-surface-container-high text-outline hover:text-white transition-colors">
-            <span class="material-symbols-outlined text-sm">grid_view</span>
-          </button>
-          <button class="p-2 rounded bg-surface-container-high/40 text-outline/50">
-            <span class="material-symbols-outlined text-sm">list</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Bento Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <!-- Python Card -->
-        <div class="glass-card rounded-xl p-5 ghost-border-cyan flex flex-col group cursor-pointer hover:bg-surface-container-highest transition-all duration-300">
-          <div class="flex items-start justify-between mb-4">
-            <span class="material-symbols-outlined text-primary-container text-3xl" data-icon="terminal">terminal</span>
-            <span class="px-2 py-0.5 rounded-full bg-primary-container/10 text-primary-container text-[10px] font-bold uppercase tracking-wider">Python</span>
-          </div>
-          <h3 class="font-mono text-sm mb-1 group-hover:text-primary-container transition-colors">core_engine.py</h3>
-          <p class="text-xs text-outline mb-6 leading-relaxed">Neural indexing logic for hybrid vector search optimization.</p>
-          <div class="mt-auto flex items-center justify-between text-[10px] font-mono text-outline/60">
-            <span>12.4 KB</span>
-            <span>2h ago</span>
-          </div>
-        </div>
-
-        <!-- JSON Card -->
-        <div class="glass-card rounded-xl p-5 ghost-border-violet flex flex-col group cursor-pointer hover:bg-surface-container-highest transition-all duration-300">
-          <div class="flex items-start justify-between mb-4">
-            <span class="material-symbols-outlined text-secondary text-3xl" data-icon="settings_ethernet">settings_ethernet</span>
-            <span class="px-2 py-0.5 rounded-full bg-secondary/10 text-secondary text-[10px] font-bold uppercase tracking-wider">JSON</span>
-          </div>
-          <h3 class="font-mono text-sm mb-1 group-hover:text-secondary transition-colors">schema.json</h3>
-          <p class="text-xs text-outline mb-6 leading-relaxed">Metadata definitions for multi-tenant filesystem isolation.</p>
-          <div class="mt-auto flex items-center justify-between text-[10px] font-mono text-outline/60">
-            <span>4.1 KB</span>
-            <span>5m ago</span>
-          </div>
-        </div>
-
-        <!-- PNG Card -->
-        <div class="glass-card rounded-xl p-5 ghost-border-orange flex flex-col group cursor-pointer hover:bg-surface-container-highest transition-all duration-300">
-          <div class="flex items-start justify-between mb-4">
-            <span class="material-symbols-outlined text-tertiary-fixed-dim text-3xl" data-icon="image">image</span>
-            <span class="px-2 py-0.5 rounded-full bg-tertiary-fixed-dim/10 text-tertiary-fixed-dim text-[10px] font-bold uppercase tracking-wider">PNG</span>
-          </div>
-          <h3 class="font-mono text-sm mb-1 group-hover:text-tertiary-fixed-dim transition-colors">blueprint_v2.png</h3>
-          <div class="relative w-full h-24 rounded overflow-hidden mb-4 bg-surface-container-low">
-            <img alt="Blueprint preview" class="w-full h-full object-cover opacity-50 group-hover:opacity-100 transition-opacity" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCT6RiihQjqWV5eQX3hPc1Su5_XDxgFp6cts6Z6F1gFaeu9Bm-rPMX0sebZB30rLYmuSFO0beNMZr7QF2qmR4FnFCJUMgqxzu3wfM5eZbSGXRjYRs2Ld3Yw0yKFhnpXMPhhWTtuLjpZuNkKA8z_rNI2vMbGciNnnml0vCjkCKd01nuJwEriPTN6m6oSCDa8C9bbr_s3u6a3hJ7abMEKNFuIFHC2LrEKDFpk0oIQPoi497r2sjuwOXtAFodTE96hETjH-NWpVXk9rrzc" />
-          </div>
-          <div class="mt-auto flex items-center justify-between text-[10px] font-mono text-outline/60">
-            <span>2.8 MB</span>
-            <span>Yesterday</span>
-          </div>
-        </div>
-
-        <!-- Large Featured Card -->
-        <div class="col-span-full md:col-span-2 glass-card rounded-xl p-6 ghost-border-cyan flex gap-6 group cursor-pointer hover:bg-surface-container-highest transition-all">
-          <div class="w-1/3 h-full min-h-[160px] bg-surface-container-lowest rounded-lg border border-outline-variant/20 p-4 font-mono text-[10px] text-primary-container/80 overflow-hidden leading-tight">
-            <div class="mb-1">def index_vector(data):</div>
-            <div class="pl-4 mb-1">result = []</div>
-            <div class="pl-4 mb-1">for item in data:</div>
-            <div class="pl-8 mb-1"># High-perf slice</div>
-            <div class="pl-8 mb-1">v = process(item)</div>
-            <div class="pl-8">result.append(v)</div>
-          </div>
-          <div class="flex-1 flex flex-col">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="material-symbols-outlined text-primary-container text-sm" data-icon="verified">verified</span>
-              <span class="text-primary-container text-[10px] font-bold">OPTIMIZED MODULE</span>
-            </div>
-            <h3 class="text-lg font-bold mb-2">Vectorization Engine</h3>
-            <p class="text-sm text-outline mb-4">Current efficiency rating: 98.4%. Processed 1.2M nodes in the last cycle without latency spikes.</p>
-            <div class="mt-auto flex gap-4">
-              <div class="flex items-center gap-1 text-[10px] font-mono text-outline">
-                <span class="material-symbols-outlined text-[14px]" data-icon="memory">memory</span>
-                256MB RAM
-              </div>
-              <div class="flex items-center gap-1 text-[10px] font-mono text-outline">
-                <span class="material-symbols-outlined text-[14px]" data-icon="speed">speed</span>
-                12ms LATENCY
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </main>
-
-    <!-- Right Panel (Inspector) -->
-    <aside class="w-72 fixed right-0 top-16 bottom-8 bg-surface-container-low border-l border-outline-variant/10 flex flex-col">
-      <div class="flex border-b border-outline-variant/10">
-        <button class="flex-1 py-3 text-[10px] font-bold text-primary-container border-b-2 border-primary-container bg-surface-container-high/50">ANALYSIS</button>
-        <button class="flex-1 py-3 text-[10px] font-bold text-outline hover:text-white transition-colors">METADATA</button>
-        <button class="flex-1 py-3 text-[10px] font-bold text-outline hover:text-white transition-colors">SIGNALS</button>
-      </div>
-      <div class="p-6 space-y-8 flex-1 overflow-y-auto">
-        <section>
-          <h4 class="text-[10px] font-bold text-outline uppercase tracking-widest mb-4">Resource Distribution</h4>
-          <div class="space-y-4">
-            <div>
-              <div class="flex justify-between text-[10px] mb-1 font-mono">
-                <span>Compute</span>
-                <span>82%</span>
-              </div>
-              <div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
-                <div class="h-full bg-gradient-to-r from-primary-container to-secondary w-[82%]"></div>
-              </div>
-            </div>
-            <div>
-              <div class="flex justify-between text-[10px] mb-1 font-mono">
-                <span>IO Throughput</span>
-                <span>45%</span>
-              </div>
-              <div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
-                <div class="h-full bg-gradient-to-r from-primary-container to-secondary w-[45%]"></div>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section>
-          <h4 class="text-[10px] font-bold text-outline uppercase tracking-widest mb-4">Active Signals</h4>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-2 py-1 rounded bg-surface-container-highest border border-primary-container/30 text-primary-container text-[10px] font-mono">LOCKED_WRITE</span>
-            <span class="px-2 py-1 rounded bg-surface-container-highest border border-secondary/30 text-secondary text-[10px] font-mono">SYNC_PENDING</span>
-            <span class="px-2 py-1 rounded bg-surface-container-highest border border-tertiary-fixed-dim/30 text-tertiary-fixed-dim text-[10px] font-mono">ENCRYPTED_AES256</span>
-          </div>
-        </section>
-        <section class="mt-auto space-y-3">
-          <button class="w-full py-3 bg-gradient-to-r from-secondary-container to-secondary text-on-secondary font-bold text-xs rounded-lg shadow-lg shadow-secondary-container/20 hover:scale-[1.02] transition-transform">
-            Open in Workspace
-          </button>
-          <button class="w-full py-3 border border-outline-variant/50 text-white font-bold text-xs rounded-lg hover:bg-surface-container-highest transition-colors">
-            Share Access
-          </button>
-        </section>
-      </div>
-    </aside>
 
   </div>
 
-  <!-- Footer (Status Bar) -->
-  <footer class="fixed bottom-0 w-full z-50 h-8 flex items-center justify-between px-4 bg-[#131317] border-t border-transparent bg-gradient-to-r from-[#00F5D4]/20 via-transparent to-transparent">
-    <div class="flex items-center gap-6 font-['JetBrains_Mono'] text-[10px] uppercase tracking-[0.2em] font-semibold text-slate-600">
-      <div class="flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse"></span>
-        <span class="text-[#00F5D4]">latency: 12ms</span>
-      </div>
-      <span>sync: active</span>
-      <span class="text-slate-800">|</span>
-      <span>Uptime: 142h 12m</span>
-    </div>
-    <div class="flex items-center gap-6 font-['JetBrains_Mono'] text-[10px] uppercase tracking-[0.2em] font-semibold">
-      <span class="text-slate-600">Index: <span class="text-white">1,402,991 nodes</span></span>
-      <span class="text-[#00F5D4]">DEEPSEEK_FILESYSTEM_OS_CORE_READY</span>
-    </div>
-  </footer>
+  <script>
+    /* ═══════════════════════════════════════════════════════════
+       INTERACTIVE BEHAVIOR
+       ═══════════════════════════════════════════════════════════ */
+    (() => {
+      'use strict';
 
+      const rows = document.querySelectorAll('.result-row');
+      const pills = document.querySelectorAll('.scope-pill');
+      const searchInput = document.getElementById('searchInput');
+      let selectedIndex = 0;
+
+      // ── Keyboard Navigation ──────────────────────────────────
+      function updateSelection(newIndex) {
+        if (newIndex < 0 || newIndex >= rows.length) return;
+        rows[selectedIndex]?.classList.remove('selected');
+        selectedIndex = newIndex;
+        rows[selectedIndex]?.classList.add('selected');
+        rows[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          updateSelection(selectedIndex + 1);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          updateSelection(selectedIndex - 1);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const selected = rows[selectedIndex];
+          if (selected) {
+            selected.style.transform = 'scale(0.98)';
+            setTimeout(() => { selected.style.transform = ''; }, 150);
+          }
+        } else if (e.key === 'Escape') {
+          // In real app: hide panel
+          searchInput.value = '';
+          searchInput.focus();
+        }
+      });
+
+      // ── Row hover ─────────────────────────────────────────────
+      rows.forEach((row, i) => {
+        row.addEventListener('mouseenter', () => {
+          rows[selectedIndex]?.classList.remove('selected');
+          selectedIndex = i;
+          row.classList.add('selected');
+        });
+
+        row.addEventListener('click', () => {
+          row.style.transform = 'scale(0.98)';
+          setTimeout(() => { row.style.transform = ''; }, 150);
+        });
+      });
+
+      // ── Scope pills ──────────────────────────────────────────
+      pills.forEach(pill => {
+        pill.addEventListener('click', () => {
+          pills.forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+        });
+      });
+
+      // ── Search input live effect ─────────────────────────────
+      searchInput.addEventListener('input', () => {
+        const query = searchInput.value.trim().toLowerCase();
+        rows.forEach(row => {
+          const name = row.querySelector('.result-name')?.textContent.toLowerCase() || '';
+          const path = row.querySelector('.result-path')?.textContent.toLowerCase() || '';
+          if (!query || name.includes(query) || path.includes(query)) {
+            row.style.display = '';
+          } else {
+            row.style.display = 'none';
+          }
+        });
+      });
+
+      // ── Focus input on load ──────────────────────────────────
+      searchInput.focus();
+    })();
+  </script>
 </body>
 </html>

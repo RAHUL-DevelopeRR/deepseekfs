@@ -956,17 +956,6 @@ class SearchPanel(QWidget):
         self._fade.setStartValue(0.0)
         self._fade.setEndValue(1.0)
         self._fade.start()
-        self._visible = True
-
-    def _hide_panel(self):
-        self._close_settings()
-        self._fade.stop()
-        self._fade.setStartValue(self.windowOpacity())
-        self._fade.setEndValue(0.0)
-        self._fade.finished.connect(self._on_fade_out_done)
-        self._fade.start()
-        self._visible = False
-
     def _on_fade_out_done(self):
         self.hide()
         try:
@@ -1099,24 +1088,20 @@ class SearchPanel(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Entry point
+# Entry point — macOS Tahoe Spotlight (dv-4.1)
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("DeepSeekFS")
-    app.setApplicationVersion("6.0.0")
+    app.setApplicationVersion("4.1.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(True)
 
     service = DesktopService()
 
-    # ── Launch the new full interface window ──────────────────
-    from ui.main_window import DeepSeekMainWindow
-    main_window = DeepSeekMainWindow()
-    main_window.show()
-
-    # ── Keep the Shift+Space search panel overlay ────────────
-    panel = SearchPanel(service)
+    # ── Launch the Spotlight panel as the primary UI ──────────
+    from ui.spotlight_panel import SpotlightPanel, HotkeyFilter as SpotlightHotkeyFilter
+    panel = SpotlightPanel(service)
 
     # Register global hotkey: Shift+Space
     hotkey_ok = False
@@ -1126,10 +1111,13 @@ def main():
         )
         if hotkey_ok:
             logger.info("Global hotkey registered: Shift+Space")
-            event_filter = HotkeyFilter(panel.toggle_panel)
+            event_filter = SpotlightHotkeyFilter(panel.toggle_panel)
             app.installNativeEventFilter(event_filter)
         else:
             logger.warning("Failed to register Shift+Space hotkey")
+
+    # Show panel on startup
+    panel.toggle_panel()
 
     ret = app.exec()
 
@@ -1141,3 +1129,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
