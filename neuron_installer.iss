@@ -74,14 +74,14 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 
 [Run]
 ; Install Ollama if checkbox was selected
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Invoke-WebRequest -Uri '{#OllamaURL}' -OutFile '{tmp}\{#OllamaInstaller}'"""; StatusMsg: "Downloading Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated
-Filename: "{tmp}\{#OllamaInstaller}"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"; StatusMsg: "Installing Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& {{ Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile (Join-Path $env:TEMP 'OllamaSetup.exe') }}"""; StatusMsg: "Downloading Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated
+Filename: "{tmp}\OllamaSetup.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"; StatusMsg: "Installing Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated
 
 ; Pull the model if checkbox was selected
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Start-Process 'ollama' -ArgumentList 'serve' -WindowStyle Hidden; Start-Sleep -Seconds 5; ollama pull llama3.2:1b"""; StatusMsg: "Downloading AI model (llama3.2:1b)..."; Tasks: pullmodel; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Start-Process ollama -ArgumentList 'serve' -WindowStyle Hidden; Start-Sleep 5; & ollama pull llama3.2:1b"""; StatusMsg: "Downloading AI model (llama3.2:1b)..."; Tasks: pullmodel; Flags: runhidden waituntilterminated
 
 ; Warmup the model
-Filename: "{app}\venv\Scripts\python.exe"; Parameters: """{app}\warmup_encyl.py"""; StatusMsg: "Warming up AI engine..."; Tasks: pullmodel; Flags: runhidden waituntilterminated nowait
+Filename: "{app}\venv\Scripts\python.exe"; Parameters: """{app}\warmup_encyl.py"""; StatusMsg: "Warming up AI engine..."; Tasks: pullmodel; Flags: runhidden nowait
 
 ; Launch Neuron
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
