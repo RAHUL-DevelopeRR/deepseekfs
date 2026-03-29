@@ -1,9 +1,11 @@
 ; ═══════════════════════════════════════════════════════════════
-; Neuron v1.0 — Professional Windows Installer (Inno Setup 6)
+; Neuron v4.2 — Professional Windows Installer (Inno Setup 6)
 ; ═══════════════════════════════════════════════════════════════
+; Bundles: Launcher .exe + Source + Python venv + Ollama (optional)
+; Target: Any Windows 10/11 x64 machine
 
 #define MyAppName "Neuron"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "4.2"
 #define MyAppPublisher "Rahul"
 #define MyAppExeName "Neuron.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
@@ -21,24 +23,25 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=NeuronSetup
+OutputBaseFilename=NeuronSetup_v4.2
 SetupIconFile=assets\neuron_icon.ico
 UninstallDisplayIcon={app}\assets\neuron_icon.ico
-UninstallDisplayName={#MyAppName}
+UninstallDisplayName={#MyAppName} {#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+WizardImageFile=assets\wizard_sidebar.bmp
+WizardSmallImageFile=assets\wizard_small.bmp
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DiskSpanning=no
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=4.2.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} — AI-Powered Semantic File Intelligence
 VersionInfoTextVersion={#MyAppVersion}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
-; Welcome & info pages
 DisableWelcomePage=no
 InfoBeforeFile=docs\pre_install_info.txt
 
@@ -46,13 +49,13 @@ InfoBeforeFile=docs\pre_install_info.txt
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-english.WelcomeLabel2=This will install [name/ver] on your computer.%n%nNeuron is an AI-powered semantic file search engine for Windows. It lets you search by meaning, summarize any file with AI, and browse with a Windows 11 native interface.%n%nMinimum Requirements:%n  • Windows 10/11 (64-bit)%n  • 4 GB RAM (8 GB recommended)%n  • 2 GB free disk space%n%nOptional (for AI Summarization):%n  • Ollama (can be installed during setup)%n  • llama3.2:1b model (~700 MB download)
+english.WelcomeLabel2=This will install [name/ver] on your computer.%n%nNeuron is an AI-powered semantic file search engine for Windows. It lets you search by meaning, summarize any file with AI, and browse with a Windows 11 native interface.%n%nMinimum Requirements:%n  - Windows 10/11 (64-bit)%n  - 4 GB RAM (8 GB recommended)%n  - 2 GB free disk space%n%nOptional (for AI Summarization):%n  - Ollama (can be installed during setup)%n  - llama3.2:1b model (~700 MB download)
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "startmenuicon"; Description: "Create Start Menu shortcut"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
+Name: "startmenuicon"; Description: "Create Start Menu shortcut"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "installollama"; Description: "Install Ollama AI engine (required for file summarization)"; GroupDescription: "AI Engine (Encyl):"; Flags: unchecked
-Name: "pullmodel"; Description: "Download llama3.2:1b model (~700 MB — requires internet)"; GroupDescription: "AI Engine (Encyl):"; Flags: unchecked
+Name: "pullmodel"; Description: "Download llama3.2:1b model (~700 MB, requires internet)"; GroupDescription: "AI Engine (Encyl):"; Flags: unchecked
 Name: "addtopath"; Description: "Add Neuron to system PATH"; GroupDescription: "System Integration:"; Flags: unchecked
 
 [Files]
@@ -74,21 +77,20 @@ Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs
 Source: "venv\*"; DestDir: "{app}\venv"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\neuron_icon.ico"; Tasks: startmenuicon
-Name: "{group}\Warmup Encyl AI"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\warmup_encyl.py"""; IconFilename: "{app}\assets\neuron_icon.ico"; Tasks: startmenuicon
-Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\neuron_icon.ico"
+Name: "{group}\Warmup Encyl AI"; Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\warmup_encyl.py"""; IconFilename: "{app}\assets\neuron_icon.ico"
+Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\neuron_icon.ico"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Run]
-; Install Ollama — download to known location, then run
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $out = Join-Path '{tmp}' 'OllamaSetup.exe'; Write-Host 'Downloading Ollama...'; Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile $out -UseBasicParsing; Write-Host 'Download complete.'"""; StatusMsg: "Downloading Ollama (this may take a few minutes)..."; Tasks: installollama; Flags: runhidden waituntilterminated
-Filename: "{tmp}\OllamaSetup.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"; StatusMsg: "Installing Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated skipifdoesntexist
+; Install Ollama — only if not already installed (smart detection)
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install_ollama.ps1"" -TempDir ""{tmp}"""; StatusMsg: "Checking and installing Ollama..."; Tasks: installollama; Flags: runhidden waituntilterminated
 
-; Pull model — start ollama serve, then pull
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); $ollama = Get-Command ollama -ErrorAction SilentlyContinue; if ($ollama) {{ Start-Process ollama -ArgumentList 'serve' -WindowStyle Hidden -ErrorAction SilentlyContinue; Start-Sleep 8; & ollama pull llama3.2:1b }} else {{ Write-Host 'Ollama not found, skipping model pull' }}"""; StatusMsg: "Downloading AI model llama3.2:1b (~700 MB)..."; Tasks: pullmodel; Flags: runhidden waituntilterminated
+; Pull model — smart detection (only if not already present)
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); $ollama = Get-Command ollama -ErrorAction SilentlyContinue; if (-not $ollama) {{ $paths = @('C:\Users\' + $env:USERNAME + '\AppData\Local\Programs\Ollama\ollama.exe', 'C:\Program Files\Ollama\ollama.exe', 'C:\Program Files (x86)\Ollama\ollama.exe'); foreach ($p in $paths) {{ if (Test-Path $p) {{ $ollama = Get-Item $p; break }} }}; }}; if ($ollama) {{ $ollamaPath = if ($ollama.Source) {{ $ollama.Source }} else {{ $ollama.FullName }}; Start-Process $ollamaPath -ArgumentList 'serve' -WindowStyle Hidden -ErrorAction SilentlyContinue; Start-Sleep 8; & $ollamaPath pull llama3.2:1b }} else {{ Write-Host 'Ollama not found' }}"""; StatusMsg: "Downloading AI model llama3.2:1b (~700 MB)..."; Tasks: pullmodel; Flags: runhidden waituntilterminated
 
 ; Warmup model
 Filename: "{app}\venv\Scripts\pythonw.exe"; Parameters: """{app}\warmup_encyl.py"""; StatusMsg: "Warming up AI engine..."; Tasks: pullmodel; Flags: runhidden nowait skipifdoesntexist
