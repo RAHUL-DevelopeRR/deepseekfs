@@ -1,0 +1,41 @@
+═══════════════════════════════════════════════════════════
+                    NEURON v1.0.0
+        AI-Powered Semantic File Intelligence
+═══════════════════════════════════════════════════════════
+
+WHAT IS NEURON?
+
+  Neuron is a Windows desktop application that brings 
+  intelligent semantic search to your files. Unlike 
+  traditional search (which matches filenames), Neuron 
+  understands the MEANING behind your query.
+
+  Search for "quarterly revenue report" and find 
+  "Q3_2024_financial_summary.xlsx" — even though 
+  the words don't match.
+
+FEATURES:
+
+  • Semantic Search   — Search by meaning, not keywords
+  • Encyl AI          — Summarize any file with local AI
+  • Windows 11 UI     — Native Fluent Design interface
+  • Real-time Index   — Auto-index file changes
+  • 100% Local        — No cloud, no telemetry
+  • 40+ File Types    — PDF, DOCX, PPTX, TXT, code...
+
+KEYBOARD SHORTCUT:
+
+  Press  Shift + Space  to open the Neuron search panel.
+
+REQUIREMENTS:
+
+  • Windows 10/11 (64-bit)
+  • 4 GB RAM minimum (8 GB recommended)
+  • 2 GB disk space
+
+OPTIONAL (for AI Summarization):
+
+  • Ollama — select "Install Ollama" on the next page
+  • llama3.2:1b model — select "Download AI model"
+
+═══════════════════════════════════════════════════════════
