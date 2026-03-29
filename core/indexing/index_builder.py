@@ -131,6 +131,19 @@ class _MetadataDB:
         self._conn().execute("DELETE FROM files")
         self._conn().commit()
 
+    def remove_by_path(self, path: str) -> bool:
+        """Remove a file entry by path. Returns True if it existed."""
+        cur = self._conn().execute("DELETE FROM files WHERE path=?", (path,))
+        self._conn().commit()
+        return cur.rowcount > 0
+
+    def get_faiss_id_by_path(self, path: str) -> int | None:
+        """Get the FAISS vector ID for a given path."""
+        row = self._conn().execute(
+            "SELECT faiss_id FROM files WHERE path=? LIMIT 1", (path,)
+        ).fetchone()
+        return row[0] if row else None
+
     def close(self):
         conn = getattr(self._local, "conn", None)
         if conn:
@@ -228,6 +241,16 @@ class IndexBuilder:
                 logger.error(f"Error indexing {norm_path}: {e}")
                 return False
 
+    def remove_file(self, file_path: str) -> bool:
+        """Remove a file from the index (soft delete — marks in SQLite, FAISS vector stays but unused)."""
+        with self.lock:
+            norm_path = str(Path(file_path).resolve())
+            removed = self._db.remove_by_path(norm_path)
+            if removed:
+                self.save()
+                logger.info(f"Removed from index: {norm_path}")
+            return removed
+
     def index_directory(self, directory: str, recursive: bool = True) -> int:
         path = Path(directory)
         count = 0
@@ -300,9 +323,23 @@ class IndexBuilder:
         n_docs = self._db.count()
         if self.index is None or n_docs == 0:
             return [], []
-        k = min(top_k, n_docs)
+        # Search more than needed to compensate for deleted files
+        k = min(top_k * 2, self.index.ntotal)
+        if k == 0:
+            return [], []
         distances, indices = self.index.search(query_embedding, k)
-        return distances[0], indices[0]
+        # Filter out FAISS IDs that no longer exist in metadata (deleted files)
+        valid_d, valid_i = [], []
+        for d, i in zip(distances[0], indices[0]):
+            if i < 0:
+                continue
+            meta = self._db.get_by_faiss_id(int(i))
+            if meta and Path(meta["path"]).exists():
+                valid_d.append(d)
+                valid_i.append(i)
+                if len(valid_d) >= top_k:
+                    break
+        return valid_d, valid_i
 
     def get_metadata_by_faiss_id(self, fid: int) -> dict | None:
         return self._db.get_by_faiss_id(fid)

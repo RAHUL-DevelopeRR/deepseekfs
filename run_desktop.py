@@ -1097,6 +1097,15 @@ def main():
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(True)
 
+    # Ensure hotkey cleanup on any exit
+    import atexit, signal
+    def _cleanup():
+        try: ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+        except Exception as e: logger.error(f"Hotkey cleanup failed: {e}")
+    atexit.register(_cleanup)
+    signal.signal(signal.SIGINT, lambda *_: (_cleanup(), sys.exit(0)))
+    signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
+
     service = DesktopService()
 
     # ── Launch the Spotlight panel as the primary UI ──────────
@@ -1106,6 +1115,9 @@ def main():
     # Register global hotkey: Shift+Space
     hotkey_ok = False
     if platform.system() == "Windows":
+        # Unregister first in case previous process left it registered
+        ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+        import time; time.sleep(0.1)
         hotkey_ok = ctypes.windll.user32.RegisterHotKey(
             None, HOTKEY_ID, MOD_SHIFT, VK_SPACE
         )
@@ -1114,7 +1126,7 @@ def main():
             event_filter = SpotlightHotkeyFilter(panel.toggle_panel)
             app.installNativeEventFilter(event_filter)
         else:
-            logger.warning("Failed to register Shift+Space hotkey")
+            logger.warning("Failed to register Shift+Space hotkey — another instance may be running")
 
     # Show panel on startup
     panel.toggle_panel()

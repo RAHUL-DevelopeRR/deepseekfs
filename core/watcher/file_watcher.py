@@ -1,4 +1,4 @@
-"""Watch file system for changes"""
+"""Watch file system for changes — create, modify, delete, move"""
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from pathlib import Path
@@ -19,7 +19,22 @@ class FileEventHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if not event.is_directory:
             self._process_file(event.src_path)
-    
+
+    def on_deleted(self, event):
+        """Remove deleted files from the index."""
+        if not event.is_directory:
+            path = str(Path(event.src_path).resolve())
+            if self.index_builder.remove_file(path):
+                logger.info(f"File removed from index: {event.src_path}")
+
+    def on_moved(self, event):
+        """Handle file renames/moves — remove old, add new."""
+        if not event.is_directory:
+            old_path = str(Path(event.src_path).resolve())
+            self.index_builder.remove_file(old_path)
+            self._process_file(event.dest_path)
+            logger.info(f"File moved: {event.src_path} → {event.dest_path}")
+
     def _process_file(self, file_path: str):
         """Process file if supported"""
         ext = Path(file_path).suffix.lower()
@@ -53,3 +68,4 @@ class FileWatcher:
         self.observer.stop()
         self.observer.join()
         logger.info("File watcher stopped")
+

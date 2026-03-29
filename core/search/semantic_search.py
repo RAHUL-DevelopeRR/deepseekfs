@@ -105,18 +105,28 @@ class SemanticSearch:
                 distance = float(distances[i])
                 base_similarity = 1 / (1 + distance)
 
-                # ── Keyword bonus ─────────────────────────────
+                # ── Keyword / filename bonus ──────────────────
                 name_lower = meta.get("name", "").lower()
                 query_lower = search_text.lower().strip()
-                query_words = [w for w in query_lower.split() if len(w) > 2]
+                query_words = [w for w in query_lower.split() if len(w) >= 2]
 
                 keyword_bonus = 0.0
-                if query_lower and query_lower in name_lower:
-                    keyword_bonus = 0.40
+                # Exact filename match (strongest signal)
+                if query_lower and (query_lower == name_lower or
+                                     query_lower == name_lower.rsplit('.', 1)[0]):
+                    keyword_bonus = 0.85
+                # Filename contains query
+                elif query_lower and query_lower in name_lower:
+                    keyword_bonus = 0.55
+                # All query words in filename
                 elif query_words and all(w in name_lower for w in query_words):
-                    keyword_bonus = 0.25
+                    keyword_bonus = 0.35
+                # Any query word in filename
                 elif query_words and any(w in name_lower for w in query_words):
-                    keyword_bonus = 0.10
+                    keyword_bonus = 0.15
+                # Any query word in file path
+                elif query_words and any(w in file_path_lower for w in query_words):
+                    keyword_bonus = 0.08
 
                 similarity = min(1.0, base_similarity + keyword_bonus)
 
@@ -166,6 +176,54 @@ class SemanticSearch:
                 })
 
             results.sort(key=lambda x: x["combined_score"], reverse=True)
+
+            # ── Direct filename search (catches what FAISS misses) ──
+            result_paths = {r["path"] for r in results}
+            query_lower = search_text.lower().strip()
+            if query_lower and len(query_lower) >= 2:
+                try:
+                    db = index_builder._db
+                    conn = db._conn()
+                    # Search by filename LIKE pattern
+                    pattern = f"%{query_lower}%"
+                    rows = conn.execute(
+                        "SELECT * FROM files WHERE LOWER(name) LIKE ? LIMIT ?",
+                        (pattern, top_k)
+                    ).fetchall()
+                    for row in rows:
+                        row_dict = dict(row)
+                        fpath = row_dict["path"]
+                        if fpath in result_paths:
+                            continue
+                        if not Path(fpath).exists():
+                            continue
+                        name = row_dict.get("name", "")
+                        name_l = name.lower()
+                        # Score: exact match > contains > partial
+                        if query_lower == name_l or query_lower == name_l.rsplit('.', 1)[0]:
+                            fn_score = 0.95
+                        elif query_lower in name_l:
+                            fn_score = 0.75
+                        else:
+                            fn_score = 0.60
+                        results.append({
+                            "path": fpath,
+                            "name": name,
+                            "extension": row_dict.get("extension", ""),
+                            "size": row_dict.get("size", 0),
+                            "modified_time": row_dict.get("modified_time", 0),
+                            "semantic_score": round(fn_score, 4),
+                            "time_score": 0.5,
+                            "combined_score": round(fn_score, 4),
+                            "open_count": row_dict.get("open_count", 0),
+                        })
+                        result_paths.add(fpath)
+                except Exception as e:
+                    logger.warning(f"Filename search fallback error: {e}")
+
+                # Re-sort after merging filename matches
+                results.sort(key=lambda x: x["combined_score"], reverse=True)
+
             results = results[:top_k]
 
             logger.info(f"Query: '{query}' -> {len(results)} results")

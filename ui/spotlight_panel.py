@@ -34,6 +34,11 @@ from PyQt6.QtGui import (
 import app.config as config
 from app.logger import logger
 from services.desktop_service import DesktopService
+from services.ollama_service import get_ollama
+
+# ── resolve assets path ──────────────────────────────────────
+_ASSETS = Path(__file__).resolve().parent.parent / "assets"
+_ICON   = _ASSETS / "icon.ico"
 
 # ═════════════════════════════════════════════════════════════
 # DESIGN CONSTANTS  —  Apple-grade visual language
@@ -169,6 +174,42 @@ class SearchThread(QThread):
         try:    self.results.emit(self._s.search(self._q, self._k))
         except Exception as e: self.error.emit(str(e))
 
+class AskAIThread(QThread):
+    """Ask Ollama a question grounded in file search results."""
+    answer = pyqtSignal(str)
+    error  = pyqtSignal(str)
+    def __init__(self, question: str, file_contexts: list):
+        super().__init__()
+        self._q, self._ctx = question, file_contexts
+    def run(self):
+        try:
+            ai = get_ollama()
+            if not ai.is_available():
+                self.error.emit("Ollama not running. Start with: ollama serve")
+                return
+            ans = ai.ask_about_files(self._q, self._ctx)
+            self.answer.emit(ans)
+        except Exception as e:
+            self.error.emit(str(e))
+
+class SummarizeThread(QThread):
+    """Summarize a single file via Ollama."""
+    summary = pyqtSignal(str, str)  # (path, summary text)
+    error   = pyqtSignal(str)
+    def __init__(self, path: str):
+        super().__init__()
+        self._path = path
+    def run(self):
+        try:
+            ai = get_ollama()
+            if not ai.is_available():
+                self.error.emit("Ollama not running. Start with: ollama serve")
+                return
+            s = ai.summarize_file(self._path)
+            self.summary.emit(self._path, s)
+        except Exception as e:
+            self.error.emit(str(e))
+
 
 # ═════════════════════════════════════════════════════════════
 # Micro-widgets
@@ -217,7 +258,7 @@ class GlowSearchBar(QFrame):
 
         # the actual input
         self.inp = QLineEdit()
-        self.inp.setPlaceholderText("Search your files…")
+        self.inp.setPlaceholderText("Search files… or type ? to ask Encyl")
         self.inp.setStyleSheet(f"""
             QLineEdit {{
                 border: none; background: transparent;
@@ -656,6 +697,9 @@ class SpotlightPanel(QWidget):
         self._settings: SettingsOverlay | None = None
         self._it: IndexThread | None = None
         self._st: SearchThread | None = None
+        self._ait: AskAIThread | None = None
+        self._smt: SummarizeThread | None = None
+        self._ai_panel: QFrame | None = None
 
         self._deb = QTimer(self)
         self._deb.setSingleShot(True)
@@ -865,14 +909,23 @@ class SpotlightPanel(QWidget):
         bb.addWidget(self.idx_lbl)
         bb.addStretch()
 
-        for txt in ["↑↓ navigate", "↵ open", "^C copy", "Esc close"]:
+        for txt in ["↑↓ nav", "↵ open", "Tab Encyl", "?query ask", "^C copy", "Esc close"]:
             h = QLabel(txt)
-            h.setStyleSheet(f"font-size: 9.5px; color: rgba(255,255,255,0.14); background: transparent;")
+            h.setStyleSheet(f"font-size: 9px; color: rgba(255,255,255,0.14); background: transparent;")
             bb.addWidget(h)
             if txt != "Esc close":
                 sep = QLabel("·")
                 sep.setStyleSheet("color: rgba(255,255,255,0.10); font-size: 9px; background: transparent;")
                 bb.addWidget(sep)
+
+        # Ollama status
+        ai = get_ollama()
+        ai_ok = ai.is_available()
+        self.ai_lbl = QLabel("🧠 Encyl" if ai_ok else "🧠 ✗")
+        self.ai_lbl.setStyleSheet(f"font-size: 9px; color: {'rgba(52,199,89,0.7)' if ai_ok else 'rgba(255,255,255,0.14)'}; background: transparent; margin-left: 8px;")
+        self.ai_lbl.setToolTip("Encyl AI connected — type ? to ask" if ai_ok else "Encyl offline — start Ollama with 'ollama serve'")
+        bb.addWidget(self.ai_lbl)
+
         root.addLayout(bb)
 
     # ═════════════════════════════════════════════════════════
@@ -979,10 +1032,22 @@ class SpotlightPanel(QWidget):
     # ── tray ─────────────────────────────────────────────────
     def _build_tray(self):
         self._tray = QSystemTrayIcon(self)
+        # Set the actual icon
+        if _ICON.exists():
+            self._tray.setIcon(QIcon(str(_ICON)))
+            QApplication.setWindowIcon(QIcon(str(_ICON)))
         m = QMenu()
-        m.addAction("Show  (Shift+Space)").triggered.connect(self.toggle_panel)
+        m.setStyleSheet("""
+            QMenu { background: #1a1a1e; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; padding: 4px; }
+            QMenu::item { padding: 6px 20px; border-radius: 4px; }
+            QMenu::item:selected { background: rgba(56,156,255,0.3); }
+            QMenu::separator { height: 1px; background: #333; margin: 4px 8px; }
+        """)
+        m.addAction("🔍  Show  (Shift+Space)").triggered.connect(self.toggle_panel)
+        m.addAction("🔄  Re-index").triggered.connect(self._reindex)
+        m.addAction("⚙️  Settings").triggered.connect(self._toggle_settings)
         m.addSeparator()
-        m.addAction("Quit").triggered.connect(self._quit)
+        m.addAction("❌  Quit").triggered.connect(self._quit)
         self._tray.setContextMenu(m)
         self._tray.activated.connect(
             lambda r: self.toggle_panel() if r in (
@@ -1020,6 +1085,16 @@ class SpotlightPanel(QWidget):
     def _do_search(self):
         q = self.search.text().strip()
         if not q: return
+
+        # ── "? question" → Ask AI mode ──
+        if q.startswith("?"):
+            question = q[1:].strip()
+            if not question: return
+            self._ask_ai(question)
+            return
+
+        # ── normal search ──
+        self._dismiss_ai_panel()
         if self._idx_count == 0 and not self._indexing:
             self.status.setText("Index empty — waiting for indexing…"); return
         self.status.setText("Searching…")
@@ -1031,6 +1106,157 @@ class SpotlightPanel(QWidget):
 
     def _on_results(self, hits):
         self._all = hits; self._filter()
+
+    # ── AI BRAIN ─────────────────────────────────────────────
+    def _ask_ai(self, question: str):
+        """Search for relevant files, then ask Ollama about them."""
+        self.status.setText("🧠 Encyl is reading your files…")
+        # First, search for relevant files
+        cfg = self._svc.get_config()
+        try:
+            from core.search.semantic_search import SemanticSearch
+            hits = SemanticSearch().search(question, top_k=cfg.get("top_k", 10))
+        except Exception:
+            hits = []
+
+        if not hits:
+            self.status.setText("No files found for AI context")
+            return
+
+        # Show search results AND ask AI
+        self._all = hits
+        self._filter()
+
+        self.status.setText("🧠 Encyl is thinking…")
+        self._ait = AskAIThread(question, hits)
+        self._ait.answer.connect(lambda ans: self._show_ai_answer(question, ans))
+        self._ait.error.connect(self._handle_encyl_error)
+        self._ait.start()
+
+    def _summarize_selected(self):
+        """Summarize the currently selected file via Ollama."""
+        if not (0 <= self._sel < len(self._rows)):
+            self.status.setText("Select a file first, then press Tab to summarize")
+            return
+        # Check Encyl availability
+        ai = get_ollama()
+        ai.reset_availability()  # force re-check
+        if not ai.is_available():
+            self.status.setText("⚠ Encyl offline — run 'ollama serve' in terminal")
+            self.ai_lbl.setText("🧠 ✗")
+            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
+            return
+        # Update status to show it's connected
+        self.ai_lbl.setText("🧠 Encyl")
+        self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(52,199,89,0.7); background: transparent; margin-left: 8px;")
+
+        path = self._rows[self._sel]._path
+        self.status.setText(f"🧠 Encyl is summarizing {Path(path).name}…")
+        self._smt = SummarizeThread(path)
+        self._smt.summary.connect(self._show_ai_summary)
+        self._smt.error.connect(self._handle_encyl_error)
+        self._smt.start()
+
+    def _show_ai_answer(self, question: str, answer: str):
+        """Display AI answer in a panel above results."""
+        self._dismiss_ai_panel()
+        self._ai_panel = QFrame(self.rw)
+        self._ai_panel.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(56,156,255,0.06);
+                border: 1px solid rgba(56,156,255,0.18);
+                border-radius: 14px;
+            }}
+        """)
+        vb = QVBoxLayout(self._ai_panel)
+        vb.setContentsMargins(18, 14, 18, 14)
+        vb.setSpacing(8)
+
+        # header
+        hdr = QHBoxLayout()
+        hl = QLabel("🧠 Encyl Answer")
+        hl.setStyleSheet(f"font-family: {FN}; font-size: 11px; font-weight: 700; color: #65B8FF; background: transparent;")
+        hdr.addWidget(hl)
+        hdr.addStretch()
+        x = QLabel("✕"); x.setFixedSize(22, 22)
+        x.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        x.setCursor(Qt.CursorShape.PointingHandCursor)
+        x.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); border-radius: 4px;")
+        x.mousePressEvent = lambda e: self._dismiss_ai_panel()
+        hdr.addWidget(x)
+        vb.addLayout(hdr)
+
+        # question
+        ql = QLabel(f'" {question} "')
+        ql.setWordWrap(True)
+        ql.setStyleSheet(f"font-family: {FN}; font-size: 11px; font-style: italic; color: rgba(255,255,255,0.40); background: transparent;")
+        vb.addWidget(ql)
+
+        # answer
+        al = QLabel(answer)
+        al.setWordWrap(True)
+        al.setStyleSheet(f"font-family: {FN}; font-size: 12.5px; font-weight: 400; color: rgba(255,255,255,0.85); background: transparent; line-height: 1.5;")
+        al.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        vb.addWidget(al)
+
+        # insert at top of results layout
+        self.rl.insertWidget(0, self._ai_panel)
+        self.status.setText(f'🧠 Encyl answered "{question[:40]}…"')
+
+    def _show_ai_summary(self, path: str, summary: str):
+        """Display AI summary for a single file."""
+        self._dismiss_ai_panel()
+        name = Path(path).name
+        self._ai_panel = QFrame(self.rw)
+        self._ai_panel.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(52,199,89,0.06);
+                border: 1px solid rgba(52,199,89,0.18);
+                border-radius: 14px;
+            }}
+        """)
+        vb = QVBoxLayout(self._ai_panel)
+        vb.setContentsMargins(18, 14, 18, 14)
+        vb.setSpacing(8)
+
+        hdr = QHBoxLayout()
+        hl = QLabel(f"🧠 Encyl Summary — {name}")
+        hl.setStyleSheet(f"font-family: {FN}; font-size: 11px; font-weight: 700; color: #4ADE80; background: transparent;")
+        hdr.addWidget(hl)
+        hdr.addStretch()
+        x = QLabel("✕"); x.setFixedSize(22, 22)
+        x.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        x.setCursor(Qt.CursorShape.PointingHandCursor)
+        x.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); border-radius: 4px;")
+        x.mousePressEvent = lambda e: self._dismiss_ai_panel()
+        hdr.addWidget(x)
+        vb.addLayout(hdr)
+
+        al = QLabel(summary)
+        al.setWordWrap(True)
+        al.setStyleSheet(f"font-family: {FN}; font-size: 12.5px; font-weight: 400; color: rgba(255,255,255,0.85); background: transparent; line-height: 1.5;")
+        al.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        vb.addWidget(al)
+
+        self.rl.insertWidget(0, self._ai_panel)
+        self.status.setText(f"🧠 Encyl summarized {name}")
+
+    def _dismiss_ai_panel(self):
+        if self._ai_panel:
+            self._ai_panel.hide()
+            self._ai_panel.deleteLater()
+            self._ai_panel = None
+
+    def _handle_encyl_error(self, error_msg: str):
+        """User-friendly error messages for Encyl failures."""
+        if "timed out" in error_msg.lower():
+            self.status.setText("⏳ Encyl is warming up — try again in a few seconds")
+        elif "not running" in error_msg.lower() or "connection" in error_msg.lower():
+            self.status.setText("⚠ Encyl offline — run 'ollama serve' in terminal")
+            self.ai_lbl.setText("🧠 ✗")
+            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
+        else:
+            self.status.setText(f"⚠ Encyl error: {error_msg[:60]}")
 
     # ── file open ────────────────────────────────────────────
     def _open(self, path):
@@ -1115,12 +1341,23 @@ class SpotlightPanel(QWidget):
     # NOTE: No changeEvent override — panel stays until Shift+Space or Esc.
     # This is intentional: the user explicitly requested persistent overlay.
 
+    # ── Tab intercept (Qt steals Tab before keyPressEvent) ─────
+    def event(self, e):
+        """Override event() to catch Tab key before Qt uses it for focus cycling."""
+        from PyQt6.QtCore import QEvent
+        if e.type() == QEvent.Type.KeyPress:
+            if e.key() == Qt.Key.Key_Tab:
+                self._summarize_selected()
+                return True
+        return super().event(e)
+
     def keyPressEvent(self, e):
         k, m = e.key(), e.modifiers()
         if   k == Qt.Key.Key_Escape:                          self._hide()
         elif k == Qt.Key.Key_Down:                             self._move(1)
         elif k == Qt.Key.Key_Up:                               self._move(-1)
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):       self._open_sel()
+        elif k == Qt.Key.Key_I and m & Qt.KeyboardModifier.ControlModifier: self._summarize_selected()
         elif k == Qt.Key.Key_C and m & Qt.KeyboardModifier.ControlModifier: self._copy_sel()
         elif k == Qt.Key.Key_R and m & Qt.KeyboardModifier.ControlModifier: self._reindex()
         elif k == Qt.Key.Key_O and m & Qt.KeyboardModifier.ControlModifier: self._action("add_path")
