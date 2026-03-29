@@ -2,7 +2,7 @@
 import logging
 import sys
 
-def setup_logger(name: str = "deepseekfs") -> logging.Logger:
+def setup_logger(name: str = "neuron") -> logging.Logger:
     """Configure logger with console + file output"""
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)

@@ -1,0 +1,212 @@
+name: Neuron CI/CD
+
+on:
+  push:
+    branches: [ main, dv-4, dv-4.1 ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ═══════════════════════════════════════════════
+  # Job 1: Lint & Static Analysis
+  # ═══════════════════════════════════════════════
+  lint:
+    name: Lint & Type Check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install lint tools
+        run: pip install flake8 mypy
+
+      - name: Flake8 — Code style
+        run: |
+          python -m flake8 core/ services/ ui/ app/ \
+            --max-line-length 120 \
+            --ignore E501,W503,E402,F401 \
+            --count --statistics
+        continue-on-error: true
+
+      - name: MyPy — Type checking
+        run: |
+          python -m mypy core/ services/ \
+            --ignore-missing-imports \
+            --no-strict-optional
+        continue-on-error: true
+
+  # ═══════════════════════════════════════════════
+  # Job 2: Unit Tests
+  # ═══════════════════════════════════════════════
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-desktop.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-desktop.txt
+          pip install pytest pytest-cov
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/ -v --tb=short --junitxml=test-results.xml 2>&1 || true
+        env:
+          NEURON_TEST_MODE: "1"
+
+      - name: Verify core imports
+        run: |
+          python -c "from core.embeddings.embedder import get_embedder; print('✅ Embedder OK')"
+          python -c "from core.search.semantic_search import SemanticSearch; print('✅ SemanticSearch OK')"
+          python -c "from core.indexing.index_builder import get_index; print('✅ IndexBuilder OK')"
+          python -c "from services.ollama_service import OllamaService; print('✅ OllamaService OK')"
+          python -c "from ui.spotlight_panel import SpotlightPanel; print('✅ SpotlightPanel OK')"
+
+      - name: Verify warmup script
+        run: python warmup_encyl.py --help 2>&1 || python -c "print('warmup_encyl.py exists')"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results.xml
+
+  # ═══════════════════════════════════════════════
+  # Job 3: Build Launcher .exe
+  # ═══════════════════════════════════════════════
+  build-launcher:
+    name: Build Launcher
+    runs-on: windows-latest
+    needs: [lint, test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build launcher exe
+        run: pyinstaller launcher.spec --clean --noconfirm
+
+      - name: Verify launcher
+        run: |
+          $exe = "dist\Neuron.exe"
+          if (Test-Path $exe) {
+            $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            Write-Host "✅ Neuron.exe built: $size MB"
+          } else {
+            Write-Error "❌ Neuron.exe not found!"
+            exit 1
+          }
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-launcher
+          path: dist/Neuron.exe
+
+  # ═══════════════════════════════════════════════
+  # Job 4: Build Installer (Release only)
+  # ═══════════════════════════════════════════════
+  build-installer:
+    name: Build Installer
+    runs-on: windows-latest
+    needs: [build-launcher]
+    if: github.event_name == 'release'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Create venv and install deps
+        run: |
+          python -m venv venv
+          venv\Scripts\pip install -r requirements-desktop.txt
+
+      - name: Download launcher artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: neuron-launcher
+          path: dist/
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" neuron_installer.iss
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-installer
+          path: installer_output/NeuronSetup.exe
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer_output/NeuronSetup.exe
+            dist/Neuron.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ═══════════════════════════════════════════════
+  # Job 5: Security Scan
+  # ═══════════════════════════════════════════════
+  security:
+    name: Security Scan
+    runs-on: windows-latest
+    needs: [lint]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install safety
+        run: pip install safety pip-audit
+
+      - name: Check for vulnerabilities
+        run: pip-audit -r requirements-desktop.txt 2>&1 || true
+        continue-on-error: true

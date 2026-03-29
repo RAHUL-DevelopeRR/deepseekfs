@@ -44,3 +44,15 @@ storage/
 # Logs
 *.log
 logs/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+installer_output/
+Neuron.exe
+
+# Neuron data
+*.faiss
+*.db
+storage/neuron_index/

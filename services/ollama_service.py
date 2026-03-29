@@ -1,21 +1,26 @@
 """
-DeepSeekFS — Ollama AI Intelligence Service
-============================================
+Neuron — Ollama AI Intelligence Service
+========================================
 Local LLM integration for file summaries, Q&A, and smart actions.
 Uses Ollama's REST API (http://localhost:11434).
+
+Architecture:
+- Semantic search uses all-MiniLM-L6-v2 (80MB, loaded in RAM at startup)
+- Encyl uses llama3.2:3b via Ollama (~2GB, loaded on first request)
+- Summary cache avoids re-processing the same file
 """
 from __future__ import annotations
 
-import json, time, os
+import json, time, os, hashlib, threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 from app.logger import logger
 
 OLLAMA_URL = "http://localhost:11434"
-MODEL      = "llama3.2:3b"
+MODEL      = "llama3.2:1b"
 TIMEOUT    = 120  # seconds (first call has cold-start penalty)
 
 # ── File content extraction (reuse existing parser) ──────────
@@ -65,11 +70,19 @@ def _read_file_content(path: str, max_chars: int = 4000) -> str:
 
 
 class OllamaService:
-    """Interface to local Ollama LLM for file intelligence."""
+    """Interface to local Ollama LLM for file intelligence.
+
+    Latency optimization:
+    - Summary cache: SHA256(path + mtime) → cached summary (no re-processing)
+    - Pre-warm: Sends a tiny prompt on startup to load model into RAM
+    - Keep-alive: Ollama keeps model in RAM for 5 min after last request
+    """
 
     def __init__(self, model: str = MODEL):
         self._model = model
         self._available: Optional[bool] = None
+        self._summary_cache: Dict[str, str] = {}  # hash → summary
+        self._warmed = False
 
     # ── Health check ─────────────────────────────────────────
     def is_available(self) -> bool:
@@ -93,6 +106,38 @@ class OllamaService:
     def reset_availability(self):
         """Force re-check on next call."""
         self._available = None
+
+    # ── Pre-warm (load model into RAM) ───────────────────────
+    def pre_warm(self):
+        """Send a tiny request to load the model into GPU/RAM.
+        Call this on app startup in a background thread.
+        After this, subsequent requests are 3-5x faster."""
+        if self._warmed:
+            return
+        def _warm():
+            try:
+                if not self.is_available():
+                    return
+                logger.info("Encyl: Pre-warming model (loading into RAM)...")
+                t0 = time.time()
+                self._generate("Say 'ready' in one word.", max_tokens=5)
+                elapsed = time.time() - t0
+                self._warmed = True
+                logger.info(f"Encyl: Model warm — loaded in {elapsed:.1f}s")
+            except Exception as e:
+                logger.info(f"Encyl: Pre-warm failed: {e}")
+        threading.Thread(target=_warm, daemon=True).start()
+
+    # ── Cache key ────────────────────────────────────────────
+    @staticmethod
+    def _cache_key(path: str) -> str:
+        """Hash path + modification time for cache lookup."""
+        try:
+            mtime = os.path.getmtime(path)
+            raw = f"{path}|{mtime}"
+            return hashlib.sha256(raw.encode()).hexdigest()[:16]
+        except Exception:
+            return ""
 
     # ── Core LLM call ────────────────────────────────────────
     def _generate(self, prompt: str, system: str = "", max_tokens: int = 300) -> str:
@@ -127,7 +172,14 @@ class OllamaService:
     # ── Public API ───────────────────────────────────────────
 
     def summarize_file(self, path: str) -> str:
-        """Generate a 2-3 line summary of a file's content."""
+        """Generate a 2-3 line summary of a file's content.
+        Uses cache — same file (unchanged) returns instantly."""
+        # Check cache first
+        key = self._cache_key(path)
+        if key and key in self._summary_cache:
+            logger.info(f"Encyl: Cache hit for {Path(path).name}")
+            return self._summary_cache[key]
+
         content = _read_file_content(path, max_chars=3000)
         if not content:
             return "Could not read file content."
@@ -149,7 +201,14 @@ Content:
             "Do not say 'this file contains' — just describe the content directly."
         )
         result = self._generate(prompt, system, max_tokens=150)
-        return result or "AI summary unavailable."
+        summary = result or "AI summary unavailable."
+
+        # Cache the result
+        if key and result:
+            self._summary_cache[key] = summary
+            logger.info(f"Encyl: Cached summary for {name} (key={key})")
+
+        return summary
 
     def ask_about_files(self, question: str, file_contexts: list[dict]) -> str:
         """Answer a natural language question using file context from search results."""
@@ -176,7 +235,7 @@ Files:
 Answer concisely and reference specific file names when relevant."""
 
         system = (
-            "You are DeepSeekFS AI, a local file intelligence assistant. "
+            "You are Neuron AI, a local file intelligence assistant. "
             "Answer questions about the user's files based on the provided content. "
             "Be specific — mention file names and quote relevant parts. "
             "If you can't answer from the files, say so honestly."
@@ -201,6 +260,10 @@ Content:
         if result:
             return [t.strip().lower() for t in result.split(",") if t.strip()][:5]
         return []
+
+    @property
+    def cache_size(self) -> int:
+        return len(self._summary_cache)
 
 
 # ── Singleton ────────────────────────────────────────────────

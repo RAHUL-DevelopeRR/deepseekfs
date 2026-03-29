@@ -1,5 +1,5 @@
 """
-DeepSeekFS – Desktop Entry Point (v6.0 — Windows 11 Glass UI)
+Neuron – Desktop Entry Point (v6.0 — Windows 11 Explorer UI)
 ==============================================================
 Frameless frosted-glass search panel inspired by Windows 11 Start Menu.
 Shift+Space to toggle.  Zero-X DFS branding.
@@ -16,6 +16,46 @@ Usage:
     python run_desktop.py
 """
 from __future__ import annotations
+
+# ═══════════════════════════════════════════════════════════════
+# MUST BE FIRST — Pre-load ALL PyTorch DLLs before any imports
+# ═══════════════════════════════════════════════════════════════
+import os, sys, glob, ctypes
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    _meipass = sys._MEIPASS
+    _torch_lib = os.path.join(_meipass, 'torch', 'lib')
+
+    # 1. Add to DLL search directories
+    for _p in [_torch_lib, _meipass]:
+        if os.path.isdir(_p):
+            try:
+                os.add_dll_directory(_p)
+            except OSError:
+                pass
+
+    # 2. Add to PATH
+    os.environ['PATH'] = _torch_lib + ';' + _meipass + ';' + os.environ.get('PATH', '')
+
+    # 3. Pre-load ALL torch DLLs in dependency order
+    #    c10.dll → torch.dll → torch_cpu.dll → torch_python.dll
+    _load_order = [
+        'c10.dll', 'libiomp5md.dll', 'libiompstubs5md.dll',
+        'uv.dll', 'shm.dll', 'torch_global_deps.dll',
+        'torch.dll', 'torch_cpu.dll', 'torch_python.dll',
+    ]
+    _kernel32 = ctypes.WinDLL('kernel32.dll')
+    _kernel32.LoadLibraryW.restype = ctypes.c_void_p
+    _kernel32.SetDllDirectoryW(_torch_lib)
+
+    for _dll_name in _load_order:
+        _dll_path = os.path.join(_torch_lib, _dll_name)
+        if os.path.exists(_dll_path):
+            _kernel32.LoadLibraryW(_dll_path)
+
+    # Also load any remaining DLLs we might have missed
+    for _dll_path in glob.glob(os.path.join(_torch_lib, '*.dll')):
+        _kernel32.LoadLibraryW(_dll_path)
+# ═══════════════════════════════════════════════════════════════
 
 import ctypes
 import ctypes.wintypes
@@ -1092,7 +1132,7 @@ class SearchPanel(QWidget):
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("DeepSeekFS")
+    app.setApplicationName("Neuron")
     app.setApplicationVersion("4.1.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(True)

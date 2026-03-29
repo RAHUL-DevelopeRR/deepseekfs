@@ -195,7 +195,7 @@ API_PORT = int(os.getenv("API_PORT", 8000))
 API_RELOAD = False
 
 # UI configuration
-UI_TITLE = "DeepSeekFS - Semantic File Search"
+UI_TITLE = "Neuron — AI File Intelligence"
 UI_WIDTH = 1000
 UI_HEIGHT = 700
 
