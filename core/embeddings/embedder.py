@@ -9,8 +9,11 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"     # FIX 4: prevent MKL/OpenMP cras
 os.environ["CURL_CA_BUNDLE"] = ""
 os.environ["REQUESTS_CA_BUNDLE"] = ""
 os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+try:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+except ImportError:
+    pass  # urllib3 not available — SSL warnings will show but functionality is unaffected
 
 import numpy as np
 from sentence_transformers import SentenceTransformer

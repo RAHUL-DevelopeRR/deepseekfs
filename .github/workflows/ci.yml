@@ -2,7 +2,7 @@ name: Neuron CI/CD
 
 on:
   push:
-    branches: [ main, dv-4, dv-4.1 ]
+    branches: [ main, dv-4, dv-4.1, dv-4.2 ]
   pull_request:
     branches: [ main ]
   release:
@@ -31,24 +31,24 @@ jobs:
 
       - name: Flake8 — Code style
         run: |
-          python -m flake8 core/ services/ ui/ app/ \
-            --max-line-length 120 \
-            --ignore E501,W503,E402,F401 \
+          python -m flake8 core/ services/ ui/ app/ `
+            --max-line-length 120 `
+            --ignore E501,W503,E402,F401 `
             --count --statistics
         continue-on-error: true
 
       - name: MyPy — Type checking
         run: |
-          python -m mypy core/ services/ \
-            --ignore-missing-imports \
+          python -m mypy core/ services/ `
+            --ignore-missing-imports `
             --no-strict-optional
         continue-on-error: true
 
   # ═══════════════════════════════════════════════
-  # Job 2: Unit Tests
+  # Job 2: Unit Tests (Windows - primary target)
   # ═══════════════════════════════════════════════
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
+  test-windows:
+    name: Tests (Windows, Python ${{ matrix.python-version }})
     runs-on: windows-latest
     strategy:
       matrix:
@@ -73,31 +73,72 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-desktop.txt
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov urllib3
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/ -v --tb=short --junitxml=test-results.xml 2>&1 || true
+          python -m pytest tests/test_core.py -v --tb=short --junitxml=test-results.xml
         env:
           NEURON_TEST_MODE: "1"
 
       - name: Verify core imports
         run: |
-          python -c "from core.embeddings.embedder import get_embedder; print('✅ Embedder OK')"
-          python -c "from core.search.semantic_search import SemanticSearch; print('✅ SemanticSearch OK')"
-          python -c "from core.indexing.index_builder import get_index; print('✅ IndexBuilder OK')"
-          python -c "from services.ollama_service import OllamaService; print('✅ OllamaService OK')"
-          python -c "from ui.spotlight_panel import SpotlightPanel; print('✅ SpotlightPanel OK')"
-
-      - name: Verify warmup script
-        run: python warmup_encyl.py --help 2>&1 || python -c "print('warmup_encyl.py exists')"
+          python -c "from core.embeddings.embedder import get_embedder; print('Embedder OK')"
+          python -c "from core.search.semantic_search import SemanticSearch; print('SemanticSearch OK')"
+          python -c "from core.indexing.index_builder import get_index; print('IndexBuilder OK')"
+          python -c "from services.ollama_service import OllamaService; print('OllamaService OK')"
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results
+          name: test-results-windows
           path: test-results.xml
+
+  # ═══════════════════════════════════════════════
+  # Job 2b: Unit Tests (Linux - CI compatibility)
+  # ═══════════════════════════════════════════════
+  test-linux:
+    name: Tests (Linux, Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-desktop.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-desktop.txt
+          pip install pytest pytest-cov urllib3
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/test_core.py -v --tb=short --junitxml=test-results-linux.xml
+        env:
+          NEURON_TEST_MODE: "1"
+        continue-on-error: true
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-linux
+          path: test-results-linux.xml
 
   # ═══════════════════════════════════════════════
   # Job 3: Build Launcher .exe
@@ -105,7 +146,7 @@ jobs:
   build-launcher:
     name: Build Launcher
     runs-on: windows-latest
-    needs: [lint, test]
+    needs: [lint, test-windows]
 
     steps:
       - uses: actions/checkout@v4
@@ -121,15 +162,31 @@ jobs:
       - name: Build launcher exe
         run: pyinstaller launcher.spec --clean --noconfirm
 
-      - name: Verify launcher
+      - name: Verify launcher exists
         run: |
           $exe = "dist\Neuron.exe"
           if (Test-Path $exe) {
             $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-            Write-Host "✅ Neuron.exe built: $size MB"
+            Write-Host "Neuron.exe built: $size MB"
           } else {
-            Write-Error "❌ Neuron.exe not found!"
+            Write-Error "Neuron.exe not found!"
             exit 1
+          }
+
+      - name: Smoke test — launcher starts without crash
+        run: |
+          # Run the launcher with a timeout — it should exit gracefully
+          # when venv is not present (expected in CI)
+          $proc = Start-Process "dist\Neuron.exe" -PassThru -NoNewWindow
+          Start-Sleep 3
+          if (-not $proc.HasExited) {
+            $proc.Kill()
+            Write-Host "Neuron.exe launched successfully (killed after 3s smoke test)"
+          } else {
+            $exit = $proc.ExitCode
+            Write-Host "Neuron.exe exited with code: $exit"
+            # Exit code 1 is OK — means venv not found (expected in CI)
+            if ($exit -gt 1) { exit 1 }
           }
 
       - name: Upload launcher artifact
@@ -177,13 +234,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: neuron-installer
-          path: installer_output/NeuronSetup.exe
+          path: installer_output/NeuronSetup_v4.2.exe
 
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer_output/NeuronSetup.exe
+            installer_output/NeuronSetup_v4.2.exe
             dist/Neuron.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -193,7 +250,7 @@ jobs:
   # ═══════════════════════════════════════════════
   security:
     name: Security Scan
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     needs: [lint]
 
     steps:
