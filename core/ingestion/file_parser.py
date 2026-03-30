@@ -252,3 +252,7 @@ class FileParser:
             "created_time": stat.st_ctime,
             "extension": Path(file_path).suffix.lower(),
         }
+
+
+# Convenience alias used by external callers and tests
+extract_text = FileParser.parse
