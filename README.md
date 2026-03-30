@@ -2,13 +2,19 @@
   <img src="assets/neuron_icon.ico" alt="Neuron" width="80"/>
 </p>
 
-<h1 align="center">Neuron</h1>
+<h1 align="center">Neuron v4.2</h1>
 <p align="center">
   <b>AI-Powered Semantic File Intelligence for Windows</b><br/>
   <i>Search smarter. Understand your files. Summarize anything.</i>
 </p>
 
 <p align="center">
+  <a href="https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest"><img src="https://img.shields.io/badge/⬇_Download-NeuronSetup_v4.2.exe-6366f1?style=for-the-badge&logo=windows" /></a>
+  <a href="https://zero-x.live"><img src="https://img.shields.io/badge/🌐_Website-zero--x.live-00d4aa?style=for-the-badge" /></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-4.2-6366f1?style=flat-square" />
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/python-3.11-green?style=flat-square" />
   <img src="https://img.shields.io/badge/AI-Ollama%20%2B%20Llama%203.2-orange?style=flat-square" />
@@ -41,7 +47,7 @@
 
 ### Option 1: Installer (Recommended)
 
-1. Download `NeuronSetup.exe` from [Releases](https://github.com/RAHUL-DevelopeRR/deepseekfs/releases)
+1. Download **[NeuronSetup_v4.2.exe](https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest)** from Releases
 2. Run the installer → check **"Install Ollama"** if you want AI summarization
 3. Launch Neuron from Desktop/Start Menu
 4. Press `Shift+Space` to open the search panel
