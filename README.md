@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Assets/NeuronG.png" alt="Neuron" width="120"/>
+  <img src="Assets/NeuronG_transparent.png" alt="Neuron" width="140"/>
 </p>
 
 <h1 align="center">Neuron v4.2</h1>
