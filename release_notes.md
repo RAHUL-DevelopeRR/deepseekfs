@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://zero-x.live/Assets/NeuronG_transparent.png" alt="Neuron" width="160" style="border-radius:50%;" />
+  <img src="https://zero-x.live/Assets/NeuronG.png" alt="Neuron" width="160" />
 </div>
 
 <h1 align="center">Neuron v4.2</h1>
