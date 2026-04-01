@@ -17,6 +17,7 @@ from core.time.scoring import (
 )
 from core.indexing.index_builder import get_index
 from core.search.query_parser import extract_intent
+from core.search.query_corrector import get_corrector
 
 
 # ── Size thresholds for filters ──────────────────────────────
@@ -43,6 +44,20 @@ class SemanticSearch:
             return []
 
         try:
+            # ── Typo correction (like ChatGPT) ────────────
+            corrector = get_corrector()
+            if not corrector._vocab:
+                # Build vocabulary from indexed filenames on first search
+                try:
+                    db = index_builder._db
+                    conn = db._conn()
+                    rows = conn.execute("SELECT name FROM files").fetchall()
+                    corrector.build_vocab([r[0] for r in rows])
+                except Exception:
+                    pass  # Non-critical, search still works
+
+            corrected_query, was_corrected = corrector.correct_query(query)
+
             # ── Parse query for date targets ──────────────────
             target_time, cleaned_query = extract_time_target(query)
 
@@ -50,14 +65,42 @@ class SemanticSearch:
             cleaned_query, target_exts, path_filter, size_filter, excluded_paths = \
                 extract_intent(cleaned_query)
 
-            # Use cleaned query for embedding
+            # Use cleaned query for embedding; if corrected, also prepare corrected embedding
             search_text = cleaned_query if len(cleaned_query) >= 3 else query
             query_embedding = self.embedder.encode_single(search_text)
             query_embedding = np.array([query_embedding], dtype=np.float32)
 
+            # If typo was corrected, also compute embedding for corrected query
+            corrected_embedding = None
+            if was_corrected:
+                corrected_text = corrected_query
+                # Re-parse the corrected query for clean embedding
+                _, corrected_clean = extract_time_target(corrected_text)
+                corrected_clean, _, _, _, _ = extract_intent(corrected_clean)
+                if len(corrected_clean) >= 3:
+                    corrected_text = corrected_clean
+                corrected_embedding = self.embedder.encode_single(corrected_text)
+                corrected_embedding = np.array([corrected_embedding], dtype=np.float32)
+                logger.info(f"Typo-corrected search: '{query}' → '{corrected_query}'")
+
             # Search wider when filtering
             search_limit = top_k * 10 if (target_exts or path_filter or size_filter) else top_k * 3
             distances, indices = index_builder.search_raw(query_embedding, search_limit)
+
+            # If corrected, also search with corrected embedding and merge
+            if corrected_embedding is not None:
+                c_distances, c_indices = index_builder.search_raw(corrected_embedding, search_limit)
+                # Merge: append corrected results that aren't duplicates
+                idx_set = set(int(x) for x in indices if x >= 0)
+                merged_dist = list(distances)
+                merged_idx = list(indices)
+                for ci, cd in zip(c_indices, c_distances):
+                    if int(ci) >= 0 and int(ci) not in idx_set:
+                        merged_idx.append(ci)
+                        merged_dist.append(cd)
+                        idx_set.add(int(ci))
+                distances = np.array(merged_dist)
+                indices = np.array(merged_idx)
 
             results = []
             time_multiplier = get_time_multiplier(query) if use_time_ranking else 1.0
@@ -180,44 +223,52 @@ class SemanticSearch:
             # ── Direct filename search (catches what FAISS misses) ──
             result_paths = {r["path"] for r in results}
             query_lower = search_text.lower().strip()
+            # Also search with corrected query for typo resilience
+            search_terms = [query_lower]
+            if was_corrected:
+                corrected_lower = corrected_query.lower().strip()
+                if corrected_lower != query_lower:
+                    search_terms.append(corrected_lower)
+
             if query_lower and len(query_lower) >= 2:
                 try:
                     db = index_builder._db
                     conn = db._conn()
-                    # Search by filename LIKE pattern
-                    pattern = f"%{query_lower}%"
-                    rows = conn.execute(
-                        "SELECT * FROM files WHERE LOWER(name) LIKE ? LIMIT ?",
-                        (pattern, top_k)
-                    ).fetchall()
-                    for row in rows:
-                        row_dict = dict(row)
-                        fpath = row_dict["path"]
-                        if fpath in result_paths:
-                            continue
-                        if not Path(fpath).exists():
-                            continue
-                        name = row_dict.get("name", "")
-                        name_l = name.lower()
-                        # Score: exact match > contains > partial
-                        if query_lower == name_l or query_lower == name_l.rsplit('.', 1)[0]:
-                            fn_score = 0.95
-                        elif query_lower in name_l:
-                            fn_score = 0.75
-                        else:
-                            fn_score = 0.60
-                        results.append({
-                            "path": fpath,
-                            "name": name,
-                            "extension": row_dict.get("extension", ""),
-                            "size": row_dict.get("size", 0),
-                            "modified_time": row_dict.get("modified_time", 0),
-                            "semantic_score": round(fn_score, 4),
-                            "time_score": 0.5,
-                            "combined_score": round(fn_score, 4),
-                            "open_count": row_dict.get("open_count", 0),
-                        })
-                        result_paths.add(fpath)
+                    # Search by filename LIKE pattern (both original + corrected)
+                    for term in search_terms:
+                        pattern = f"%{term}%"
+                        rows = conn.execute(
+                            "SELECT * FROM files WHERE LOWER(name) LIKE ? LIMIT ?",
+                            (pattern, top_k)
+                        ).fetchall()
+                        for row in rows:
+                            row_dict = dict(row)
+                            fpath = row_dict["path"]
+                            if fpath in result_paths:
+                                continue
+                            if not Path(fpath).exists():
+                                continue
+                            name = row_dict.get("name", "")
+                            name_l = name.lower()
+                            # Score: exact match > contains > partial
+                            if term == name_l or term == name_l.rsplit('.', 1)[0]:
+                                fn_score = 0.95
+                            elif term in name_l:
+                                fn_score = 0.75
+                            else:
+                                fn_score = 0.60
+                            results.append({
+                                "path": fpath,
+                                "name": name,
+                                "extension": row_dict.get("extension", ""),
+                                "size": row_dict.get("size", 0),
+                                "modified_time": row_dict.get("modified_time", 0),
+                                "semantic_score": round(fn_score, 4),
+                                "time_score": 0.5,
+                                "combined_score": round(fn_score, 4),
+                                "open_count": row_dict.get("open_count", 0),
+                            })
+                            result_paths.add(fpath)
                 except Exception as e:
                     logger.warning(f"Filename search fallback error: {e}")
 
