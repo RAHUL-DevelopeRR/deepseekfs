@@ -116,11 +116,12 @@ class DesktopService:
         return total_new
 
     # ── Search ───────────────────────────────────────────────
-    def search(self, query: str, top_k: int = 20) -> List[dict]:
+    def search(self, query: str, top_k: int = 20, use_llm_rerank: bool = False) -> List[dict]:
         """Direct call into core/search — no HTTP round-trip."""
         from core.search.semantic_search import SemanticSearch
         engine = SemanticSearch()
-        return engine.search(query, top_k=top_k, use_time_ranking=True)
+        return engine.search(query, top_k=top_k, use_time_ranking=True,
+                             use_llm_rerank=use_llm_rerank)
 
     # ── Stats ────────────────────────────────────────────────
     def total_indexed(self) -> int:

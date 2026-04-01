@@ -18,6 +18,7 @@ from core.time.scoring import (
 from core.indexing.index_builder import get_index
 from core.search.query_parser import extract_intent
 from core.search.query_corrector import get_corrector
+from core.search.llm_reranker import get_reranker
 
 
 # ── Size thresholds for filters ──────────────────────────────
@@ -36,6 +37,7 @@ class SemanticSearch:
         query: str,
         top_k: int = config.TOP_K,
         use_time_ranking: bool = True,
+        use_llm_rerank: bool = False,
     ) -> List[Dict]:
         index_builder = get_index()
 
@@ -276,6 +278,13 @@ class SemanticSearch:
                 results.sort(key=lambda x: x["combined_score"], reverse=True)
 
             results = results[:top_k]
+
+            # ── LLM Re-rank (deep content understanding) ─────
+            if use_llm_rerank and len(results) >= 2:
+                reranker = get_reranker()
+                if reranker.is_available():
+                    logger.info(f"LLM re-ranking {len(results)} results for: '{query}'")
+                    results = reranker.rerank(query, results)
 
             logger.info(f"Query: '{query}' -> {len(results)} results")
             return results

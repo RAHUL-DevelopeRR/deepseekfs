@@ -183,11 +183,11 @@ class IndexThread(QThread):
 class SearchThread(QThread):
     results = pyqtSignal(list)
     error   = pyqtSignal(str)
-    def __init__(self, svc, q, k=20):
+    def __init__(self, svc, q, k=20, use_llm=False):
         super().__init__()
-        self._s, self._q, self._k = svc, q, k
+        self._s, self._q, self._k, self._llm = svc, q, k, use_llm
     def run(self):
-        try:    self.results.emit(self._s.search(self._q, self._k))
+        try:    self.results.emit(self._s.search(self._q, self._k, use_llm_rerank=self._llm))
         except Exception as e: self.error.emit(str(e))
 
 class AskAIThread(QThread):
@@ -1076,9 +1076,11 @@ class SpotlightPanel(QWidget):
         self._settings: SettingsOverlay | None = None
         self._it: IndexThread | None = None
         self._st: SearchThread | None = None
+        self._llm_st: SearchThread | None = None  # LLM re-rank background thread
         self._ait: AskAIThread | None = None
         self._smt: SummarizeThread | None = None
         self._ai_panel: QFrame | None = None
+        self._llm_active: bool = False  # True while LLM re-ranking
 
         self._deb = QTimer(self)
         self._deb.setSingleShot(True)
@@ -1638,20 +1640,55 @@ class SpotlightPanel(QWidget):
             self._ask_ai(question)
             return
 
-        # ── normal search ──
+        # ── normal search (Phase 1: fast FAISS) ──
         self._dismiss_ai_panel()
         self._stop_encyl_loading()
         if self._idx_count == 0 and not self._indexing:
             self.status.setText("Index empty — waiting for indexing…"); return
         self.status.setText("Searching…")
         cfg = self._svc.get_config()
-        self._st = SearchThread(self._svc, q, cfg.get("top_k", 20))
+        self._st = SearchThread(self._svc, q, cfg.get("top_k", 20), use_llm=False)
         self._st.results.connect(self._on_results)
         self._st.error.connect(lambda e: self.status.setText(f"Error: {e}"))
         self._st.start()
 
     def _on_results(self, hits):
         self._all = hits; self._filter()
+        # Phase 2: trigger LLM re-rank in background (if available)
+        q = self.search.text().strip()
+        if q and len(hits) >= 2 and not q.startswith("?"):
+            self._start_llm_rerank(q, len(hits))
+
+    def _start_llm_rerank(self, query: str, result_count: int):
+        """Phase 2: Background LLM re-ranking for deeper content understanding."""
+        try:
+            from core.search.llm_reranker import get_reranker
+            reranker = get_reranker()
+            if not reranker.is_available():
+                return  # No Ollama — skip silently
+        except Exception:
+            return
+
+        self._llm_active = True
+        self.status.setText(f"🧠 AI enhancing {result_count} results…")
+        cfg = self._svc.get_config()
+        self._llm_st = SearchThread(self._svc, query, cfg.get("top_k", 20), use_llm=True)
+        self._llm_st.results.connect(self._on_llm_results)
+        self._llm_st.error.connect(lambda e: self._on_llm_done())
+        self._llm_st.start()
+
+    def _on_llm_results(self, hits):
+        """Silently update results with LLM-reranked order."""
+        self._all = hits; self._filter()
+        self._on_llm_done()
+        llm_count = sum(1 for h in hits if h.get("llm_score") is not None)
+        if llm_count:
+            self.status.setText(f"✨ AI-enhanced • {len(hits)} results")
+        else:
+            self.status.setText(f"{len(hits)} results")
+
+    def _on_llm_done(self):
+        self._llm_active = False
 
     # ── AI BRAIN ─────────────────────────────────────────────
     def _ask_ai(self, question: str):
