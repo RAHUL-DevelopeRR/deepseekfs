@@ -57,6 +57,7 @@ Name: "startmenuicon"; Description: "Create Start Menu shortcut"; GroupDescripti
 Name: "installollama"; Description: "Install Ollama AI engine (required for file summarization)"; GroupDescription: "AI Engine (Encyl):"; Flags: unchecked
 Name: "pullmodel"; Description: "Download llama3.2:1b model (~700 MB, requires internet)"; GroupDescription: "AI Engine (Encyl):"; Flags: unchecked
 Name: "addtopath"; Description: "Add Neuron to system PATH"; GroupDescription: "System Integration:"; Flags: unchecked
+Name: "runonstartup"; Description: "Launch Neuron on Windows startup"; GroupDescription: "System Integration:"; Flags: unchecked
 
 [Files]
 ; ── Launcher exe ──
@@ -84,6 +85,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: runonstartup
 
 [Run]
 ; Install Ollama — only if not already installed (smart detection)
