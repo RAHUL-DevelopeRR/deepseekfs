@@ -22,16 +22,39 @@ class DesktopService:
     """
     Single facade used by the PyQt6 UI layer.
     All heavy lifting is delegated to core/ modules.
+    Initialization is lazy — the embedding model and file watcher
+    load in the background so the UI starts instantly.
     """
 
     def __init__(self):
-        self._idx = get_index()
         self._lock = threading.Lock()
-        logger.info("DesktopService: index singleton loaded")
+        self._idx = None
+        self._ready = threading.Event()
+        self.watcher = None
+        logger.info("DesktopService: starting background initialization…")
+        # Kick off heavy init in background so UI + hotkey register instantly
+        t = threading.Thread(target=self._bg_init, daemon=True, name="svc-init")
+        t.start()
 
-        from core.watcher.file_watcher import FileWatcher
-        self.watcher = FileWatcher(self._idx)
-        self.watcher.start()
+    def _bg_init(self):
+        """Background thread: loads index (embedding model) + starts file watcher."""
+        try:
+            self._idx = get_index()
+            logger.info("DesktopService: index singleton loaded (background)")
+
+            from core.watcher.file_watcher import FileWatcher
+            self.watcher = FileWatcher(self._idx)
+            self.watcher.start()
+        except Exception as e:
+            logger.error(f"DesktopService background init failed: {e}")
+        finally:
+            self._ready.set()
+
+    def _ensure_ready(self):
+        """Wait for background init if not yet done."""
+        self._ready.wait(timeout=120)
+        if self._idx is None:
+            self._idx = get_index()
 
     # ── Indexing ─────────────────────────────────────────────
     def run_indexing(
@@ -40,6 +63,7 @@ class DesktopService:
         on_progress: Callable[[int, int], None] | None = None,
     ) -> int:
         """Run indexing with live progress callbacks. Returns new file count."""
+        self._ensure_ready()
         paths = config.WATCH_PATHS
         if not paths:
             if on_status:
@@ -118,6 +142,7 @@ class DesktopService:
     # ── Search ───────────────────────────────────────────────
     def search(self, query: str, top_k: int = 20, use_llm_rerank: bool = False) -> List[dict]:
         """Direct call into core/search — no HTTP round-trip."""
+        self._ensure_ready()
         from core.search.semantic_search import SemanticSearch
         engine = SemanticSearch()
         return engine.search(query, top_k=top_k, use_time_ranking=True,
@@ -126,7 +151,9 @@ class DesktopService:
     # ── Stats ────────────────────────────────────────────────
     def total_indexed(self) -> int:
         try:
-            return len(get_index().metadata)
+            if self._idx is None:
+                return 0
+            return len(self._idx.metadata)
         except Exception:
             return 0
 
