@@ -1,4 +1,4 @@
-# How to Run DeepSeekFS Desktop (v2.0)
+# How to Run Neuron Desktop (v4.2)
 
 ## Prerequisites
 - Python 3.9 or newer
@@ -12,8 +12,9 @@
 ```bash
 git clone https://github.com/RAHUL-DevelopeRR/deepseekfs
 cd deepseekfs
-git checkout desktop-v2          # switch to the desktop branch
 ```
+
+> The desktop code lives on `main`. No branch switching required.
 
 ---
 
@@ -76,16 +77,22 @@ You can type a query while indexing is still running — the UI never freezes.
 build_exe.bat
 ```
 
-Output: `dist\DeepSeekFS\DeepSeekFS.exe`
+Output: `dist\Neuron\Neuron.exe` (or `dist\DeepSeekFS\DeepSeekFS.exe` if using
+`build_exe.bat` directly).
 
-Distribute the entire `dist\DeepSeekFS\` folder. No Python installation
+Distribute the entire `dist\Neuron\` folder. No Python installation
 required on the target machine.
+
+For the official Neuron installer (Inno Setup), see `README.md → Building the Installer`.
 
 ---
 
 ## Customising watched folders
 
-Edit `app/config.py`:
+Add or remove folders using the **⚙ Settings** panel inside the running app
+(gear icon), or edit `storage/user_config.json` directly.
+
+You can also hard-code paths in `app/config.py` for development:
 
 ```python
 # Hard-code your own paths instead of the auto-detected ones:
@@ -99,9 +106,15 @@ Or use the **📁 Add Folder** button in the UI at runtime.
 
 ---
 
-## Troubleshooting
+## Legacy web mode
 
-| Symptom | Fix |
+`python run.py` starts the original FastAPI + pywebview web-mode server.
+This requires `requirements.txt` (not `requirements-desktop.txt`) and is
+kept for reference only. Desktop users should always use `run_desktop.py`.
+
+---
+
+## Troubleshooting
 |---------|-----|
 | `ModuleNotFoundError: PyQt6` | `pip install PyQt6` |
 | Progress bar stuck at 0% | Check that WATCH_PATHS exist on your machine |
@@ -113,6 +126,5 @@ Or use the **📁 Add Folder** button in the UI at runtime.
 
 ## Notes
 
-- The original web app (`python run.py`) is **untouched** on `main`.
 - FAISS index is stored in `storage/faiss_index/` and reused across runs.
 - Closing the window **minimises to the system tray**; use tray → Quit to exit.

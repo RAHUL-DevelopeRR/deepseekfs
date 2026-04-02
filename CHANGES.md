@@ -1,4 +1,26 @@
-# DeepSeekFS — What Changed: v1.0 (Web) → v2.0 (Desktop)
+# DeepSeekFS / Neuron — Changelog
+
+## v4.2 (current) — Refactor & Quality Pass
+
+### What changed
+- `docs/refactor_to_9_10.md` added — ordered refactor checklist.
+- `run.py` and `app/main.py` marked **DEPRECATED** (web/legacy mode only).
+- `Dockerfile` and `docker-compose.yml` labelled as web-mode deployment.
+- `services_desktop.py` (root) **removed** — dead file with incorrect import
+  paths, not referenced by any module.
+- `app/config.py` — `API_HOST`, `API_PORT`, `API_RELOAD` clearly marked as
+  web-mode only; deprecated pickle paths annotated.
+- `core/*/__init__.py` — explicit `__all__` lists added to all core sub-packages.
+- `HOW_TO_RUN.md` — stale `git checkout desktop-v2` step removed (desktop code
+  is on `main`); build output path corrected.
+
+### Deferred (requires Windows build environment)
+- Break up `run_desktop.py` into dedicated UI modules.
+- Consolidate `DeepSeekFS.spec` and `build_exe.bat` onto `neuron.spec`.
+
+---
+
+
 
 ## 📌 TL;DR
 

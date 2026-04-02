@@ -1,4 +1,15 @@
-"""Application entry point"""
+"""
+DEPRECATED — Web/Legacy Mode Entry Point
+=========================================
+This file starts a FastAPI + Uvicorn HTTP server on localhost:8000 and opens a
+pywebview browser window as the UI.
+
+The canonical desktop entry point is ``run_desktop.py``.  Use this file only if
+you specifically need the REST API (e.g. for Docker / server deployment).
+
+Web-mode dependencies (fastapi, uvicorn, pywebview) are listed in
+``requirements.txt`` but are NOT included in ``requirements-desktop.txt``.
+"""
 import sys
 import time
 import threading
