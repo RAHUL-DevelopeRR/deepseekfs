@@ -1152,26 +1152,20 @@ def main():
     from ui.spotlight_panel import SpotlightPanel, HotkeyFilter as SpotlightHotkeyFilter
     panel = SpotlightPanel(service)
 
-    # Register global hotkey: Shift+Space (with retry + fallback)
+    # Register global hotkey: Shift+Space (non-blocking, immediate)
     hotkey_ok = False
     if platform.system() == "Windows":
-        import time as _time
         # Unregister first in case previous process left it registered
         ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+        time.sleep(0.05)  # tiny yield to let OS release
 
-        # Retry up to 3 times with increasing delay
-        for attempt in range(1, 4):
-            _time.sleep(0.15 * attempt)  # 150ms, 300ms, 450ms
-            hotkey_ok = ctypes.windll.user32.RegisterHotKey(
-                None, HOTKEY_ID, MOD_SHIFT, VK_SPACE
-            )
-            if hotkey_ok:
-                logger.info(f"Global hotkey registered: Shift+Space (attempt {attempt})")
-                break
-            logger.warning(f"Hotkey registration attempt {attempt}/3 failed, retrying...")
-
-        # Fallback to Ctrl+Space if Shift+Space failed
-        if not hotkey_ok:
+        hotkey_ok = ctypes.windll.user32.RegisterHotKey(
+            None, HOTKEY_ID, MOD_SHIFT, VK_SPACE
+        )
+        if hotkey_ok:
+            logger.info("Global hotkey registered: Shift+Space")
+        else:
+            # Fallback to Ctrl+Space immediately
             MOD_CTRL = 0x0002
             hotkey_ok = ctypes.windll.user32.RegisterHotKey(
                 None, HOTKEY_ID, MOD_CTRL, VK_SPACE

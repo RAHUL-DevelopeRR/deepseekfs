@@ -86,7 +86,8 @@ class OllamaService:
 
     # ── Health check ─────────────────────────────────────────
     def is_available(self) -> bool:
-        """Check if Ollama server is running and model exists."""
+        """Check if Ollama server is running and model exists.
+        Auto-starts 'ollama serve' if not running."""
         if self._available is not None:
             return self._available
         try:
@@ -99,7 +100,58 @@ class OllamaService:
                 logger.info(f"OllamaService: model '{self._model}' not found. Available: {models}")
             return self._available
         except Exception as e:
-            logger.info(f"OllamaService: Ollama not reachable: {e}")
+            logger.info(f"OllamaService: Ollama not reachable: {e} — attempting auto-start…")
+            # ── Try to auto-start ollama serve ──
+            if self._try_auto_start():
+                return self._available
+            self._available = False
+            return False
+
+    def _try_auto_start(self) -> bool:
+        """Attempt to start 'ollama serve' automatically."""
+        import subprocess as _sp, shutil
+        ollama_path = shutil.which("ollama")
+        if not ollama_path:
+            # Check common install paths on Windows
+            for candidate in [
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe"),
+                r"C:\Program Files\Ollama\ollama.exe",
+                r"C:\Program Files (x86)\Ollama\ollama.exe",
+            ]:
+                if os.path.isfile(candidate):
+                    ollama_path = candidate
+                    break
+        if not ollama_path:
+            logger.info("OllamaService: ollama binary not found on system")
+            return False
+        try:
+            logger.info(f"OllamaService: auto-starting ollama serve via {ollama_path}")
+            _sp.Popen(
+                [ollama_path, "serve"],
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                creationflags=_sp.CREATE_NO_WINDOW if hasattr(_sp, 'CREATE_NO_WINDOW') else 0,
+            )
+            # Wait for server to come up  (poll up to 15 seconds)
+            for attempt in range(30):
+                time.sleep(0.5)
+                try:
+                    req = Request(f"{OLLAMA_URL}/api/tags", method="GET")
+                    resp = urlopen(req, timeout=2)
+                    data = json.loads(resp.read())
+                    models = [m.get("name", "") for m in data.get("models", [])]
+                    self._available = any(self._model in m for m in models)
+                    if self._available:
+                        logger.info(f"OllamaService: auto-started successfully — model ready")
+                    else:
+                        logger.info(f"OllamaService: server up but model '{self._model}' not found. Available: {models}")
+                    return self._available
+                except Exception:
+                    continue
+            logger.warning("OllamaService: auto-start timed out after 15s")
+            self._available = False
+            return False
+        except Exception as ex:
+            logger.warning(f"OllamaService: auto-start failed: {ex}")
             self._available = False
             return False
 
