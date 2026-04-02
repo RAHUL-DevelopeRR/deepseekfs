@@ -1,4 +1,11 @@
-"""FastAPI Application"""
+"""
+DEPRECATED — Web/Legacy Mode FastAPI Application
+=================================================
+This module is only used when running the web-mode entry point (``run.py``).
+The desktop application (``run_desktop.py``) never imports this file.
+
+Kept for reference and backward compatibility with Docker/server deployments.
+"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import app.config as config

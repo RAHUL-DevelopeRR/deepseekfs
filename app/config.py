@@ -181,15 +181,17 @@ SUPPORTED_EXTENSIONS = {
 MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 FAISS_INDEX_PATH = str(FAISS_INDEX_DIR / "index.bin")
-METADATA_PATH = str(CACHE_DIR / "metadata.pkl")
-INDEXED_PATHS_DB = str(CACHE_DIR / "indexed_paths.pkl")  # deprecated
+METADATA_PATH = str(CACHE_DIR / "metadata.pkl")      # deprecated — use SQLITE_DB_PATH
+INDEXED_PATHS_DB = str(CACHE_DIR / "indexed_paths.pkl")  # deprecated — use SQLITE_DB_PATH
 SQLITE_DB_PATH = str(CACHE_DIR / "metadata.db")
 
 # Search configuration
 TOP_K = UserConfig.load().get("top_k", 20)
 SIMILARITY_THRESHOLD = 0.3
 
-# API configuration
+# ── Web-mode only settings (not used by the desktop app) ─────────────────────
+# These are read by run.py / app/main.py when running as a FastAPI server.
+# They have no effect in run_desktop.py.
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", 8000))
 API_RELOAD = False

@@ -1,3 +1,9 @@
+# DEPRECATED — Web/Server Deployment Only
+# =========================================
+# This Dockerfile builds the FastAPI web-mode server (run.py + app/main.py).
+# It is NOT used for the Windows desktop application (run_desktop.py + PyQt6).
+# For desktop use, follow the installer/build instructions in README.md.
+
 FROM python:3.11-slim
 
 WORKDIR /app

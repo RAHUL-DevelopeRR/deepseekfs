@@ -208,29 +208,43 @@ python -m mypy core/ services/ --ignore-missing-imports
 
 ```
 deepseekfs/
-├── run_desktop.py          # Main entry point
-├── launcher.py             # PyInstaller launcher stub
+├── run_desktop.py          # ← Main entry point (desktop)
+├── launcher.py             # PyInstaller launcher stub (produces Neuron.exe)
 ├── warmup_encyl.py         # Ollama model pre-loader
 ├── neuron_installer.iss    # Inno Setup installer script
+├── neuron.spec             # PyInstaller spec (canonical build)
+├── launcher.spec           # PyInstaller spec for launcher stub
+├── build_exe.bat           # One-click build helper
 ├── app/
-│   ├── config.py           # Configuration & paths
+│   ├── config.py           # Configuration, paths, user preferences
 │   └── logger.py           # Logging setup
 ├── core/
-│   ├── embeddings/         # Sentence-transformer embedder
-│   ├── indexing/            # FAISS index builder
-│   ├── ingestion/           # File content extraction
-│   ├── search/              # Semantic + keyword search
-│   └── watcher/             # File system monitor
+│   ├── embeddings/         # Sentence-transformer embedder (all-MiniLM-L6-v2)
+│   ├── indexing/           # FAISS index builder + SQLite metadata
+│   ├── ingestion/          # File content extraction (40+ types)
+│   ├── search/             # Semantic + keyword search engine
+│   ├── time/               # Time-decay recency scoring
+│   └── watcher/            # File system monitor (watchdog)
 ├── services/
-│   ├── desktop_service.py   # Main service orchestrator
-│   ├── ollama_service.py    # Encyl AI (Ollama integration)
-│   └── startup_indexer.py   # Background indexing
+│   ├── desktop_service.py  # Main service orchestrator for PyQt6 UI
+│   ├── ollama_service.py   # Encyl AI (Ollama / llama3.2:1b integration)
+│   └── startup_indexer.py  # Background indexing on startup
 ├── ui/
-│   └── spotlight_panel.py   # PyQt6 Fluent Design UI
+│   └── spotlight_panel.py  # PyQt6 Fluent Design search panel
+├── docs/
+│   ├── refactor_to_9_10.md # Refactor checklist
+│   └── pre_install_info.txt
 ├── assets/
-│   └── neuron_icon.ico      # DNA helix app icon
-└── storage/
-    └── user_config.json     # User preferences
+│   └── neuron_icon.ico     # DNA helix app icon
+├── storage/                # Runtime data (FAISS index, SQLite, user config)
+│   └── user_config.json
+│
+│   ── Legacy web-mode files (kept for reference, not used by desktop app) ──
+├── run.py                  # [DEPRECATED] FastAPI + pywebview entry point
+├── app/main.py             # [DEPRECATED] FastAPI application
+├── api/                    # [DEPRECATED] REST API routes and schemas
+├── Dockerfile              # [DEPRECATED] Web/server deployment
+└── docker-compose.yml      # [DEPRECATED] Web/server deployment
 ```
 
 ---
