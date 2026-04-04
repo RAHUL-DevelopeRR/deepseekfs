@@ -1,0 +1,248 @@
+name: Build and Release v4.3 - Memory OS
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub Release'
+        required: true
+        type: boolean
+        default: true
+
+env:
+  PYTHON_VERSION: '3.11'
+  VERSION: '4.3'
+
+jobs:
+  build-and-release:
+    name: Build Neuron v4.3 Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: claude/add-activity-logging-module
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-v43-${{ hashFiles('requirements-desktop.txt') }}
+          restore-keys: ${{ runner.os }}-pip-v43-
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build launcher exe
+        run: |
+          pyinstaller launcher.spec --clean --noconfirm
+        shell: pwsh
+
+      - name: Verify launcher exists
+        run: |
+          $exe = "dist\Neuron.exe"
+          if (Test-Path $exe) {
+            $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            Write-Host "✓ Neuron.exe built successfully: $size MB"
+
+            # Create dist directory if it doesn't exist
+            if (-not (Test-Path "dist")) {
+              New-Item -ItemType Directory -Path "dist"
+            }
+          } else {
+            Write-Error "✗ Neuron.exe not found!"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Create Python venv for installer
+        run: |
+          python -m venv venv
+          venv\Scripts\pip install --upgrade pip
+          venv\Scripts\pip install -r requirements-desktop.txt
+        shell: pwsh
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y --no-progress
+        shell: pwsh
+
+      - name: Build installer with InnoSetup
+        run: |
+          $innoPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $innoPath) {
+            & $innoPath neuron_installer_v4.3.iss
+            Write-Host "✓ Installer build completed"
+          } else {
+            Write-Error "✗ Inno Setup compiler not found"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Verify installer exists
+        run: |
+          $installer = "installer_output\NeuronSetup_v4.3_MemoryOS.exe"
+          if (Test-Path $installer) {
+            $size = [math]::Round((Get-Item $installer).Length / 1MB, 1)
+            Write-Host "✓ Installer built successfully: $size MB"
+            Write-Host "  Location: $installer"
+          } else {
+            Write-Error "✗ Installer not found at expected location"
+            Get-ChildItem -Path installer_output -ErrorAction SilentlyContinue
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-launcher-v4.3
+          path: dist/Neuron.exe
+          retention-days: 30
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-installer-v4.3
+          path: installer_output/NeuronSetup_v4.3_MemoryOS.exe
+          retention-days: 30
+
+      - name: Create Release Notes
+        if: inputs.create_release
+        run: |
+          @"
+          # Neuron v4.3 - Memory OS Edition 🧠
+
+          ## What's New in v4.3
+
+          Neuron now feels like a **Memory OS** instead of just a search box! This release introduces intelligent activity tracking and personalized suggestions that help you pick up where you left off.
+
+          ### ✨ New Features
+
+          **Activity Logging & Tracking**
+          - Every search and file open is now logged to help you rediscover your work
+          - Structured SQLite-based activity database for fast queries
+          - Track your digital footprint across all indexed files
+
+          **Jump Back In Suggestions**
+          - See your 5 most recent files as clickable chips when you open Neuron
+          - Instantly resume work without typing a single character
+          - Smart suggestions appear right in the search panel
+
+          **You Might Want to Revisit...**
+          - Get recommendations for older files related to your current search
+          - Rediscover files you haven't touched in a few days
+          - Visually distinct section in search results
+
+          **Memory Lane Daily Recap** 📅
+          - New dedicated panel showing your daily activity
+          - View files touched, top searches, and most-accessed documents
+          - Navigate between Today, Yesterday, and specific dates
+          - Beautiful timeline view of your work history
+
+          **Continuity Streak Tracking** 🔥
+          - Track days with at least 1 search + 1 file open
+          - Subtle streak counter in system tray tooltip
+          - Professional, non-gamified approach
+
+          ### 🔧 Technical Improvements
+
+          - New `core/activity/` module with clean API for activity tracking
+          - Thread-safe SQLite with WAL mode for concurrent operations
+          - Optimized queries for suggestions and daily statistics
+          - New `ui/memory_lane_panel.py` with Windows 11 design language
+          - Enhanced `desktop_service.py` with activity data methods
+
+          ### 📦 Installation
+
+          **New Users:**
+          Download and run `NeuronSetup_v4.3_MemoryOS.exe`
+
+          **Existing Users:**
+          The installer will upgrade your existing Neuron installation while preserving your index and settings.
+
+          ### 🎯 System Requirements
+
+          - Windows 10/11 (64-bit)
+          - 4 GB RAM (8 GB recommended)
+          - 2 GB free disk space
+          - Optional: Ollama for AI summarization
+
+          ### 🐛 Known Issues
+
+          - First-time indexing may take a few minutes on large folders
+          - Activity database starts empty (builds up as you use Neuron)
+
+          ### 📝 Notes
+
+          - Built from branch: `claude/add-activity-logging-module`
+          - All new features are fully integrated with existing semantic search
+          - Activity data is stored locally in `storage/activity.db`
+
+          ---
+
+          **Full Changelog:** See commit history for detailed changes
+          **Report Issues:** https://github.com/RAHUL-DevelopeRR/deepseekfs/issues
+          "@ | Out-File -FilePath release_notes.md -Encoding UTF8
+          Get-Content release_notes.md
+        shell: pwsh
+
+      - name: Create Git Tag
+        if: inputs.create_release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a v4.3 -m "Release v4.3 - Memory OS Edition"
+          git push origin v4.3
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: inputs.create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v4.3
+          name: "v4.3 - Memory OS"
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            installer_output/NeuronSetup_v4.3_MemoryOS.exe
+            dist/Neuron.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Summary
+        if: always()
+        run: |
+          Write-Host ""
+          Write-Host "════════════════════════════════════════════════════"
+          Write-Host "  Neuron v4.3 - Memory OS Build Summary"
+          Write-Host "════════════════════════════════════════════════════"
+          Write-Host ""
+          Write-Host "Branch: claude/add-activity-logging-module"
+          Write-Host "Version: 4.3"
+          Write-Host ""
+          if (Test-Path "dist\Neuron.exe") {
+            Write-Host "✓ Launcher: dist\Neuron.exe"
+          }
+          if (Test-Path "installer_output\NeuronSetup_v4.3_MemoryOS.exe") {
+            Write-Host "✓ Installer: installer_output\NeuronSetup_v4.3_MemoryOS.exe"
+          }
+          Write-Host ""
+          if ("${{ inputs.create_release }}" -eq "true") {
+            Write-Host "✓ GitHub Release created at:"
+            Write-Host "  https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/tag/v4.3"
+          }
+          Write-Host ""
+          Write-Host "════════════════════════════════════════════════════"
+        shell: pwsh
