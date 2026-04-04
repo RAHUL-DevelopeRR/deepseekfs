@@ -16,6 +16,7 @@ from app.logger import logger
 import os
 from core.indexing.index_builder import get_index
 from services.startup_indexer import StartupIndexer
+from core.activity import log_event, get_recent_files, get_revisit_suggestions, get_daily_stats, get_streak_days
 
 
 class DesktopService:
@@ -145,8 +146,13 @@ class DesktopService:
         self._ensure_ready()
         from core.search.semantic_search import SemanticSearch
         engine = SemanticSearch()
-        return engine.search(query, top_k=top_k, use_time_ranking=True,
-                             use_llm_rerank=use_llm_rerank)
+        results = engine.search(query, top_k=top_k, use_time_ranking=True,
+                                use_llm_rerank=use_llm_rerank)
+
+        # Log search activity
+        log_event(event_type="search", query_text=query)
+
+        return results
 
     # ── Stats ────────────────────────────────────────────────
     def total_indexed(self) -> int:
@@ -162,6 +168,8 @@ class DesktopService:
         """Record that a user opened a file (for access-frequency scoring)."""
         try:
             get_index().record_open(path)
+            # Log file open activity
+            log_event(event_type="open_file", file_path=path)
         except Exception as e:
             logger.warning(f"Could not record open for {path}: {e}")
 
@@ -192,3 +200,24 @@ class DesktopService:
     def save_config(self, cfg: dict):
         UserConfig.save(cfg)
         config.WATCH_PATHS = UserConfig.get_all_watch_paths()
+
+    # ── Activity tracking (Memory OS features) ───────────────
+    def get_recent_files(self, limit: int = 5) -> List[dict]:
+        """Get recently accessed files for 'Jump back in' suggestions."""
+        return get_recent_files(limit)
+
+    def get_revisit_suggestions(self, query: str, exclude_days: int = 2, limit: int = 3) -> List[dict]:
+        """Get 'You might want to revisit' suggestions based on query."""
+        tokens = query.lower().split()
+        return get_revisit_suggestions(tokens, exclude_days, limit)
+
+    def get_daily_stats(self, date=None):
+        """Get activity statistics for a day (defaults to today)."""
+        from datetime import datetime
+        if date is None:
+            date = datetime.now()
+        return get_daily_stats(date)
+
+    def get_streak_days(self) -> int:
+        """Get current continuity streak."""
+        return get_streak_days()
