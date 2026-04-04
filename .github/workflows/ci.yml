@@ -2,7 +2,7 @@ name: Neuron CI/CD
 
 on:
   push:
-    branches: [ main, dv-4, dv-4.1, dv-4.2 ]
+    branches: [ main, 'dv-*', 'release-*' ]
   pull_request:
     branches: [ main ]
   release:
