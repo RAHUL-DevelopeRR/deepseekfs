@@ -37,6 +37,7 @@ from services.desktop_service import DesktopService
 from PyQt6.QtWidgets import QFileIconProvider
 from PyQt6.QtCore import QFileInfo
 from services.ollama_service import get_ollama
+from ui.memory_lane_panel import MemoryLanePanel
 
 # ── resolve assets path ──────────────────────────────────────
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -1128,6 +1129,7 @@ class SpotlightPanel(QWidget):
         self._indexing = False
         self._idx_count = 0
         self._settings: SettingsOverlay | None = None
+        self._memory_lane: MemoryLanePanel | None = None
         self._it: IndexThread | None = None
         self._st: SearchThread | None = None
         self._llm_st: SearchThread | None = None  # LLM re-rank background thread
@@ -1653,6 +1655,22 @@ class SpotlightPanel(QWidget):
         if self._settings:
             self._settings.hide(); self._settings.deleteLater(); self._settings = None
 
+    def _toggle_memory_lane(self):
+        """Toggle Memory Lane daily recap panel."""
+        if self._memory_lane and self._memory_lane.isVisible():
+            self._memory_lane.hide(); self._memory_lane.deleteLater(); self._memory_lane = None
+            return
+        self._memory_lane = MemoryLanePanel(self._svc, self)
+        self._memory_lane.closed.connect(self._close_memory_lane)
+        self._memory_lane.file_clicked.connect(self._open)
+        self._memory_lane.setGeometry(22, 80, self.width() - 44, self.height() - 110)
+        self._memory_lane.show(); self._memory_lane.raise_()
+
+    def _close_memory_lane(self):
+        """Close Memory Lane panel."""
+        if self._memory_lane:
+            self._memory_lane.hide(); self._memory_lane.deleteLater(); self._memory_lane = None
+
     def _reindex(self):
         from services.startup_indexer import StartupIndexer
         StartupIndexer()._wipe_index("manual")
@@ -1673,6 +1691,7 @@ class SpotlightPanel(QWidget):
             QMenu::separator { height: 1px; background: #333; margin: 4px 8px; }
         """)
         m.addAction("🔍  Show  (Shift+Space)").triggered.connect(self.toggle_panel)
+        m.addAction("📅  Memory Lane").triggered.connect(self._toggle_memory_lane)
         m.addAction("🔄  Re-index").triggered.connect(self._reindex)
         m.addAction("⚙️  Settings").triggered.connect(self._toggle_settings)
         m.addSeparator()
