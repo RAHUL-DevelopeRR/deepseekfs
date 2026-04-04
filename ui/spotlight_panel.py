@@ -1524,11 +1524,15 @@ class SpotlightPanel(QWidget):
             self.rl.addWidget(r)
             self._rows.append(r)
 
+        # "You might want to revisit..." section
+        q = self.search.text().strip()
+        if q:
+            self._add_revisit_suggestions(q)
+
         self.rl.addWidget(self._acw)
         self.rl.addWidget(self._sgw)
         self.rl.addStretch()
 
-        q = self.search.text().strip()
         n = len(hits)
         self.status.setText(f'{n} result{"s" if n != 1 else ""} for "{q}"')
         if self._rows:
@@ -1575,6 +1579,54 @@ class SpotlightPanel(QWidget):
             logger.warning(f"Failed to populate Jump back in: {e}")
             self._jbi_widget.hide()
 
+    def _add_revisit_suggestions(self, query: str):
+        """Add 'You might want to revisit...' section to results."""
+        try:
+            suggestions = self._svc.get_revisit_suggestions(query, exclude_days=2, limit=3)
+            if not suggestions:
+                return
+
+            # Add spacing
+            spacer = QWidget()
+            spacer.setFixedHeight(16)
+            spacer.setStyleSheet("background: transparent;")
+            self.rl.addWidget(spacer)
+
+            # Add header
+            header = CatHeader("You might want to revisit...", len(suggestions), self.rw)
+            self.rl.addWidget(header)
+
+            # Add suggestion rows (visually different from main results)
+            for suggestion in suggestions:
+                file_path = suggestion.get('file_path')
+                if file_path and Path(file_path).exists():
+                    # Create a minimal dict compatible with ResultRow
+                    hit = {
+                        'path': file_path,
+                        'name': Path(file_path).name,
+                        'extension': Path(file_path).suffix,
+                    }
+                    r = ResultRow(hit, top=False, parent=self.rw)
+                    r.clicked.connect(self._open)
+                    # Make it visually distinct (dimmed)
+                    r.setStyleSheet("""
+                        ResultRow {
+                            background: transparent;
+                            border: 1px solid transparent;
+                            border-radius: 4px;
+                            opacity: 0.6;
+                        }
+                        ResultRow:hover {
+                            background: rgba(255,255,255,0.03);
+                            border: 1px solid transparent;
+                            opacity: 1.0;
+                        }
+                    """)
+                    self.rl.addWidget(r)
+                    self._rows.append(r)
+
+        except Exception as e:
+            logger.warning(f"Failed to add revisit suggestions: {e}")
 
     # ── actions ──────────────────────────────────────────────
     def _action(self, aid):
@@ -1632,6 +1684,19 @@ class SpotlightPanel(QWidget):
                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self._tray.setToolTip("Neuron — Shift+Space to search")
         self._tray.show()
+        self._update_tray_tooltip()
+
+    def _update_tray_tooltip(self):
+        """Update tray tooltip with streak info."""
+        try:
+            streak = self._svc.get_streak_days()
+            if streak > 0:
+                tooltip = f"Neuron — Shift+Space to search\n{streak} day{'s' if streak != 1 else ''} streak 🔥"
+            else:
+                tooltip = "Neuron — Shift+Space to search"
+            self._tray.setToolTip(tooltip)
+        except Exception:
+            self._tray.setToolTip("Neuron — Shift+Space to search")
 
     # ── indexing ─────────────────────────────────────────────
     def _kick_index(self):
@@ -1648,6 +1713,8 @@ class SpotlightPanel(QWidget):
         self._indexing = False
         self._idx_count = self._svc.total_indexed()
         self.idx_lbl.setText(f"{self._idx_count:,} files indexed")
+        # Update tray tooltip with streak
+        self._update_tray_tooltip()
 
     # ── Navigation (← → ↑ ↻) ────────────────────────────────
     def _nav_back(self):
