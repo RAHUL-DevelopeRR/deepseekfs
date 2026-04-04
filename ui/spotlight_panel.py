@@ -37,6 +37,7 @@ from services.desktop_service import DesktopService
 from PyQt6.QtWidgets import QFileIconProvider
 from PyQt6.QtCore import QFileInfo
 from services.ollama_service import get_ollama
+from ui.memory_lane_panel import MemoryLanePanel
 
 # ── resolve assets path ──────────────────────────────────────
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -947,6 +948,60 @@ class ActionCard(QFrame):
         self.action_clicked.emit(self._aid)
 
 
+# ── suggestion chip (for "Jump back in") ─────────────────────
+class SuggestionChip(QFrame):
+    """Compact file suggestion chip with icon and truncated name."""
+    clicked = pyqtSignal(str)
+
+    def __init__(self, file_path: str, parent=None):
+        super().__init__(parent)
+        self._path = file_path
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(32)
+        self.setStyleSheet(f"""
+            SuggestionChip {{
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 16px;
+                padding: 0 12px;
+            }}
+            SuggestionChip:hover {{
+                background: rgba(0,120,212,0.15);
+                border-color: rgba(0,120,212,0.30);
+            }}
+        """)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 0, 12, 0)
+        lay.setSpacing(6)
+
+        # Icon
+        ic = QLabel()
+        ic.setFixedSize(16, 16)
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pixmap = _get_shell_icon(file_path, 16)
+        if not pixmap.isNull():
+            ic.setPixmap(pixmap)
+        else:
+            ic.setText("📄")
+            ic.setStyleSheet("font-size: 12px; background: transparent;")
+        lay.addWidget(ic)
+
+        # Name (truncated)
+        name = Path(file_path).name
+        if len(name) > 30:
+            name = name[:27] + "..."
+        lbl = QLabel(name)
+        lbl.setStyleSheet(f"""
+            font-family: {FN}; font-size: 11px; font-weight: 500;
+            color: rgba(255,255,255,0.75); background: transparent;
+        """)
+        lay.addWidget(lbl)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._path)
+
 # ── settings overlay ─────────────────────────────────────────
 class SettingsOverlay(QFrame):
     closed = pyqtSignal()
@@ -1074,6 +1129,7 @@ class SpotlightPanel(QWidget):
         self._indexing = False
         self._idx_count = 0
         self._settings: SettingsOverlay | None = None
+        self._memory_lane: MemoryLanePanel | None = None
         self._it: IndexThread | None = None
         self._st: SearchThread | None = None
         self._llm_st: SearchThread | None = None  # LLM re-rank background thread
@@ -1261,6 +1317,33 @@ class SpotlightPanel(QWidget):
         root.addLayout(pr)
         root.addSpacing(8)
 
+        # ── JUMP BACK IN SUGGESTIONS ──
+        self._jbi_widget = QWidget()
+        self._jbi_widget.setStyleSheet("background: transparent;")
+        jbi_lay = QVBoxLayout(self._jbi_widget)
+        jbi_lay.setContentsMargins(0, 0, 0, 6)
+        jbi_lay.setSpacing(6)
+
+        jbi_header = QLabel("JUMP BACK IN")
+        jbi_header.setStyleSheet(f"""
+            font-family: {FN}; font-size: 10px; font-weight: 700;
+            letter-spacing: 1px; color: rgba(255,255,255,0.25);
+            background: transparent; padding-left: 12px;
+        """)
+        jbi_lay.addWidget(jbi_header)
+
+        # Container for suggestion chips
+        self._jbi_chips_container = QWidget()
+        self._jbi_chips_container.setStyleSheet("background: transparent;")
+        self._jbi_chips_layout = QHBoxLayout(self._jbi_chips_container)
+        self._jbi_chips_layout.setContentsMargins(12, 0, 12, 0)
+        self._jbi_chips_layout.setSpacing(8)
+        self._jbi_chips_layout.addStretch()
+        jbi_lay.addWidget(self._jbi_chips_container)
+
+        self._jbi_widget.hide()
+        root.addWidget(self._jbi_widget)
+
         # ── DIVIDER ──
         dv = QFrame(); dv.setFixedHeight(1)
         dv.setStyleSheet("background: rgba(255,255,255,0.06);")
@@ -1443,11 +1526,15 @@ class SpotlightPanel(QWidget):
             self.rl.addWidget(r)
             self._rows.append(r)
 
+        # "You might want to revisit..." section
+        q = self.search.text().strip()
+        if q:
+            self._add_revisit_suggestions(q)
+
         self.rl.addWidget(self._acw)
         self.rl.addWidget(self._sgw)
         self.rl.addStretch()
 
-        q = self.search.text().strip()
         n = len(hits)
         self.status.setText(f'{n} result{"s" if n != 1 else ""} for "{q}"')
         if self._rows:
@@ -1466,6 +1553,82 @@ class SpotlightPanel(QWidget):
         elif exts: filtered = [h for h in self._all if h.get("extension","").lower() in exts]
         else: filtered = self._all
         self._populate(filtered)
+
+    # ── "Jump back in" suggestions ───────────────────────────
+    def _populate_jump_back_in(self):
+        """Populate 'Jump back in' suggestions with recent files."""
+        # Clear existing chips
+        while self._jbi_chips_layout.count() > 1:  # Keep the stretch
+            item = self._jbi_chips_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        try:
+            recent_files = self._svc.get_recent_files(limit=5)
+            if recent_files:
+                for file_data in recent_files:
+                    file_path = file_data.get('file_path')
+                    if file_path and Path(file_path).exists():
+                        chip = SuggestionChip(file_path, self._jbi_chips_container)
+                        chip.clicked.connect(self._open)
+                        self._jbi_chips_layout.insertWidget(
+                            self._jbi_chips_layout.count() - 1, chip
+                        )
+                self._jbi_widget.show()
+            else:
+                self._jbi_widget.hide()
+        except Exception as e:
+            logger.warning(f"Failed to populate Jump back in: {e}")
+            self._jbi_widget.hide()
+
+    def _add_revisit_suggestions(self, query: str):
+        """Add 'You might want to revisit...' section to results."""
+        try:
+            suggestions = self._svc.get_revisit_suggestions(query, exclude_days=2, limit=3)
+            if not suggestions:
+                return
+
+            # Add spacing
+            spacer = QWidget()
+            spacer.setFixedHeight(16)
+            spacer.setStyleSheet("background: transparent;")
+            self.rl.addWidget(spacer)
+
+            # Add header
+            header = CatHeader("You might want to revisit...", len(suggestions), self.rw)
+            self.rl.addWidget(header)
+
+            # Add suggestion rows (visually different from main results)
+            for suggestion in suggestions:
+                file_path = suggestion.get('file_path')
+                if file_path and Path(file_path).exists():
+                    # Create a minimal dict compatible with ResultRow
+                    hit = {
+                        'path': file_path,
+                        'name': Path(file_path).name,
+                        'extension': Path(file_path).suffix,
+                    }
+                    r = ResultRow(hit, top=False, parent=self.rw)
+                    r.clicked.connect(self._open)
+                    # Make it visually distinct (dimmed)
+                    r.setStyleSheet("""
+                        ResultRow {
+                            background: transparent;
+                            border: 1px solid transparent;
+                            border-radius: 4px;
+                            opacity: 0.6;
+                        }
+                        ResultRow:hover {
+                            background: rgba(255,255,255,0.03);
+                            border: 1px solid transparent;
+                            opacity: 1.0;
+                        }
+                    """)
+                    self.rl.addWidget(r)
+                    self._rows.append(r)
+
+        except Exception as e:
+            logger.warning(f"Failed to add revisit suggestions: {e}")
 
     # ── actions ──────────────────────────────────────────────
     def _action(self, aid):
@@ -1492,6 +1655,22 @@ class SpotlightPanel(QWidget):
         if self._settings:
             self._settings.hide(); self._settings.deleteLater(); self._settings = None
 
+    def _toggle_memory_lane(self):
+        """Toggle Memory Lane daily recap panel."""
+        if self._memory_lane and self._memory_lane.isVisible():
+            self._memory_lane.hide(); self._memory_lane.deleteLater(); self._memory_lane = None
+            return
+        self._memory_lane = MemoryLanePanel(self._svc, self)
+        self._memory_lane.closed.connect(self._close_memory_lane)
+        self._memory_lane.file_clicked.connect(self._open)
+        self._memory_lane.setGeometry(22, 80, self.width() - 44, self.height() - 110)
+        self._memory_lane.show(); self._memory_lane.raise_()
+
+    def _close_memory_lane(self):
+        """Close Memory Lane panel."""
+        if self._memory_lane:
+            self._memory_lane.hide(); self._memory_lane.deleteLater(); self._memory_lane = None
+
     def _reindex(self):
         from services.startup_indexer import StartupIndexer
         StartupIndexer()._wipe_index("manual")
@@ -1512,6 +1691,7 @@ class SpotlightPanel(QWidget):
             QMenu::separator { height: 1px; background: #333; margin: 4px 8px; }
         """)
         m.addAction("🔍  Show  (Shift+Space)").triggered.connect(self.toggle_panel)
+        m.addAction("📅  Memory Lane").triggered.connect(self._toggle_memory_lane)
         m.addAction("🔄  Re-index").triggered.connect(self._reindex)
         m.addAction("⚙️  Settings").triggered.connect(self._toggle_settings)
         m.addSeparator()
@@ -1523,6 +1703,19 @@ class SpotlightPanel(QWidget):
                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self._tray.setToolTip("Neuron — Shift+Space to search")
         self._tray.show()
+        self._update_tray_tooltip()
+
+    def _update_tray_tooltip(self):
+        """Update tray tooltip with streak info."""
+        try:
+            streak = self._svc.get_streak_days()
+            if streak > 0:
+                tooltip = f"Neuron — Shift+Space to search\n{streak} day{'s' if streak != 1 else ''} streak 🔥"
+            else:
+                tooltip = "Neuron — Shift+Space to search"
+            self._tray.setToolTip(tooltip)
+        except Exception:
+            self._tray.setToolTip("Neuron — Shift+Space to search")
 
     # ── indexing ─────────────────────────────────────────────
     def _kick_index(self):
@@ -1539,6 +1732,8 @@ class SpotlightPanel(QWidget):
         self._indexing = False
         self._idx_count = self._svc.total_indexed()
         self.idx_lbl.setText(f"{self._idx_count:,} files indexed")
+        # Update tray tooltip with streak
+        self._update_tray_tooltip()
 
     # ── Navigation (← → ↑ ↻) ────────────────────────────────
     def _nav_back(self):
@@ -1611,6 +1806,8 @@ class SpotlightPanel(QWidget):
     def _on_text(self, t):
         if t.strip():
             self._deb.start()
+            # Hide "Jump back in" when user starts typing
+            self._jbi_widget.hide()
         else:
             # Fully reset when search bar is cleared
             self._deb.stop()
@@ -1624,6 +1821,8 @@ class SpotlightPanel(QWidget):
             self.rl.addStretch()
             self._show_empty()
             self.status.setText("")
+            # Show "Jump back in" when search is cleared
+            self._populate_jump_back_in()
 
     def _do_search(self):
         q = self.search.text().strip()
@@ -1916,6 +2115,8 @@ class SpotlightPanel(QWidget):
             self.rl.addStretch()
             self._show_empty()
             self.status.setText("")
+            # Populate "Jump back in" suggestions
+            self._populate_jump_back_in()
 
         if platform.system() == "Windows":
             QTimer.singleShot(30, self._acrylic)
