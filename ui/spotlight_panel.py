@@ -947,6 +947,60 @@ class ActionCard(QFrame):
         self.action_clicked.emit(self._aid)
 
 
+# ── suggestion chip (for "Jump back in") ─────────────────────
+class SuggestionChip(QFrame):
+    """Compact file suggestion chip with icon and truncated name."""
+    clicked = pyqtSignal(str)
+
+    def __init__(self, file_path: str, parent=None):
+        super().__init__(parent)
+        self._path = file_path
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(32)
+        self.setStyleSheet(f"""
+            SuggestionChip {{
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 16px;
+                padding: 0 12px;
+            }}
+            SuggestionChip:hover {{
+                background: rgba(0,120,212,0.15);
+                border-color: rgba(0,120,212,0.30);
+            }}
+        """)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 0, 12, 0)
+        lay.setSpacing(6)
+
+        # Icon
+        ic = QLabel()
+        ic.setFixedSize(16, 16)
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pixmap = _get_shell_icon(file_path, 16)
+        if not pixmap.isNull():
+            ic.setPixmap(pixmap)
+        else:
+            ic.setText("📄")
+            ic.setStyleSheet("font-size: 12px; background: transparent;")
+        lay.addWidget(ic)
+
+        # Name (truncated)
+        name = Path(file_path).name
+        if len(name) > 30:
+            name = name[:27] + "..."
+        lbl = QLabel(name)
+        lbl.setStyleSheet(f"""
+            font-family: {FN}; font-size: 11px; font-weight: 500;
+            color: rgba(255,255,255,0.75); background: transparent;
+        """)
+        lay.addWidget(lbl)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._path)
+
 # ── settings overlay ─────────────────────────────────────────
 class SettingsOverlay(QFrame):
     closed = pyqtSignal()
@@ -1261,6 +1315,33 @@ class SpotlightPanel(QWidget):
         root.addLayout(pr)
         root.addSpacing(8)
 
+        # ── JUMP BACK IN SUGGESTIONS ──
+        self._jbi_widget = QWidget()
+        self._jbi_widget.setStyleSheet("background: transparent;")
+        jbi_lay = QVBoxLayout(self._jbi_widget)
+        jbi_lay.setContentsMargins(0, 0, 0, 6)
+        jbi_lay.setSpacing(6)
+
+        jbi_header = QLabel("JUMP BACK IN")
+        jbi_header.setStyleSheet(f"""
+            font-family: {FN}; font-size: 10px; font-weight: 700;
+            letter-spacing: 1px; color: rgba(255,255,255,0.25);
+            background: transparent; padding-left: 12px;
+        """)
+        jbi_lay.addWidget(jbi_header)
+
+        # Container for suggestion chips
+        self._jbi_chips_container = QWidget()
+        self._jbi_chips_container.setStyleSheet("background: transparent;")
+        self._jbi_chips_layout = QHBoxLayout(self._jbi_chips_container)
+        self._jbi_chips_layout.setContentsMargins(12, 0, 12, 0)
+        self._jbi_chips_layout.setSpacing(8)
+        self._jbi_chips_layout.addStretch()
+        jbi_lay.addWidget(self._jbi_chips_container)
+
+        self._jbi_widget.hide()
+        root.addWidget(self._jbi_widget)
+
         # ── DIVIDER ──
         dv = QFrame(); dv.setFixedHeight(1)
         dv.setStyleSheet("background: rgba(255,255,255,0.06);")
@@ -1467,6 +1548,34 @@ class SpotlightPanel(QWidget):
         else: filtered = self._all
         self._populate(filtered)
 
+    # ── "Jump back in" suggestions ───────────────────────────
+    def _populate_jump_back_in(self):
+        """Populate 'Jump back in' suggestions with recent files."""
+        # Clear existing chips
+        while self._jbi_chips_layout.count() > 1:  # Keep the stretch
+            item = self._jbi_chips_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        try:
+            recent_files = self._svc.get_recent_files(limit=5)
+            if recent_files:
+                for file_data in recent_files:
+                    file_path = file_data.get('file_path')
+                    if file_path and Path(file_path).exists():
+                        chip = SuggestionChip(file_path, self._jbi_chips_container)
+                        chip.clicked.connect(self._open)
+                        self._jbi_chips_layout.insertWidget(
+                            self._jbi_chips_layout.count() - 1, chip
+                        )
+                self._jbi_widget.show()
+            else:
+                self._jbi_widget.hide()
+        except Exception as e:
+            logger.warning(f"Failed to populate Jump back in: {e}")
+            self._jbi_widget.hide()
+
+
     # ── actions ──────────────────────────────────────────────
     def _action(self, aid):
         if aid == "reindex":   self._reindex()
@@ -1611,6 +1720,8 @@ class SpotlightPanel(QWidget):
     def _on_text(self, t):
         if t.strip():
             self._deb.start()
+            # Hide "Jump back in" when user starts typing
+            self._jbi_widget.hide()
         else:
             # Fully reset when search bar is cleared
             self._deb.stop()
@@ -1624,6 +1735,8 @@ class SpotlightPanel(QWidget):
             self.rl.addStretch()
             self._show_empty()
             self.status.setText("")
+            # Show "Jump back in" when search is cleared
+            self._populate_jump_back_in()
 
     def _do_search(self):
         q = self.search.text().strip()
@@ -1916,6 +2029,8 @@ class SpotlightPanel(QWidget):
             self.rl.addStretch()
             self._show_empty()
             self.status.setText("")
+            # Populate "Jump back in" suggestions
+            self._populate_jump_back_in()
 
         if platform.system() == "Windows":
             QTimer.singleShot(30, self._acrylic)
