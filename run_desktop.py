@@ -1133,7 +1133,7 @@ class SearchPanel(QWidget):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Neuron")
-    app.setApplicationVersion("4.1.0")
+    app.setApplicationVersion("4.5.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(True)
 
@@ -1191,5 +1191,30 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-
+    try:
+        main()
+    except Exception as exc:
+        # ── Last-resort crash guard ──
+        # Log to file so we can diagnose even when running as windowless exe
+        import traceback
+        crash_msg = traceback.format_exc()
+        try:
+            crash_log = Path(__file__).resolve().parent / "storage" / "crash.log"
+            crash_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(crash_log, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"Crash at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(crash_msg)
+        except Exception:
+            pass
+        # Show a native MessageBox so the user sees something
+        try:
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                f"Neuron failed to start:\n\n{str(exc)[:300]}\n\nCheck storage/crash.log for details.",
+                "Neuron — Startup Error",
+                0x10,  # MB_ICONERROR
+            )
+        except Exception:
+            print(crash_msg, file=sys.stderr)
+        sys.exit(1)

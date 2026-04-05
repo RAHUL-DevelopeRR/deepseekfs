@@ -1,11 +1,16 @@
 ; ═══════════════════════════════════════════════════════════════
-; Neuron v4.2 — Professional Windows Installer (Inno Setup 6)
+; Neuron v4.5 — Professional Windows Installer (Inno Setup 6)
 ; ═══════════════════════════════════════════════════════════════
 ; Bundles: Launcher .exe + Source + Python venv + Ollama (optional)
 ; Target: Any Windows 10/11 x64 machine
+; Changes from v4.2:
+;   - Fixed launcher (DETACHED_PROCESS instead of CREATE_NO_WINDOW)
+;   - Hardened activity logger (Phase 1 Memory OS)
+;   - Top-level crash guard in run_desktop.py
+;   - Launcher uses pythonw.exe (no console flash)
 
 #define MyAppName "Neuron"
-#define MyAppVersion "4.2"
+#define MyAppVersion "4.5"
 #define MyAppPublisher "Rahul"
 #define MyAppExeName "Neuron.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
@@ -23,7 +28,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=NeuronSetup_v4.2
+OutputBaseFilename=NeuronSetup_v4.5
 SetupIconFile=assets\neuron_icon.ico
 UninstallDisplayIcon={app}\assets\neuron_icon.ico
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
@@ -36,7 +41,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DiskSpanning=no
-VersionInfoVersion=4.2.0.0
+VersionInfoVersion=4.5.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} — AI-Powered Semantic File Intelligence
 VersionInfoTextVersion={#MyAppVersion}

@@ -16,7 +16,10 @@ from app.logger import logger
 import os
 from core.indexing.index_builder import get_index
 from services.startup_indexer import StartupIndexer
-from core.activity import log_event, get_recent_files, get_revisit_suggestions, get_daily_stats, get_streak_days
+from core.activity import (
+    log_event, get_recent_events, get_recent_files,
+    get_revisit_suggestions, get_daily_stats, get_streak_days,
+)
 
 
 class DesktopService:
@@ -206,8 +209,18 @@ class DesktopService:
         """Get recently accessed files for 'Jump back in' suggestions."""
         return get_recent_files(limit)
 
+    def get_recent_events(self, limit: int = 100, event_type: str | None = None) -> List[dict]:
+        """Get most recent activity events (for activity search / Memory Lane)."""
+        return get_recent_events(limit, event_type)
+
     def get_revisit_suggestions(self, query: str, exclude_days: int = 2, limit: int = 3) -> List[dict]:
-        """Get 'You might want to revisit' suggestions based on query."""
+        """Get 'You might want to revisit' suggestions.
+
+        Tokenises the query by whitespace and matches each token
+        against file paths in the activity log.  Files accessed
+        within ``exclude_days`` are filtered out so we only surface
+        slightly-older, contextually-relevant files.
+        """
         tokens = query.lower().split()
         return get_revisit_suggestions(tokens, exclude_days, limit)
 

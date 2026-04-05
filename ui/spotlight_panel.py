@@ -1252,6 +1252,12 @@ class SpotlightPanel(QWidget):
         self._btn_refresh.clicked.connect(self._nav_refresh)
         nav.addWidget(self._btn_refresh)
 
+        self._btn_memory = QPushButton("📅")
+        self._btn_memory.setStyleSheet(nav_btn_css)
+        self._btn_memory.setToolTip("Memory Lane — daily activity recap")
+        self._btn_memory.clicked.connect(self._toggle_memory_lane)
+        nav.addWidget(self._btn_memory)
+
         nav.addSpacing(12)
 
         # ── SEARCH BAR (right-aligned in nav) ──
@@ -1387,6 +1393,37 @@ class SpotlightPanel(QWidget):
         """)
         self.rl.addWidget(self.empty)
 
+        # TODAY'S ACTIVITY CARD (visible in empty state)
+        self._today_card = QFrame()
+        self._today_card.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(0,120,212,0.04);
+                border: 1px solid rgba(0,120,212,0.10);
+                border-radius: 10px;
+            }}
+        """)
+        tc_lay = QVBoxLayout(self._today_card)
+        tc_lay.setContentsMargins(16, 12, 16, 12)
+        tc_lay.setSpacing(6)
+        tc_hdr = QHBoxLayout()
+        tc_title = QLabel("📊 Today's Activity")
+        tc_title.setStyleSheet(f"font-family: {FN}; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.65); background: transparent;")
+        tc_hdr.addWidget(tc_title)
+        tc_hdr.addStretch()
+        self._today_streak = QLabel("")
+        self._today_streak.setStyleSheet(f"font-family: {FN}; font-size: 10px; color: rgba(255,180,50,0.8); background: transparent;")
+        tc_hdr.addWidget(self._today_streak)
+        tc_lay.addLayout(tc_hdr)
+        # Activity stats row
+        self._today_stats = QLabel("Loading...")
+        self._today_stats.setStyleSheet(f"font-family: {FN}; font-size: 11px; color: rgba(255,255,255,0.35); background: transparent;")
+        tc_lay.addWidget(self._today_stats)
+        # "Try @query" hint
+        tc_hint = QLabel("💡 Type @yesterday or @last week to search your activity")
+        tc_hint.setStyleSheet(f"font-family: {MN}; font-size: 9px; color: rgba(0,120,212,0.50); background: transparent;")
+        tc_lay.addWidget(tc_hint)
+        self.rl.addWidget(self._today_card)
+
         # ACTION CARDS (visible in empty state)
         self._acw = QWidget(); self._acw.setStyleSheet("background: transparent;")
         al = QVBoxLayout(self._acw); al.setContentsMargins(0,0,0,0); al.setSpacing(6)
@@ -1409,6 +1446,7 @@ class SpotlightPanel(QWidget):
             ("💡", "Semantic search", "Use natural language — \"files about machine learning\""),
             ("🧠", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
             ("⏰", "Time filters", "Try \"modified last week\" or \"created today\""),
+            ("📅", "Activity search", "Type @yesterday to see your recent work sessions"),
         ]:
             sf = QFrame(); sf.setFixedHeight(42)
             sf.setStyleSheet("background: transparent; border-radius: 10px;")
@@ -1417,14 +1455,14 @@ class SpotlightPanel(QWidget):
             si.setAlignment(Qt.AlignmentFlag.AlignCenter)
             si.setStyleSheet("font-size: 15px; background: rgba(56,156,255,0.06); border-radius: 8px;")
             sfl.addWidget(si)
-            tc = QVBoxLayout(); tc.setSpacing(0)
+            tc2 = QVBoxLayout(); tc2.setSpacing(0)
             n = QLabel(nm)
             n.setStyleSheet(f"font-family: {FN}; font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.70); background: transparent;")
-            tc.addWidget(n)
+            tc2.addWidget(n)
             d = QLabel(ds)
             d.setStyleSheet(f"font-family: {MN}; font-size: 9.5px; color: rgba(255,255,255,0.22); background: transparent;")
-            tc.addWidget(d)
-            sfl.addLayout(tc, 1)
+            tc2.addWidget(d)
+            sfl.addLayout(tc2, 1)
             sl2.addWidget(sf)
         self.rl.addWidget(self._sgw)
         self.rl.addStretch()
@@ -1465,6 +1503,11 @@ class SpotlightPanel(QWidget):
         self.idx_lbl = QLabel("Indexing…")
         self.idx_lbl.setStyleSheet(f"font-size: 10px; color: rgba(255,255,255,0.18); background: transparent;")
         bb.addWidget(self.idx_lbl)
+
+        # Streak indicator
+        self._streak_lbl = QLabel("")
+        self._streak_lbl.setStyleSheet(f"font-size: 10px; color: rgba(255,180,50,0.6); background: transparent; margin-left: 6px;")
+        bb.addWidget(self._streak_lbl)
         bb.addStretch()
 
         for txt in ["↑↓ nav", "↵ open", "Tab Encyl", "?query ask", "^C copy", "Esc close"]:
@@ -1494,15 +1537,18 @@ class SpotlightPanel(QWidget):
         while self.rl.count() > 0:
             it = self.rl.takeAt(0)
             w = it.widget()
-            if w and w not in (self.empty, self._acw, self._sgw):
+            if w and w not in (self.empty, self._acw, self._sgw, self._today_card):
                 w.deleteLater()
 
     def _show_empty(self, msg=None):
         if msg: self.empty.setText(msg)
         self.empty.show(); self._acw.show(); self._sgw.show()
+        self._today_card.show()
+        self._refresh_today_card()
 
     def _hide_empty(self):
         self.empty.hide(); self._acw.hide(); self._sgw.hide()
+        self._today_card.hide()
 
     def _populate(self, hits):
         self._clear()
@@ -1630,7 +1676,286 @@ class SpotlightPanel(QWidget):
         except Exception as e:
             logger.warning(f"Failed to add revisit suggestions: {e}")
 
-    # ── actions ──────────────────────────────────────────────
+    # ── Activity Search (Memory OS) ──────────────────────────
+    def _do_activity_search(self, query: str):
+        """Handle @ activity queries like '@yesterday' or '@last week python files'."""
+        import datetime
+        self._dismiss_ai_panel()
+        self._stop_encyl_loading()
+        self._clear()
+        self._hide_empty()
+
+        now = datetime.datetime.now()
+        # Parse time range from query
+        time_range, keyword = self._parse_time_range(query, now)
+
+        try:
+            events = self._svc.get_recent_events(limit=500)
+            if not events:
+                self._show_empty("No activity recorded yet — use Neuron to build your timeline")
+                self.rl.addWidget(self.empty)
+                self.rl.addWidget(self._today_card)
+                self.rl.addWidget(self._acw)
+                self.rl.addWidget(self._sgw)
+                self.rl.addStretch()
+                self.status.setText("No activity events found")
+                return
+
+            # Filter events by time range
+            filtered = []
+            for ev in events:
+                ts = ev.get('timestamp', '')
+                if not ts:
+                    continue
+                try:
+                    ev_time = datetime.datetime.fromisoformat(ts)
+                except (ValueError, TypeError):
+                    continue
+                if time_range:
+                    start, end = time_range
+                    if not (start <= ev_time <= end):
+                        continue
+                # Keyword filter (on file path)
+                if keyword:
+                    fp = ev.get('file_path', '').lower()
+                    et = ev.get('event_type', '').lower()
+                    if keyword.lower() not in fp and keyword.lower() not in et:
+                        continue
+                filtered.append(ev)
+
+            if not filtered:
+                q_display = f"@{query}"
+                self._show_empty(f"No activity matching \"{q_display}\"\\n\\nTry: @yesterday, @last week, @today python")
+                self.rl.addWidget(self.empty)
+                self.rl.addWidget(self._today_card)
+                self.rl.addWidget(self._acw)
+                self.rl.addWidget(self._sgw)
+                self.rl.addStretch()
+                self.status.setText(f'No activity for "@{query}"')
+                return
+
+            self._show_activity_results(filtered, query)
+
+        except Exception as e:
+            logger.error(f"Activity search error: {e}")
+            self.status.setText(f"Activity search error: {e}")
+
+    def _show_activity_results(self, events: list, query: str):
+        """Display activity events grouped by session (30-min gaps)."""
+        import datetime, collections
+
+        # Group events into sessions (30-min gap = new session)
+        sessions = []
+        current_session = []
+        last_time = None
+
+        for ev in events:
+            try:
+                ev_time = datetime.datetime.fromisoformat(ev.get('timestamp', ''))
+            except (ValueError, TypeError):
+                continue
+            if last_time and (last_time - ev_time).total_seconds() > 1800:
+                if current_session:
+                    sessions.append(current_session)
+                current_session = []
+            current_session.append(ev)
+            last_time = ev_time
+
+        if current_session:
+            sessions.append(current_session)
+
+        # Display sessions
+        total_events = sum(len(s) for s in sessions)
+        self.status.setText(
+            f'{total_events} event{"s" if total_events != 1 else ""} '
+            f'in {len(sessions)} session{"s" if len(sessions) != 1 else ""} '
+            f'for "@{query}"'
+        )
+
+        for si, session in enumerate(sessions):
+            if not session:
+                continue
+            first_ev = session[0]
+            last_ev = session[-1]
+            try:
+                start_time = datetime.datetime.fromisoformat(first_ev.get('timestamp', ''))
+                end_time = datetime.datetime.fromisoformat(last_ev.get('timestamp', ''))
+            except (ValueError, TypeError):
+                continue
+
+            # Session header
+            day_str = start_time.strftime("%A, %b %d")
+            time_str = f"{start_time.strftime('%I:%M %p')} – {end_time.strftime('%I:%M %p')}"
+            duration = start_time - end_time
+            dur_min = max(1, int(abs(duration.total_seconds()) / 60))
+            dur_str = f"{dur_min}min" if dur_min < 60 else f"{dur_min // 60}h {dur_min % 60}m"
+
+            session_hdr = QFrame()
+            session_hdr.setStyleSheet(f"""
+                QFrame {{
+                    background: rgba(0,120,212,0.06);
+                    border: 1px solid rgba(0,120,212,0.12);
+                    border-radius: 8px;
+                    margin-top: {'0' if si == 0 else '8'}px;
+                }}
+            """)
+            sh_lay = QHBoxLayout(session_hdr)
+            sh_lay.setContentsMargins(12, 8, 12, 8)
+
+            sh_icon = QLabel("📂")
+            sh_icon.setStyleSheet("font-size: 14px; background: transparent;")
+            sh_lay.addWidget(sh_icon)
+
+            sh_info = QVBoxLayout()
+            sh_info.setSpacing(0)
+            sh_title = QLabel(f"{day_str}  ·  {time_str}")
+            sh_title.setStyleSheet(f"font-family: {FN}; font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.70); background: transparent;")
+            sh_info.addWidget(sh_title)
+            sh_detail = QLabel(f"{len(session)} events · {dur_str}")
+            sh_detail.setStyleSheet(f"font-family: {MN}; font-size: 9px; color: rgba(255,255,255,0.30); background: transparent;")
+            sh_info.addWidget(sh_detail)
+            sh_lay.addLayout(sh_info, 1)
+
+            self.rl.addWidget(session_hdr)
+
+            # Deduplicate files in session
+            seen_paths = set()
+            for ev in session:
+                fp = ev.get('file_path', '')
+                if not fp or fp in seen_paths:
+                    continue
+                seen_paths.add(fp)
+                if not Path(fp).exists():
+                    continue
+
+                event_type = ev.get('event_type', 'access')
+                type_emoji = {"open": "📂", "search": "🔍", "summarize": "🧠",
+                              "index": "📄", "access": "👁"}.get(event_type, "📄")
+
+                hit = {
+                    'path': fp,
+                    'name': Path(fp).name,
+                    'extension': Path(fp).suffix,
+                }
+                r = ResultRow(hit, top=False, parent=self.rw)
+                r.clicked.connect(self._open)
+                self.rl.addWidget(r)
+                self._rows.append(r)
+
+        self.rl.addStretch()
+        if self._rows:
+            self._sel = 0
+            self._rows[0].set_selected(True)
+
+    def _parse_time_range(self, query: str, now):
+        """Parse natural language time from activity query.
+
+        Returns (time_range, keyword) where time_range is (start, end) or None.
+        """
+        import datetime
+        q = query.lower().strip()
+        keyword = ""
+
+        # Extract time keywords
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        time_patterns = [
+            ("today", (today_start, now)),
+            ("yesterday", (today_start - datetime.timedelta(days=1), today_start)),
+            ("this week", (today_start - datetime.timedelta(days=today_start.weekday()), now)),
+            ("last week", (
+                today_start - datetime.timedelta(days=today_start.weekday() + 7),
+                today_start - datetime.timedelta(days=today_start.weekday()),
+            )),
+            ("this month", (today_start.replace(day=1), now)),
+            ("last month", (
+                (today_start.replace(day=1) - datetime.timedelta(days=1)).replace(day=1),
+                today_start.replace(day=1),
+            )),
+        ]
+
+        # Day name matching (e.g., "last sunday", "monday")
+        day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        for i, day_name in enumerate(day_names):
+            if day_name in q:
+                # Find the most recent occurrence of this day
+                days_ago = (now.weekday() - i) % 7
+                if days_ago == 0 and "last" in q:
+                    days_ago = 7
+                target_day = today_start - datetime.timedelta(days=days_ago)
+                time_patterns.append((day_name, (target_day, target_day + datetime.timedelta(days=1))))
+                break
+
+        # Time of day refinement (e.g., "after 10 pm")
+        time_range = None
+        for pattern, tr in time_patterns:
+            if pattern in q:
+                time_range = tr
+                # Remove the time pattern from query to extract keyword
+                keyword = q.replace(pattern, "").strip()
+                # Remove filler words
+                for w in ["last", "this", "after", "before", "on", "in"]:
+                    keyword = keyword.replace(w, "").strip()
+                break
+
+        # Handle "N days ago"
+        if not time_range:
+            import re
+            m = re.search(r'(\d+)\s*days?\s*ago', q)
+            if m:
+                days = int(m.group(1))
+                target_day = today_start - datetime.timedelta(days=days)
+                time_range = (target_day, target_day + datetime.timedelta(days=1))
+                keyword = re.sub(r'\d+\s*days?\s*ago', '', q).strip()
+
+        if not time_range:
+            # No time pattern found — treat entire query as keyword, search all time
+            keyword = q
+
+        return time_range, keyword
+
+    def _refresh_today_card(self):
+        """Update the Today's Activity card with current stats."""
+        try:
+            stats = self._svc.get_daily_stats()
+            streak = self._svc.get_streak_days()
+
+            if stats:
+                searches = stats.get('search_count', 0)
+                opens = stats.get('open_count', 0)
+                summaries = stats.get('summarize_count', 0)
+                total = searches + opens + summaries
+                parts = []
+                if searches: parts.append(f"{searches} search{'es' if searches != 1 else ''}")
+                if opens: parts.append(f"{opens} file{'s' if opens != 1 else ''} opened")
+                if summaries: parts.append(f"{summaries} summar{'ies' if summaries != 1 else 'y'}")
+                if parts:
+                    self._today_stats.setText(" · ".join(parts))
+                else:
+                    self._today_stats.setText("No activity yet today — start searching!")
+            else:
+                self._today_stats.setText("No activity yet today — start searching!")
+
+            if streak > 0:
+                self._today_streak.setText(f"🔥 {streak} day{'s' if streak != 1 else ''} streak")
+            else:
+                self._today_streak.setText("")
+        except Exception as e:
+            logger.warning(f"Failed to refresh today card: {e}")
+            self._today_stats.setText("Activity tracking active")
+
+    def _refresh_streak(self):
+        """Update streak indicator in the bottom bar."""
+        try:
+            streak = self._svc.get_streak_days()
+            if streak > 0:
+                self._streak_lbl.setText(f"🔥 {streak}d streak")
+            else:
+                self._streak_lbl.setText("")
+        except Exception:
+            pass
+
+
     def _action(self, aid):
         if aid == "reindex":   self._reindex()
         elif aid == "add_path":
@@ -1816,6 +2141,7 @@ class SpotlightPanel(QWidget):
             self._stop_encyl_loading()
             self._clear()
             self.rl.addWidget(self.empty)
+            self.rl.addWidget(self._today_card)
             self.rl.addWidget(self._acw)
             self.rl.addWidget(self._sgw)
             self.rl.addStretch()
@@ -1837,6 +2163,13 @@ class SpotlightPanel(QWidget):
             if not question: return
             self._start_encyl_loading("🧠 Encyl is searching your files...")
             self._ask_ai(question)
+            return
+
+        # ── "@ query" → Activity search mode (Memory OS) ──
+        if q.startswith("@"):
+            activity_query = q[1:].strip()
+            if not activity_query: return
+            self._do_activity_search(activity_query)
             return
 
         # ── normal search (Phase 1: fast FAISS) ──
@@ -2110,6 +2443,7 @@ class SpotlightPanel(QWidget):
             self._dismiss_ai_panel()
             self._clear()
             self.rl.addWidget(self.empty)
+            self.rl.addWidget(self._today_card)
             self.rl.addWidget(self._acw)
             self.rl.addWidget(self._sgw)
             self.rl.addStretch()
@@ -2117,6 +2451,8 @@ class SpotlightPanel(QWidget):
             self.status.setText("")
             # Populate "Jump back in" suggestions
             self._populate_jump_back_in()
+            # Update streak
+            self._refresh_streak()
 
         if platform.system() == "Windows":
             QTimer.singleShot(30, self._acrylic)
