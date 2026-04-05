@@ -2,7 +2,7 @@
   <img src="assets/HeiNeuron.png" alt="Neuron" width="160"/>
 </p>
 
-<h1 align="center">Neuron v4.2</h1>
+<h1 align="center">Neuron v4.6</h1>
 <p align="center">
   <b>AI-Powered Semantic File Intelligence for Windows</b><br/>
   <i>Search smarter. Understand your files. Summarize anything.</i>
@@ -256,6 +256,28 @@ deepseekfs/
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push (`git push origin feature/amazing`)
 5. Open a Pull Request
+
+---
+
+## 🛠️ Building v4.6 (.exe)
+
+> Run these commands on your local Windows machine with Python venv active.
+
+```bash
+# 1. Activate venv
+venv\Scripts\activate
+
+# 2. Build the installer BMP (requires ImageMagick)
+magick assets\neuron_circular.png -background white -flatten -resize 55x58 assets\neuron_circular_white.bmp
+
+# 3. Freeze with PyInstaller
+pyinstaller neuron.spec --noconfirm --clean
+
+# 4. Package with Inno Setup (requires Inno Setup 6+)
+iscc neuron_installer.iss
+
+# 5. The installer will be at: installer_output/NeuronSetup_v4.6.exe
+```
 
 ---
 

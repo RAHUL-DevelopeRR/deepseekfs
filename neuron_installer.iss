@@ -1,5 +1,5 @@
 ; ═══════════════════════════════════════════════════════════════
-; Neuron v4.5 — Professional Windows Installer (Inno Setup 6)
+; Neuron v4.6 — Professional Windows Installer (Inno Setup 6)
 ; ═══════════════════════════════════════════════════════════════
 ; Bundles: Launcher .exe + Source + Python venv + Ollama (optional)
 ; Target: Any Windows 10/11 x64 machine
@@ -10,7 +10,7 @@
 ;   - Launcher uses pythonw.exe (no console flash)
 
 #define MyAppName "Neuron"
-#define MyAppVersion "4.5"
+#define MyAppVersion "4.6"
 #define MyAppPublisher "Rahul"
 #define MyAppExeName "Neuron.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
@@ -28,7 +28,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=NeuronSetup_v4.5
+OutputBaseFilename=NeuronSetup_v4.6
 SetupIconFile=assets\neuron_icon.ico
 UninstallDisplayIcon={app}\assets\neuron_icon.ico
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
@@ -36,12 +36,14 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 WizardImageFile=assets\wizard_sidebar.bmp
+; BUG4-FIX: Neuron logo in installer wizard top-right corner
+; Generate: magick assets\neuron_circular.png -background white -flatten -resize 55x58 assets\neuron_circular_white.bmp
 WizardSmallImageFile=assets\wizard_small.bmp
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DiskSpanning=no
-VersionInfoVersion=4.5.0.0
+VersionInfoVersion=4.6.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} — AI-Powered Semantic File Intelligence
 VersionInfoTextVersion={#MyAppVersion}

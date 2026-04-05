@@ -29,8 +29,9 @@ _SMALL_FILE_THRESHOLD = 1 * 1024 * 1024    # 1 MB
 class SemanticSearch:
     """Search engine that always reads from the shared singleton index."""
 
-    def __init__(self):
+    def __init__(self, index=None):
         self.embedder = get_embedder()
+        self._preloaded_index = index
 
     def search(
         self,
@@ -39,7 +40,7 @@ class SemanticSearch:
         use_time_ranking: bool = True,
         use_llm_rerank: bool = False,
     ) -> List[Dict]:
-        index_builder = get_index()
+        index_builder = self._preloaded_index if self._preloaded_index is not None else get_index()
 
         if index_builder.index is None or index_builder.index.ntotal == 0:
             logger.warning("Index is empty. Indexing may still be running.")

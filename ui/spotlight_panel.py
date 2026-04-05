@@ -144,7 +144,22 @@ def _icon(ext: str):
 
 # ═════════════════════════════════════════════════════════════
 # Win32 native hotkey listener
+# BUG5-FIX: uses proper ctypes.Structure MSG struct
 # ═════════════════════════════════════════════════════════════
+import ctypes as _ct
+
+class _MSG(_ct.Structure):
+    """Correct Win32 MSG struct — avoids MSVC/MinGW padding fragility."""
+    _fields_ = [
+        ("hwnd",    _ct.c_void_p),
+        ("message", _ct.c_uint),
+        ("wParam",  _ct.c_ulonglong),
+        ("lParam",  _ct.c_longlong),
+        ("time",    _ct.c_ulong),
+        ("pt_x",    _ct.c_long),
+        ("pt_y",    _ct.c_long),
+    ]
+
 class HotkeyFilter(QAbstractNativeEventFilter):
     def __init__(self, cb):
         super().__init__()
@@ -152,11 +167,10 @@ class HotkeyFilter(QAbstractNativeEventFilter):
     def nativeEventFilter(self, et, msg):
         if et in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             try:
-                ptr = int(msg)
-                if ctypes.c_uint.from_address(ptr + 8).value == WM_HOTKEY:
-                    if ctypes.c_ulonglong.from_address(ptr + 16).value == HOTKEY_ID:
-                        self._cb()
-                        return True, 0
+                m = _ct.cast(int(msg), _ct.POINTER(_MSG)).contents
+                if m.message == WM_HOTKEY and m.wParam == HOTKEY_ID:
+                    self._cb()
+                    return True, 0
             except Exception:
                 pass
         return False, 0
@@ -2004,8 +2018,14 @@ class SpotlightPanel(QWidget):
     # ── tray ─────────────────────────────────────────────────
     def _build_tray(self):
         self._tray = QSystemTrayIcon(self)
-        # Set the actual icon
-        if _ICON.exists():
+        # BUG3-FIX: use white-background circular icon for tray
+        _circ = str(_ASSETS / "neuron_circular.png")
+        if Path(_circ).exists():
+            from run_desktop import make_white_bg_icon
+            tray_pix = make_white_bg_icon(_circ, 64)
+            self._tray.setIcon(QIcon(tray_pix))
+            QApplication.setWindowIcon(QIcon(tray_pix))
+        elif _ICON.exists():
             self._tray.setIcon(QIcon(str(_ICON)))
             QApplication.setWindowIcon(QIcon(str(_ICON)))
         m = QMenu()
@@ -2015,12 +2035,12 @@ class SpotlightPanel(QWidget):
             QMenu::item:selected { background: rgba(56,156,255,0.3); }
             QMenu::separator { height: 1px; background: #333; margin: 4px 8px; }
         """)
-        m.addAction("🔍  Show  (Shift+Space)").triggered.connect(self.toggle_panel)
-        m.addAction("📅  Memory Lane").triggered.connect(self._toggle_memory_lane)
-        m.addAction("🔄  Re-index").triggered.connect(self._reindex)
-        m.addAction("⚙️  Settings").triggered.connect(self._toggle_settings)
+        m.addAction("Show  (Shift+Space)").triggered.connect(self.toggle_panel)
+        m.addAction("Memory Lane").triggered.connect(self._toggle_memory_lane)
+        m.addAction("Re-index").triggered.connect(self._reindex)
+        m.addAction("Settings").triggered.connect(self._toggle_settings)
         m.addSeparator()
-        m.addAction("❌  Quit").triggered.connect(self._quit)
+        m.addAction("Quit").triggered.connect(self._quit)
         self._tray.setContextMenu(m)
         self._tray.activated.connect(
             lambda r: self.toggle_panel() if r in (

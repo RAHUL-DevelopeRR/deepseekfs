@@ -148,7 +148,8 @@ class DesktopService:
         """Direct call into core/search — no HTTP round-trip."""
         self._ensure_ready()
         from core.search.semantic_search import SemanticSearch
-        engine = SemanticSearch()
+        # BUG1-FIX: reuse the already-loaded index instead of creating a new SemanticSearch instance
+        engine = SemanticSearch(index=self._idx)
         results = engine.search(query, top_k=top_k, use_time_ranking=True,
                                 use_llm_rerank=use_llm_rerank)
 

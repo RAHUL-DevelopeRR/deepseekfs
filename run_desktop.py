@@ -91,7 +91,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QFont, QColor, QIcon, QPainter, QPainterPath,
     QBrush, QPen, QFontDatabase, QGuiApplication,
-    QCursor, QLinearGradient, QClipboard,
+    QCursor, QLinearGradient, QClipboard, QPixmap,
 )
 
 
@@ -124,67 +124,66 @@ TEXT_MUTED     = "rgba(255, 255, 255, 0.35)"
 ACCENT_LEFT    = "rgba(255, 255, 255, 0.7)"
 
 
-# ── File icon themes ─────────────────────────────────────────────────────────
-ICON_MAP = {
-    ".py":   ("🐍", "#3572A5"), ".ipynb": ("📓", "#3572A5"),
-    ".js":   ("⚡", "#F7DF1E"), ".ts":    ("⚡", "#3178C6"),
-    ".jsx":  ("⚡", "#F7DF1E"), ".tsx":   ("⚡", "#3178C6"),
-    ".rs":   ("🦀", "#DEA584"), ".go":    ("🐹", "#00ADD8"),
-    ".java": ("☕", "#B07219"), ".cpp":   ("⚙️", "#00599C"),
-    ".c":    ("⚙️", "#555555"), ".h":     ("⚙️", "#555555"),
-    ".cs":   ("🔷", "#178600"), ".rb":    ("💎", "#CC342D"),
-    ".php":  ("🐘", "#4F5D95"), ".swift": ("🐦", "#FA7343"),
-    ".kt":   ("🟣", "#A97BFF"),
-    ".md":   ("📄", "#6B7280"), ".txt":   ("📄", "#6B7280"),
-    ".log":  ("📋", "#6B7280"),
-    ".pdf":  ("📕", "#E53E3E"),
-    ".docx": ("📘", "#2B579A"), ".doc":   ("📘", "#2B579A"),
-    ".xlsx": ("📗", "#217346"), ".xls":   ("📗", "#217346"),
-    ".csv":  ("📊", "#217346"),
-    ".pptx": ("📙", "#D24726"), ".ppt":   ("📙", "#D24726"),
-    ".json": ("{}", "#F59E0B"), ".xml":   ("<>", "#F59E0B"),
-    ".html": ("🌐", "#E34C26"), ".htm":   ("🌐", "#E34C26"),
-    ".css":  ("🎨", "#264DE4"),
-    ".mp4":  ("🎬", "#8B5CF6"), ".mkv":   ("🎬", "#8B5CF6"),
-    ".avi":  ("🎬", "#8B5CF6"), ".mov":   ("🎬", "#8B5CF6"),
-    ".wmv":  ("🎬", "#8B5CF6"), ".flv":   ("🎬", "#8B5CF6"),
-    ".webm": ("🎬", "#8B5CF6"),
-    ".png":  ("🖼️", "#EC4899"), ".jpg":   ("🖼️", "#EC4899"),
-    ".jpeg": ("🖼️", "#EC4899"), ".gif":   ("🖼️", "#EC4899"),
-    ".webp": ("🖼️", "#EC4899"),
-    ".zip":  ("📦", "#92400E"), ".rar":   ("📦", "#92400E"),
-    ".7z":   ("📦", "#92400E"),
-    ".exe":  ("⚙️", "#6366F1"), ".msi":   ("⚙️", "#6366F1"),
-    ".env":  ("🔧", "#4F46E5"), ".ini":   ("🔧", "#4F46E5"),
-    ".toml": ("🔧", "#4F46E5"), ".cfg":   ("🔧", "#4F46E5"),
-    ".yaml": ("🔧", "#4F46E5"), ".yml":   ("🔧", "#4F46E5"),
-}
-DEFAULT_ICON = ("📄", "#9CA3AF")
+# ── File icon themes (BUG6-FIX: now use SVG icons from ui/icons.py) ──────────
+from ui.icons import get_ext_icon, render_svg_icon, EXT_ICON_MAP
 
-
+# Legacy compat shim — returns (pixmap, accent_color) instead of (emoji, color)
 def get_file_icon(ext: str):
-    """Return (emoji, accent_color) for a given file extension."""
-    return ICON_MAP.get(ext.lower(), DEFAULT_ICON)
+    """Return (QPixmap, accent_color) for a given file extension."""
+    return get_ext_icon(ext, 20)
+
+
+# ── BUG3-FIX: composite transparent PNG onto white circle ──────────────
+def make_white_bg_icon(path: str, size: int = 64) -> QPixmap:
+    """Returns a QPixmap with neuron_circular.png on a white circle background."""
+    base = QPixmap(size, size)
+    base.fill(QColor("white"))
+    overlay = QPixmap(path)
+    if overlay.isNull():
+        return base
+    overlay = overlay.scaled(size, size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation)
+    painter = QPainter(base)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    clip = QPainterPath()
+    clip.addEllipse(0, 0, size, size)
+    painter.setClipPath(clip)
+    painter.drawPixmap(0, 0, overlay)
+    painter.end()
+    return base
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Win32 hotkey native event filter
+# BUG5-FIX: uses proper ctypes.Structure MSG struct instead of raw pointer arithmetic
 # ─────────────────────────────────────────────────────────────────────────────
+import ctypes as _ct
+
+class _MSG(_ct.Structure):
+    """Correct Win32 MSG struct — avoids MSVC/MinGW padding fragility."""
+    _fields_ = [
+        ("hwnd",    _ct.c_void_p),
+        ("message", _ct.c_uint),
+        ("wParam",  _ct.c_ulonglong),
+        ("lParam",  _ct.c_longlong),
+        ("time",    _ct.c_ulong),
+        ("pt_x",    _ct.c_long),
+        ("pt_y",    _ct.c_long),
+    ]
+
 class HotkeyFilter(QAbstractNativeEventFilter):
     def __init__(self, callback):
         super().__init__()
         self._callback = callback
 
-    def nativeEventFilter(self, event_type: QByteArray | bytes, message):
+    def nativeEventFilter(self, event_type, message):
         if event_type in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             try:
-                msg_ptr = int(message)
-                msg_id = ctypes.c_uint.from_address(msg_ptr + 8).value
-                if msg_id == WM_HOTKEY:
-                    wparam = ctypes.c_ulonglong.from_address(msg_ptr + 16).value
-                    if wparam == HOTKEY_ID:
-                        self._callback()
-                        return True, 0
+                msg = _ct.cast(int(message), _ct.POINTER(_MSG)).contents
+                if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
+                    self._callback()
+                    return True, 0
             except Exception:
                 pass
         return False, 0
@@ -252,7 +251,9 @@ class ResultCard(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         ext = hit.get("extension", Path(self._path).suffix).lower()
-        emoji, accent = get_file_icon(ext)
+        _icon_result = get_file_icon(ext)
+        # get_file_icon now returns (QPixmap, accent_color)
+        _, accent = _icon_result
         name = hit.get("name", Path(self._path).name)
         score = hit.get("combined_score", hit.get("score", 0.0))
         ext_label = ext.upper().replace(".", "")
@@ -296,9 +297,12 @@ class ResultCard(QFrame):
         """)
         icon_layout = QVBoxLayout(icon_frame)
         icon_layout.setContentsMargins(0, 0, 0, 0)
-        icon_lbl = QLabel(emoji)
+        # BUG6-FIX: use SVG icon instead of emoji
+        _icon_pix, _ = get_ext_icon(ext, 20)
+        icon_lbl = QLabel()
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet("font-size: 18px; background: transparent;")
+        icon_lbl.setPixmap(_icon_pix)
+        icon_lbl.setStyleSheet("background: transparent;")
         icon_layout.addWidget(icon_lbl)
         root.addWidget(icon_frame)
 
@@ -412,15 +416,13 @@ class SettingsPanel(QFrame):
         header.addWidget(title)
         header.addStretch()
 
-        close_btn = QLabel("✕")
+        # BUG6-FIX: SVG close icon instead of emoji
+        close_btn = QLabel()
+        close_btn.setPixmap(render_svg_icon("close", 14, "rgba(255,255,255,0.55)"))
         close_btn.setFixedSize(28, 28)
         close_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(f"""
-            font-size: 16px; color: {TEXT_DIM};
-            background: rgba(255,255,255,0.08);
-            border-radius: 6px;
-        """)
+        close_btn.setStyleSheet("background: rgba(255,255,255,0.08); border-radius: 6px;")
         close_btn.mousePressEvent = lambda e: self.closed.emit()
         header.addWidget(close_btn)
         root.addLayout(header)
@@ -656,9 +658,11 @@ class SearchPanel(QWidget):
         search_layout.setContentsMargins(18, 0, 18, 0)
         search_layout.setSpacing(12)
 
-        search_icon = QLabel("🔍")
-        search_icon.setStyleSheet(f"font-size: 18px; color: {TEXT_DIM}; background: transparent;")
+        # BUG6-FIX: SVG search icon instead of emoji
+        search_icon = QLabel()
+        search_icon.setPixmap(render_svg_icon("search", 18, "rgba(255,255,255,0.45)"))
         search_icon.setFixedWidth(26)
+        search_icon.setStyleSheet("background: transparent;")
         search_layout.addWidget(search_icon)
 
         self.inp_query = QLineEdit()
@@ -683,15 +687,13 @@ class SearchPanel(QWidget):
         top_row.addWidget(search_container, 1)
 
         # Settings button
-        settings_btn = QLabel("⚙")
+        # BUG6-FIX: SVG settings icon instead of emoji
+        settings_btn = QLabel()
+        settings_btn.setPixmap(render_svg_icon("settings", 20, "rgba(255,255,255,0.55)"))
         settings_btn.setFixedSize(44, 44)
         settings_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
         settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        settings_btn.setStyleSheet(f"""
-            font-size: 20px; color: {TEXT_DIM};
-            background: rgba(255,255,255,0.08);
-            border-radius: 10px;
-        """)
+        settings_btn.setStyleSheet(f"background: rgba(255,255,255,0.08); border-radius: 10px;")
         settings_btn.mousePressEvent = lambda e: self._toggle_settings()
         top_row.addWidget(settings_btn)
 
@@ -834,6 +836,15 @@ class SearchPanel(QWidget):
     # ── System tray ──────────────────────────────────────────
     def _build_tray(self):
         self._tray = QSystemTrayIcon(self)
+        # BUG3-FIX: use white-background circular icon for tray
+        _assets_dir = Path(__file__).resolve().parent / "assets"
+        _circ = str(_assets_dir / "neuron_circular.png")
+        _icon_path = _assets_dir / "neuron_icon.ico"
+        if Path(_circ).exists():
+            tray_pix = make_white_bg_icon(_circ, 64)
+            self._tray.setIcon(QIcon(tray_pix))
+        elif _icon_path.exists():
+            self._tray.setIcon(QIcon(str(_icon_path)))
         menu = QMenu()
         show_action = menu.addAction("Show   (Shift+Space)")
         show_action.triggered.connect(self.toggle_panel)
@@ -842,7 +853,7 @@ class SearchPanel(QWidget):
         quit_action.triggered.connect(self._quit)
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._on_tray_click)
-        self._tray.setToolTip("Zero-X DFS — Shift+Space to search")
+        self._tray.setToolTip("Neuron — Shift+Space to search")
         self._tray.show()
 
     # ── Indexing ─────────────────────────────────────────────
@@ -917,6 +928,10 @@ class SearchPanel(QWidget):
             self._result_cards.append(card)
 
         self.results_layout.addStretch()
+
+        # BUG1-FIX: force the scroll area to recompute and repaint
+        self.results_widget.adjustSize()
+        self.scroll.viewport().update()
 
         n = len(hits)
         q = self.inp_query.text().strip()
@@ -1131,11 +1146,25 @@ class SearchPanel(QWidget):
 # Entry point — macOS Tahoe Spotlight (dv-4.1)
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
+    # ── 1. App object FIRST (nothing Qt can happen before this) ──
     app = QApplication(sys.argv)
     app.setApplicationName("Neuron")
-    app.setApplicationVersion("4.5.0")
+    app.setApplicationVersion("4.6.0")   # version bump
     app.setStyle("Fusion")
-    app.setQuitOnLastWindowClosed(True)
+    app.setQuitOnLastWindowClosed(False)  # keep alive in tray
+
+    # ── 2. BUG2-FIX: Splash screen — shows BEFORE the heavy init ──
+    from PyQt6.QtWidgets import QSplashScreen
+    _assets = Path(__file__).resolve().parent / "assets"
+    _splash_pix_path = str(_assets / "neuron_circular.png")
+    splash_pix = make_white_bg_icon(_splash_pix_path, 256) if Path(_splash_pix_path).exists() else QPixmap(256, 256)
+    splash = QSplashScreen(splash_pix,
+        Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.SplashScreen)
+    splash.showMessage("Neuron is loading…",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
+        QColor("#333333"))
+    splash.show()
+    app.processEvents()  # render splash immediately
 
     # Ensure hotkey cleanup on any exit
     import atexit, signal
@@ -1146,14 +1175,24 @@ def main():
     signal.signal(signal.SIGINT, lambda *_: (_cleanup(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
 
+    # ── 3. Now create the heavy service (loads model in background thread) ──
     service = DesktopService()
 
-    # ── Launch the Spotlight panel as the primary UI ──────────
+    # ── 4. Build the main panel ──
     from ui.spotlight_panel import SpotlightPanel, HotkeyFilter as SpotlightHotkeyFilter
     panel = SpotlightPanel(service)
 
+    # ── 5. Poll until service is ready, then close splash ──
+    def _check_ready():
+        if service._ready.is_set():
+            splash.finish(panel)
+        else:
+            QTimer.singleShot(300, _check_ready)
+    QTimer.singleShot(300, _check_ready)
+
     # Register global hotkey: Shift+Space (non-blocking, immediate)
     hotkey_ok = False
+    event_filter = None
     if platform.system() == "Windows":
         # Unregister first in case previous process left it registered
         ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
@@ -1178,6 +1217,19 @@ def main():
         if hotkey_ok:
             event_filter = SpotlightHotkeyFilter(panel.toggle_panel)
             app.installNativeEventFilter(event_filter)
+
+        # BUG5-FIX: retry once after 500ms in case a previous instance just released it
+        if not hotkey_ok:
+            def _retry_hotkey():
+                nonlocal hotkey_ok, event_filter
+                ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+                ok = ctypes.windll.user32.RegisterHotKey(None, HOTKEY_ID, MOD_SHIFT, VK_SPACE)
+                if ok:
+                    logger.info("Hotkey registered on retry")
+                    event_filter = SpotlightHotkeyFilter(panel.toggle_panel)
+                    app.installNativeEventFilter(event_filter)
+                    hotkey_ok = True
+            QTimer.singleShot(500, _retry_hotkey)
 
     # Show panel on startup
     panel.toggle_panel()
