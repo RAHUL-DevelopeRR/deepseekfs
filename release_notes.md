@@ -1,57 +1,62 @@
-<div align="center">
-  <img src="https://zero-x.live/Assets/NeuronG.png" alt="Neuron" width="160" />
-</div>
-
-<h1 align="center">Neuron v4.2</h1>
 <p align="center">
-  <b>AI-Powered Semantic File Intelligence for Windows</b><br/>
+  <img src="https://raw.githubusercontent.com/RAHUL-DevelopeRR/deepseekfs/main/assets/neuron_circular.png" alt="Neuron" width="120"/>
 </p>
 
-<p align="center">
-  <a href="https://zero-x.live"><img src="https://img.shields.io/badge/Website-zero--x.live-00d4aa?style=for-the-badge" /></a>
-  <img src="https://img.shields.io/badge/version-4.2-6366f1?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-blue?style=for-the-badge" />
-</p>
+<h2 align="center">🧠 Neuron v4.7</h2>
+<p align="center"><b>AI-Powered Semantic File Intelligence for Windows</b></p>
 
 ---
 
-## What's New in v4.2
+## 🚀 What's New in v4.7 — Production Portability Release
 
-- **Smart Ollama Detection** — Skips downloading Ollama if the AI model engine is already installed anywhere on your system
-- **HD DNA Wizard** — A beautiful branded installer with custom sidebar artwork and polished user experience
-- **Welcome Screen** — System requirements and installation instructions are now clearly shown before installation begins
-- **Fixed CI/CD Pipeline** — Automated testing pipeline with `.exe` smoke tests ensures maximum reliability
+### Architecture Overhaul
+- **PyInstaller `--onedir` packaging** — The app is now fully self-contained. No Python, no venv, no dependencies needed on the target machine. Just install and run.
+- **Bundled AI model** — The `all-MiniLM-L6-v2` embedding model is pre-cached in the installer. **No internet required for first run.**
+- **Writable storage fallback** — If the app is installed to a read-only directory (e.g. Program Files), storage automatically falls back to `%LOCALAPPDATA%\Neuron`.
+
+### Bug Fixes
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | **"pythonw is not installed" on other PCs** | Replaced venv+launcher with PyInstaller frozen bundle — Python runtime is now embedded |
+| 2 | **App crashes on machines without python-dotenv** | `dotenv` import is now optional (try/except) |
+| 3 | **Search fails on first run (no internet)** | AI model bundled locally — works offline from first launch |
+| 4 | **SSL bypass breaks corporate networks** | SSL certificate bypass is now scoped only to model download, not applied globally |
+| 5 | **1000+ lines of dead code** | Removed unused `SearchPanel` class from `run_desktop.py` (was never called) |
 
 ---
 
-## Installation
+## 📦 Installation
 
-1. Download **`NeuronSetup_v4.2.exe`** from the assets below
+1. Download **NeuronSetup_v4.7.exe** below
 2. Run the installer and follow the wizard
-3. Once running, press **`Shift+Space`** anytime to search your files by meaning!
+3. Press **Shift + Space** anytime to start semantic search
+
+> **Note**: Windows SmartScreen may show a warning for new downloads. Click "More info" → "Run anyway" to proceed.
 
 ---
 
-## Core Capabilities
+## ⚡ Core Capabilities
 
 | Feature | Description |
-|---|---|
-| **Semantic Search** | Search by meaning using neural embeddings (`all-MiniLM-L6-v2`) |
-| **Encyl AI Summarizer** | Press `Tab` on any file for a 100% offline AI summary via Ollama |
-| **Windows 11 Native** | DWM Mica/Acrylic frosted glass, Segoe Fluent icons |
-| **Sub-5ms Search** | FAISS HNSW vector graph search across 100K+ files |
-| **40+ File Types** | PDF, DOCX, PPTX, XLSX, TXT, MD, Python, JS, and more |
+|---------|-------------|
+| 🧠 Semantic Search | Search files by meaning using neural embeddings |
+| 📄 Encyl AI Summarizer | Offline AI summaries via Ollama (press `Tab`) |
+| 🪟 Windows 11 Native | Mica/Acrylic UI with Fluent design |
+| ⚡ Sub-5ms Search | FAISS HNSW search across 100K+ files |
+| 📁 40+ File Types | Supports PDF, DOCX, PPTX, XLSX, code files and more |
+| 📅 Memory OS | Activity search, streaks, "Jump back in" suggestions |
 
 ---
 
-## System Requirements
+## 💻 System Requirements
 
 - Windows 10/11 (64-bit)
-- 4 GB RAM minimum
-- 2 GB free disk space
-- Internet connection (first-time AI model download only)
+- Minimum 4GB RAM (8GB recommended)
+- 500MB free disk space
+- **No internet required** — everything is included
 
-<div align="center">
-  <i>100% Offline · No Telemetry · Privacy First</i><br/>
-  <a href="https://zero-x.live">zero-x.live</a>
-</div>
+---
+
+<p align="center">100% Offline · No Telemetry · Privacy First</p>
+<p align="center">🔗 <a href="https://zero-x.live">zero-x.live</a></p>
