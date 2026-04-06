@@ -2,22 +2,42 @@
 import json
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv()
+# dotenv is optional — not required in frozen/installed builds
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-# Paths
+# ── Paths ──────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent.parent
-STORAGE_DIR = BASE_DIR / "storage"
+
+# Prefer app-local storage, but fall back to %LOCALAPPDATA%/Neuron
+# if the app directory is not writable (e.g. installed to Program Files)
+_app_storage = BASE_DIR / "storage"
+try:
+    _app_storage.mkdir(parents=True, exist_ok=True)
+    _test = _app_storage / ".write_test"
+    _test.touch()
+    _test.unlink()
+    STORAGE_DIR = _app_storage
+except (PermissionError, OSError):
+    STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Neuron" / "storage"
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
 FAISS_INDEX_DIR = STORAGE_DIR / "faiss_index"
 CACHE_DIR = STORAGE_DIR / "cache"
 FIRST_RUN_FLAG = STORAGE_DIR / ".first_run_complete"
 CUSTOM_PATHS_FILE = STORAGE_DIR / "custom_watch_paths.json"
 INDEXED_ROOTS_FILE = STORAGE_DIR / "indexed_roots.json"
 
-# Create directories
-FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Create directories (safe — STORAGE_DIR is already verified writable)
+try:
+    FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 
 # ─────────────────────────────────────────────────────────────
 # Directories to SKIP during scanning (centralized)
