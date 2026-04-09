@@ -9,6 +9,7 @@ import faiss
 import numpy as np
 import sqlite3
 import threading
+import time
 import os
 from typing import List, Dict, Set
 from pathlib import Path
@@ -227,6 +228,7 @@ class IndexBuilder:
 
                 text = FileParser.parse(norm_path)
                 if not text or len(text.strip()) < 10:
+                    logger.debug(f"Skipping {norm_path}: Extracted text < 10 characters")
                     return False
 
                 embedding = self.embedder.encode_single(text)
@@ -289,9 +291,18 @@ class IndexBuilder:
                     files.append(str(p))
 
         logger.info(f"Found {len(files)} candidate files in {directory}")
-        for f in files:
-            if self.add_file(str(f)):
-                count += 1
+        for i, f in enumerate(files):
+            try:
+                if self.add_file(str(f)):
+                    count += 1
+                    # Save in batches of 50 to avoid data loss on crash
+                    if count % 50 == 0:
+                        self.save()
+                        logger.info(f"  Progress: {i+1}/{len(files)} scanned, {count} indexed")
+            except Exception as e:
+                logger.warning(f"Error processing {f}: {e}")
+            # ── CPU throttle: yield 50ms between files to prevent system freeze ──
+            time.sleep(0.05)
         logger.info(f"Indexed {count} NEW files from {directory}")
         return count
 
@@ -348,10 +359,13 @@ class IndexBuilder:
 # ─────────────────────────────────────────────────────────────
 # GLOBAL SINGLETON
 # ─────────────────────────────────────────────────────────────
-_global_index: IndexBuilder = None
+_global_index: IndexBuilder | None = None
+_global_index_lock = threading.Lock()
 
 def get_index() -> IndexBuilder:
     global _global_index
     if _global_index is None:
-        _global_index = IndexBuilder()
+        with _global_index_lock:
+            if _global_index is None:
+                _global_index = IndexBuilder()
     return _global_index

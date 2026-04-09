@@ -1,5 +1,5 @@
 """
-Neuron – Desktop Entry Point (v4.7.0)
+Neuron – Desktop Entry Point (v4.7.1)
 ======================================
 Bootstraps the PyQt6 application:
   - Pre-loads torch DLLs when running as frozen exe
@@ -105,7 +105,7 @@ def main():
     # ── 1. App object FIRST ──
     app = QApplication(sys.argv)
     app.setApplicationName("Neuron")
-    app.setApplicationVersion("4.7.0")
+    app.setApplicationVersion("4.7.1")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
 

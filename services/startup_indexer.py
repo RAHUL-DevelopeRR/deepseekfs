@@ -109,6 +109,17 @@ class StartupIndexer:
         return thread
 
     def _run(self):
+        # Lower thread priority on Windows so indexing doesn't freeze the UI
+        try:
+            import ctypes
+            THREAD_SET_INFORMATION = 0x0020
+            THREAD_PRIORITY_BELOW_NORMAL = -1
+            handle = ctypes.windll.kernel32.GetCurrentThread()
+            ctypes.windll.kernel32.SetThreadPriority(handle, THREAD_PRIORITY_BELOW_NORMAL)
+            logger.info("StartupIndexer: thread priority set to BELOW_NORMAL")
+        except Exception:
+            pass
+
         paths = config.WATCH_PATHS
 
         if not paths:

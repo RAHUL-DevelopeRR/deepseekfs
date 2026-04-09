@@ -10,7 +10,7 @@
 ;   - Removed dead code, fixed all portability bugs
 
 #define MyAppName "Neuron"
-#define MyAppVersion "4.7"
+#define MyAppVersion "4.7.1"
 #define MyAppPublisher "Rahul"
 #define MyAppExeName "Neuron.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
@@ -28,7 +28,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=NeuronSetup_v4.7
+OutputBaseFilename=NeuronSetup_v4.7.1
 SetupIconFile=assets\neuron_icon.ico
 UninstallDisplayIcon={app}\assets\neuron_icon.ico
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
@@ -41,7 +41,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DiskSpanning=no
-VersionInfoVersion=4.7.0.0
+VersionInfoVersion=4.7.1.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} — AI-Powered Semantic File Intelligence
 VersionInfoTextVersion={#MyAppVersion}

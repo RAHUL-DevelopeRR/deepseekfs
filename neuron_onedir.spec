@@ -14,6 +14,7 @@ Output:
 import os
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import copy_metadata
 
 block_cipher = None
 
@@ -34,6 +35,15 @@ datas = [
     # Docs
     ('docs', 'docs'),
 ]
+
+# Explicitly copy vital metadata for HF/SentenceTransformers that PyInstaller misses
+datas += copy_metadata('sentence_transformers')
+datas += copy_metadata('transformers')
+datas += copy_metadata('huggingface_hub')
+datas += copy_metadata('tokenizers')
+datas += copy_metadata('tqdm')
+datas += copy_metadata('regex')
+datas += copy_metadata('safetensors')
 
 # Only include datas that exist
 datas = [(src, dst) for src, dst in datas if os.path.exists(src)]

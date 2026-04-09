@@ -33,6 +33,7 @@ class DesktopService:
     def __init__(self):
         self._lock = threading.Lock()
         self._idx = None
+        self._init_error = None
         self._ready = threading.Event()
         self.watcher = None
         logger.info("DesktopService: starting background initialization…")
@@ -46,11 +47,16 @@ class DesktopService:
             self._idx = get_index()
             logger.info("DesktopService: index singleton loaded (background)")
 
+            from services.startup_indexer import StartupIndexer
+            si = StartupIndexer()
+            si.run_in_background()
+
             from core.watcher.file_watcher import FileWatcher
             self.watcher = FileWatcher(self._idx)
             self.watcher.start()
         except Exception as e:
             logger.error(f"DesktopService background init failed: {e}")
+            self._init_error = str(e)
         finally:
             self._ready.set()
 
@@ -122,12 +128,19 @@ class DesktopService:
 
             n_done = 0
             for fpath in all_files:
-                with self._lock:
-                    added = 1 if idx.add_file(str(fpath)) else 0
-                total_new += added
+                try:
+                    with self._lock:
+                        added = 1 if idx.add_file(str(fpath)) else 0
+                    total_new += added
+                except Exception as e:
+                    logger.warning(f"Error indexing {fpath}: {e}")
+                    added = 0
                 n_done += 1
                 if on_progress and n_total > 0:
                     on_progress(n_done, n_total)
+                # CPU throttle: yield 50ms between files to prevent system freeze
+                import time
+                time.sleep(0.05)
 
             if n_done > 0:
                 idx.save()

@@ -39,6 +39,8 @@ try:
 except Exception:
     pass
 
+FAISS_INDEX_PATH = str(FAISS_INDEX_DIR / "index.bin")
+
 # ─────────────────────────────────────────────────────────────
 # Directories to SKIP during scanning (centralized)
 # ─────────────────────────────────────────────────────────────
@@ -200,7 +202,6 @@ SUPPORTED_EXTENSIONS = {
 # Model configuration
 MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
-FAISS_INDEX_PATH = str(FAISS_INDEX_DIR / "index.bin")
 METADATA_PATH = str(CACHE_DIR / "metadata.pkl")      # deprecated — use SQLITE_DB_PATH
 INDEXED_PATHS_DB = str(CACHE_DIR / "indexed_paths.pkl")  # deprecated — use SQLITE_DB_PATH
 SQLITE_DB_PATH = str(CACHE_DIR / "metadata.db")
