@@ -1,5 +1,5 @@
 """
-Neuron – Desktop Entry Point (v4.7.1)
+Neuron – Desktop Entry Point (v4.9)
 ======================================
 Bootstraps the PyQt6 application:
   - Pre-loads torch DLLs when running as frozen exe
@@ -66,7 +66,7 @@ from services.desktop_service import DesktopService
 
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap, QBitmap, QRegion
 
 
 # ── Hotkey constants ──────────────────────────────────────────
@@ -78,24 +78,37 @@ VK_SPACE  = 0x20
 # ─────────────────────────────────────────────────────────────
 # Helpers used by ui/spotlight_panel.py
 # ─────────────────────────────────────────────────────────────
-def make_white_bg_icon(path: str, size: int = 64) -> QPixmap:
-    """Returns a QPixmap with neuron_circular.png on a white circle background."""
-    base = QPixmap(size, size)
-    base.fill(QColor("white"))
+def make_circular_splash(path: str, size: int = 280) -> QPixmap:
+    """Returns a perfectly circular QPixmap with transparent background (no white box)."""
+    # Create transparent canvas
+    result = QPixmap(size, size)
+    result.fill(Qt.GlobalColor.transparent)
+
     overlay = QPixmap(path)
     if overlay.isNull():
-        return base
-    overlay = overlay.scaled(size, size,
-        Qt.AspectRatioMode.KeepAspectRatio,
+        # Fallback: solid blue circle
+        p = QPainter(result)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor("#0078D4"))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(0, 0, size, size)
+        p.end()
+        return result
+
+    # Scale image to square
+    scaled = overlay.scaled(size, size,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
         Qt.TransformationMode.SmoothTransformation)
-    painter = QPainter(base)
+
+    # Paint with circular clip
+    painter = QPainter(result)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    clip = QPainterPath()
-    clip.addEllipse(0, 0, size, size)
-    painter.setClipPath(clip)
-    painter.drawPixmap(0, 0, overlay)
+    path = QPainterPath()
+    path.addEllipse(0, 0, size, size)
+    painter.setClipPath(path)
+    painter.drawPixmap(0, 0, scaled)
     painter.end()
-    return base
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -105,23 +118,35 @@ def main():
     # ── 1. App object FIRST ──
     app = QApplication(sys.argv)
     app.setApplicationName("Neuron")
-    app.setApplicationVersion("4.7.1")
+    app.setApplicationVersion("4.9")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
 
     # ── 2. Splash screen ──
     _assets = Path(__file__).resolve().parent / "assets"
     _splash_path = str(_assets / "neuron_circular.png")
-    if Path(_splash_path).exists():
-        splash_pix = make_white_bg_icon(_splash_path, 256)
-    else:
-        splash_pix = QPixmap(256, 256)
-        splash_pix.fill(QColor("white"))
+    _size = 280
+    splash_pix = make_circular_splash(_splash_path, _size)
+
+    # Apply circular mask so the window itself is circular (no square corners)
+    mask_bmp = QBitmap(_size, _size)
+    mask_bmp.fill(Qt.GlobalColor.color0)
+    mask_painter = QPainter(mask_bmp)
+    mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    mask_painter.setBrush(Qt.GlobalColor.color1)
+    mask_painter.setPen(Qt.PenStyle.NoPen)
+    mask_painter.drawEllipse(0, 0, _size, _size)
+    mask_painter.end()
+
     splash = QSplashScreen(splash_pix,
-        Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.SplashScreen)
+        Qt.WindowType.WindowStaysOnTopHint
+        | Qt.WindowType.SplashScreen
+        | Qt.WindowType.FramelessWindowHint)
+    splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    splash.setMask(QRegion(mask_bmp))
     splash.showMessage("Neuron is loading…",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
-        QColor("#333333"))
+        QColor("#ffffff"))
     splash.show()
     app.processEvents()
 

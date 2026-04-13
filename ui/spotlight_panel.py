@@ -1176,6 +1176,12 @@ class SpotlightPanel(QWidget):
 
         self._kick_index()
 
+        # Live-refresh timer: poll idx count every 3s while background indexing runs
+        self._live_refresh_timer = QTimer(self)
+        self._live_refresh_timer.setInterval(3000)
+        self._live_refresh_timer.timeout.connect(self._refresh_idx_count)
+        self._live_refresh_timer.start()
+
         # Pre-warm Ollama model in background (reduces first-request latency)
         try:
             ai = get_ollama()
@@ -2063,9 +2069,32 @@ class SpotlightPanel(QWidget):
             self._tray.setToolTip("Neuron — Shift+Space to search")
 
     # ── indexing ─────────────────────────────────────────────
+    def _refresh_idx_count(self):
+        """Poll the real DB count and update label. Runs every 3s."""
+        try:
+            cnt = self._svc.total_indexed()
+            if cnt != self._idx_count:
+                self._idx_count = cnt
+                if not self._indexing:
+                    self.idx_lbl.setText(f"{cnt:,} files indexed")
+                # Update tray
+                self._update_tray_tooltip()
+        except Exception:
+            pass
+
     def _kick_index(self):
+        # Show existing count immediately before starting thread
+        try:
+            existing = self._svc.total_indexed()
+            self._idx_count = existing
+            if existing > 0:
+                self.idx_lbl.setText(f"{existing:,} files indexed")
+            else:
+                self.idx_lbl.setText("Indexing…")
+        except Exception:
+            self.idx_lbl.setText("Indexing…")
+
         self._indexing = True
-        self.idx_lbl.setText("Indexing…")
         self._it = IndexThread(self._svc)
         self._it.status.connect(lambda m: self.idx_lbl.setText(m))
         self._it.progress.connect(
@@ -2077,6 +2106,11 @@ class SpotlightPanel(QWidget):
         self._indexing = False
         self._idx_count = self._svc.total_indexed()
         self.idx_lbl.setText(f"{self._idx_count:,} files indexed")
+        # Stop live refresh — indexing is done
+        try:
+            self._live_refresh_timer.stop()
+        except Exception:
+            pass
         # Update tray tooltip with streak
         self._update_tray_tooltip()
 

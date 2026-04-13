@@ -64,7 +64,11 @@ class DesktopService:
         """Wait for background init if not yet done."""
         self._ready.wait(timeout=120)
         if self._idx is None:
-            self._idx = get_index()
+            try:
+                self._idx = get_index()
+            except Exception as e:
+                logger.error(f"DesktopService._ensure_ready failed: {e}")
+                self._init_error = str(e)
 
     # ── Indexing ─────────────────────────────────────────────
     def run_indexing(
@@ -138,9 +142,6 @@ class DesktopService:
                 n_done += 1
                 if on_progress and n_total > 0:
                     on_progress(n_done, n_total)
-                # CPU throttle: yield 50ms between files to prevent system freeze
-                import time
-                time.sleep(0.05)
 
             if n_done > 0:
                 idx.save()
@@ -173,12 +174,34 @@ class DesktopService:
 
     # ── Stats ────────────────────────────────────────────────
     def total_indexed(self) -> int:
+        """Return indexed file count.
+        
+        Reads from SQLite directly if the index singleton isn't
+        loaded yet — this is the fix for the '0 files indexed' bug.
+        The old code returned 0 when _idx was None (still loading
+        model), even though the DB already had hundreds of files.
+        """
+        # Fast path: index is loaded
+        if self._idx is not None:
+            try:
+                return self._idx._db.count()
+            except Exception:
+                pass
+
+        # Slow path: index not ready, read SQLite directly
         try:
-            if self._idx is None:
-                return 0
-            return len(self._idx.metadata)
+            import sqlite3
+            db_path = config.SQLITE_DB_PATH
+            from pathlib import Path
+            if Path(db_path).exists():
+                conn = sqlite3.connect(db_path)
+                cnt = conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+                conn.close()
+                return cnt
         except Exception:
-            return 0
+            pass
+
+        return 0
 
     # ── Access tracking ──────────────────────────────────────
     def record_file_open(self, path: str):

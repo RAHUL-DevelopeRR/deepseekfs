@@ -185,16 +185,35 @@ class IndexBuilder:
         if index_path.exists() and self._db.count() > 0:
             try:
                 self.index = faiss.read_index(str(index_path))
+                db_count = self._db.count()
+                faiss_count = self.index.ntotal
                 logger.info(
-                    f"HNSW index loaded: {self._db.count()} documents, "
-                    f"FAISS vectors: {self.index.ntotal}"
+                    f"HNSW index loaded: {db_count} documents, "
+                    f"FAISS vectors: {faiss_count}"
                 )
+                # Repair DB/FAISS mismatch — prune DB rows with faiss_id >= ntotal
+                if db_count != faiss_count and faiss_count > 0:
+                    logger.warning(
+                        f"DB/FAISS mismatch: DB={db_count}, FAISS={faiss_count}. "
+                        f"Pruning orphaned DB rows..."
+                    )
+                    try:
+                        conn = self._db._conn()
+                        conn.execute(
+                            "DELETE FROM files WHERE faiss_id >= ?",
+                            (faiss_count,)
+                        )
+                        conn.commit()
+                        logger.info(f"Pruned to {self._db.count()} rows")
+                    except Exception as prune_err:
+                        logger.warning(f"Prune failed: {prune_err}")
             except Exception as e:
                 logger.warning(f"Corrupt index, rebuilding: {e}")
                 self._create_fresh_index()
         else:
             logger.info("No index found. Creating fresh HNSW index.")
             self._create_fresh_index()
+
 
     def _create_fresh_index(self):
         self.index = faiss.IndexHNSWFlat(config.EMBEDDING_DIM, self.HNSW_M)
@@ -301,8 +320,9 @@ class IndexBuilder:
                         logger.info(f"  Progress: {i+1}/{len(files)} scanned, {count} indexed")
             except Exception as e:
                 logger.warning(f"Error processing {f}: {e}")
-            # ── CPU throttle: yield 50ms between files to prevent system freeze ──
-            time.sleep(0.05)
+            # CPU throttle: yield 10ms every 10 files to prevent freeze without crawling
+            if i % 10 == 9:
+                time.sleep(0.01)
         logger.info(f"Indexed {count} NEW files from {directory}")
         return count
 
