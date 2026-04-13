@@ -1,5 +1,5 @@
 """
-Neuron – Desktop Entry Point (v4.9)
+Neuron – Desktop Entry Point (v4.9.1)
 ======================================
 Bootstraps the PyQt6 application:
   - Pre-loads torch DLLs when running as frozen exe
@@ -110,6 +110,26 @@ def make_circular_splash(path: str, size: int = 280) -> QPixmap:
     painter.end()
     return result
 
+def make_white_bg_icon(path: str, size: int = 64) -> QPixmap:
+    """Returns a QPixmap with neuron_circular.png on a white circle background.
+    Used by the system tray to ensure visibility against dark taskbars."""
+    base = QPixmap(size, size)
+    base.fill(QColor("white"))
+    overlay = QPixmap(path)
+    if overlay.isNull():
+        return base
+    overlay = overlay.scaled(size, size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation)
+    painter = QPainter(base)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    clip = QPainterPath()
+    clip.addEllipse(0, 0, size, size)
+    painter.setClipPath(clip)
+    painter.drawPixmap(0, 0, overlay)
+    painter.end()
+    return base
+
 
 # ─────────────────────────────────────────────────────────────
 # Entry point
@@ -118,7 +138,7 @@ def main():
     # ── 1. App object FIRST ──
     app = QApplication(sys.argv)
     app.setApplicationName("Neuron")
-    app.setApplicationVersion("4.9")
+    app.setApplicationVersion("4.9.1")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
 
