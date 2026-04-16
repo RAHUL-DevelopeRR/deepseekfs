@@ -1,5 +1,5 @@
 ; ═══════════════════════════════════════════════════════════════
-; Neuron v4.7 — Professional Windows Installer (Inno Setup 6)
+; Neuron v5.0 - Professional Windows Installer (Inno Setup 6)
 ; ═══════════════════════════════════════════════════════════════
 ; Bundles: PyInstaller --onedir output (self-contained, no venv)
 ; Target: Any Windows 10/11 x64 machine — no Python required
@@ -10,7 +10,7 @@
 ;   - Removed dead code, fixed all portability bugs
 
 #define MyAppName "Neuron"
-#define MyAppVersion "4.9.1"
+#define MyAppVersion "5.0.0"
 #define MyAppPublisher "Rahul"
 #define MyAppExeName "Neuron.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
@@ -28,7 +28,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=NeuronSetup_v4.9.1
+OutputBaseFilename=NeuronSetup_v5.0
 SetupIconFile=assets\neuron_icon.ico
 UninstallDisplayIcon={app}\assets\neuron_icon.ico
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
@@ -41,7 +41,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DiskSpanning=no
-VersionInfoVersion=4.7.1.0
+VersionInfoVersion=5.0.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} — AI-Powered Semantic File Intelligence
 VersionInfoTextVersion={#MyAppVersion}

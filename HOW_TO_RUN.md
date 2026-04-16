@@ -1,4 +1,4 @@
-# How to Run Neuron Desktop (v4.2)
+# How to Run Neuron Desktop (v5.0)
 
 ## Prerequisites
 - Python 3.9 or newer

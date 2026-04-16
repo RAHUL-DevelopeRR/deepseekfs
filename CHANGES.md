@@ -35,3 +35,27 @@
 - PyInstaller launcher fix (DETACHED_PROCESS)
 - Activity logger hardening
 - Top-level crash guard
+## v5.0.0 - Crash-safe Indexing Release
+
+### Fixed
+1. **Startup Crash** - resolved merge-conflict markers in
+   `core/embeddings/embedder.py` that made the app fail before indexing.
+2. **Index Wiped on Watch-path Changes** - `StartupIndexer` and
+   `DesktopService.run_indexing()` now keep the existing SQLite/FAISS index and
+   scan current folders incrementally when watch roots change.
+3. **Watch-path Detection** - Windows profile and OneDrive folders are now
+   resolved more robustly, with a home-folder fallback when no content roots are
+   found.
+4. **Embedding Dependency Robustness** - `sentence-transformers` is updated to
+   5.3.0, TensorFlow/Flax imports are disabled for the embedding stack, and a
+   deterministic fallback embedder keeps indexing/search alive if MiniLM cannot
+   load.
+5. **Parser Compatibility** - restored `extract_text()` as a compatibility
+   wrapper around `FileParser.parse()`.
+
+### Verified
+- Rebuilt the local runtime index: 800 files indexed, SQLite and FAISS counts
+  match.
+- Desktop service starts cleanly and returns search results.
+- Added a regression test for watch-path changes preserving the index.
+- `python -m pytest tests -q` passes.

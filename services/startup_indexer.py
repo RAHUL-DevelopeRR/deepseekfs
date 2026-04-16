@@ -1,8 +1,8 @@
 """Smart startup indexer — uses the global singleton index (v2.0)
 
-Detects when WATCH_PATHS have changed since last indexing and
-triggers a full re-index. Saves indexed roots to storage/indexed_roots.json
-for comparison on next startup.
+Detects when WATCH_PATHS have changed since last indexing and scans the
+current roots without deleting the existing index. Saves indexed roots to
+storage/indexed_roots.json for comparison on next startup.
 """
 import json
 import threading
@@ -132,9 +132,11 @@ class StartupIndexer:
         if self._index_has_only_samples():
             self._wipe_index("sample-only index detected")
 
-        # Auto-wipe if watch paths changed since last index
         if self._watch_paths_changed():
-            self._wipe_index("watch paths changed")
+            logger.info(
+                "Watch paths changed since last run; keeping existing index "
+                "and scanning current folders."
+            )
 
         if self.is_first_run():
             logger.info("FIRST RUN — full scan of all user folders...")

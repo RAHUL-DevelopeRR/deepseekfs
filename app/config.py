@@ -1,6 +1,7 @@
 """Configuration Management"""
 import json
 import os
+import platform
 from pathlib import Path
 
 # dotenv is optional — not required in frozen/installed builds
@@ -70,6 +71,7 @@ SKIP_DIRS = {
 def get_user_watch_paths() -> list:
     """Return common user content folders that exist on this machine."""
     home = Path.home()
+
     candidates = [
         home / "Desktop",
         home / "Documents",
@@ -77,10 +79,54 @@ def get_user_watch_paths() -> list:
         home / "Pictures",
         home / "Videos",
         home / "Music",
-        home / "OneDrive" / "Desktop",
-        home / "OneDrive" / "Documents",
     ]
-    return [str(p) for p in candidates if p.exists()]
+
+    # Windows machines can have redirected/OneDrive profile folders
+    # where Path.home() does not match the real content roots.
+    if platform.system().lower().startswith("win"):
+        user_profile = os.environ.get("USERPROFILE")
+        if user_profile:
+            up = Path(user_profile)
+            candidates.extend(
+                [
+                    up / "Desktop",
+                    up / "Documents",
+                    up / "Downloads",
+                    up / "Pictures",
+                    up / "Videos",
+                    up / "Music",
+                ]
+            )
+
+        one_drive = os.environ.get("OneDrive")
+        if one_drive:
+            od = Path(one_drive)
+            candidates.extend(
+                [
+                    od / "Desktop",
+                    od / "Documents",
+                    od / "Pictures",
+                ]
+            )
+
+    seen = set()
+    existing = []
+    for p in candidates:
+        try:
+            rp = str(p.resolve())
+            if rp in seen:
+                continue
+            if p.exists() and p.is_dir():
+                seen.add(rp)
+                existing.append(rp)
+        except Exception:
+            continue
+
+    # Last-resort fallback so startup indexing never gets stuck at 0 paths.
+    if not existing and home.exists():
+        existing.append(str(home.resolve()))
+
+    return existing
 
 
 # ─────────────────────────────────────────────────────────────
