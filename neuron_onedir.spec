@@ -1,11 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Neuron v5.0 - PyInstaller --onedir spec
-=======================================
-Bundles the desktop app into a self-contained folder. The frozen build
-intentionally excludes the optional Torch/Transformers stack that crashes
-PyInstaller on this Windows environment; the app falls back to its
-deterministic embedder so indexing/search remain available.
+Neuron v5.0 - PyInstaller --onedir spec (ONNX)
+===============================================
+Bundles the desktop app with ONNX Runtime for neural embeddings.
+No PyTorch/torch dependency — uses the same MiniLM model exported
+to ONNX format for identical search quality without DLL conflicts.
 
 Build:
     pyinstaller neuron_onedir.spec --noconfirm
@@ -37,6 +36,8 @@ datas = [
     ('ui', 'ui'),
     # Assets (icons, images)
     ('assets', 'assets'),
+    # ONNX model (neural search without torch)
+    ('storage/models/onnx', 'storage/models/onnx'),
     # Docs
     ('docs', 'docs'),
 ]
@@ -74,13 +75,15 @@ hiddenimports = [
     'openpyxl',
     'lxml', 'lxml.etree',
     'pdfminer', 'pdfminer.high_level',
+    # ONNX Runtime (replaces torch for neural embeddings)
+    'onnxruntime',
+    'tokenizers',
     # other deps
     'watchdog', 'watchdog.observers', 'watchdog.events',
     'dateparser',
     'numpy',
     'tqdm',
     'regex',
-    'requests',
     'certifi',
     'yaml',
     'sqlite3',
