@@ -2017,9 +2017,14 @@ class SpotlightPanel(QWidget):
             self._memory_lane.hide(); self._memory_lane.deleteLater(); self._memory_lane = None
 
     def _reindex(self):
-        from services.startup_indexer import StartupIndexer
-        StartupIndexer()._wipe_index("manual")
-        self._kick_index()
+        try:
+            from services.startup_indexer import StartupIndexer
+            si = StartupIndexer()
+            si._wipe_index("manual")
+            si.run_in_background()
+        except Exception as e:
+            from app.logger import logger
+            logger.error(f"Re-index failed: {e}")
 
     # ── tray ─────────────────────────────────────────────────
     def _build_tray(self):

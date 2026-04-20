@@ -1,5 +1,5 @@
 ; ═══════════════════════════════════════════════════════════════
-; Neuron v5.0 - Professional Windows Installer (Inno Setup 6)
+; Neuron v5.1 - Professional Windows Installer (Inno Setup 6)
 ; ═══════════════════════════════════════════════════════════════
 ; Bundles: PyInstaller --onedir output (self-contained, no venv)
 ; Target: Any Windows 10/11 x64 machine — no Python required
@@ -10,7 +10,7 @@
 ;   - Removed dead code, fixed all portability bugs
 
 #define MyAppName "Neuron"
-#define MyAppVersion "5.0.0"
+#define MyAppVersion "5.1.0"
 #define MyAppPublisher "Rahul"
 #define MyAppExeName "Neuron.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
