@@ -33,9 +33,8 @@ from services.profiles import get_profile_manager
 # ── Intent Detection (lightweight, no LLM) ───────────────────
 
 _ACTION_SIGNALS = frozenset({
-    "create", "make", "write", "save", "delete", "remove",
-    "organize", "move", "copy", "rename", "run", "execute",
-    "open", "list", "show files", "show folder", "dir",
+    "organize", "move", "copy", "rename", "delete", "remove",
+    "list files", "show files", "show folder", "dir",
     "install", "pip", "npm", "git", "build",
 })
 
@@ -44,14 +43,51 @@ _SEARCH_SIGNALS = frozenset({
     "which file", "show me", "get my",
 })
 
+# These override ACTION signals — if present, route to CHAT
+_CHAT_OVERRIDES = frozenset({
+    "code", "program", "script", "algorithm", "function",
+    "class", "implement", "write a", "create a", "generate a",
+    "help me", "explain", "how to", "what is", "debug",
+    "example", "tutorial", "syntax", "logic", "simulation",
+})
+
+# These FORCE action mode — explicit file/system operations only
+_STRONG_ACTION = frozenset({
+    "organize my", "move the", "delete the", "remove the",
+    "rename the", "copy the", "run command", "execute command",
+    "open folder", "list folder", "create folder", "make folder",
+    "create file", "save file", "write file",
+})
+
 
 def _detect_intent(text: str) -> str:
-    """Lightweight intent detection. Returns: chat | query | action."""
+    """Lightweight intent detection. Returns: chat | query | action.
+    
+    Priority:
+      1. Search signals → query
+      2. Strong action phrases → action
+      3. Chat overrides → chat (even if "create" is present)
+      4. Weak action signals → action
+      5. Default → chat
+    """
     words = text.lower()
+
+    # 1. Search always wins
     if any(sig in words for sig in _SEARCH_SIGNALS):
         return "query"
+
+    # 2. Strong action phrases (explicit file/system ops)
+    if any(sig in words for sig in _STRONG_ACTION):
+        return "action"
+
+    # 3. Chat overrides trump weak action signals
+    if any(sig in words for sig in _CHAT_OVERRIDES):
+        return "chat"
+
+    # 4. Weak action signals
     if any(sig in words for sig in _ACTION_SIGNALS):
         return "action"
+
     return "chat"
 
 
@@ -78,6 +114,10 @@ class MemoryOSAgent:
         self._executor: Optional[TaskExecutor] = None
         self._conversation: List[Dict] = []
         self._lock = threading.Lock()
+
+        # Response cache (LRU, 64 entries) — avoids re-inference for repeated queries
+        self._response_cache: Dict[str, str] = {}
+        self._cache_max = 64
 
         # UI callbacks (set by panel)
         self.on_step: Optional[Callable] = None
@@ -154,8 +194,49 @@ class MemoryOSAgent:
 
     # ── Chat Mode (fast, no tools) ────────────────────────────
 
+    # Instant responses for common greetings (no LLM needed)
+    _GREETINGS = {
+        "hi": "Hello! I'm Neuron. How can I help you?",
+        "hello": "Hey there! What can I do for you?",
+        "hey": "Hi! Ready to help. What do you need?",
+        "hi there": "Hello! I'm Neuron MemoryOS. How can I assist you?",
+        "hello there": "Hi! I'm ready to help. Ask me anything.",
+        "good morning": "Good morning! What can I help you with today?",
+        "good evening": "Good evening! How can I help you?",
+        "thanks": "You're welcome! Anything else?",
+        "thank you": "You're welcome! Let me know if you need anything else.",
+    }
+
     def _chat_mode(self, user_message: str) -> str:
-        """Direct conversation. No tools, minimal context."""
+        """Direct conversation. No tools, minimal context.
+        
+        Performance tiers:
+          1. Greetings:    0ms (hardcoded, no LLM)
+          2. Cached:       0ms (LRU cache hit)
+          3. Short query: ~1-2s (100 tokens)
+          4. Code:        ~5-15s (800 tokens)
+          5. Normal:      ~2-5s (512 tokens)
+        """
+        low = user_message.lower().strip().rstrip("!?.")
+
+        # Tier 1: Instant greeting response (0ms)
+        if low in self._GREETINGS:
+            response = self._GREETINGS[low]
+            self._conversation.append({"role": "user", "content": user_message})
+            self._conversation.append({"role": "assistant", "content": response})
+            logger.info(f"MemoryOS [CHAT]: 0ms (greeting), {len(response)} chars")
+            return response
+
+        # Tier 2: Cache hit (0ms)
+        cache_key = low[:100]
+        if cache_key in self._response_cache:
+            response = self._response_cache[cache_key]
+            self._conversation.append({"role": "user", "content": user_message})
+            self._conversation.append({"role": "assistant", "content": response})
+            logger.info(f"MemoryOS [CHAT]: 0ms (cached), {len(response)} chars")
+            return response
+
+        # Tier 3-5: LLM inference
         engine = self._get_engine()
         profile = get_profile_manager().get_active()
 
@@ -166,10 +247,18 @@ class MemoryOSAgent:
         messages = [{"role": "system", "content": build_chat_context()}]
         messages.extend(self._conversation[-8:])
 
+        # Dynamic token budget
+        if len(low.split()) <= 3 and not any(w in low for w in ("code", "write", "create", "explain")):
+            max_tokens = 100   # Short query → fast
+        elif any(w in low for w in ("code", "program", "script", "algorithm", "implement", "function", "class")):
+            max_tokens = 800   # Code generation → needs room
+        else:
+            max_tokens = profile.llm.max_tokens_chat
+
         t0 = time.time()
         response = engine.chat(
             messages=messages,
-            max_tokens=profile.llm.max_tokens_chat,
+            max_tokens=max_tokens,
             temperature=profile.llm.temperature,
         )
         elapsed = int((time.time() - t0) * 1000)
@@ -180,8 +269,15 @@ class MemoryOSAgent:
         if not response or not response.strip():
             response = "Hello! I'm Neuron. How can I help you?"
 
+        # Cache short responses for instant replay
+        if len(response) < 300 and len(low.split()) <= 6:
+            self._response_cache[cache_key] = response
+            if len(self._response_cache) > self._cache_max:
+                oldest = next(iter(self._response_cache))
+                del self._response_cache[oldest]
+
         self._conversation.append({"role": "assistant", "content": response})
-        logger.info(f"MemoryOS [CHAT]: {elapsed}ms, {len(response)} chars")
+        logger.info(f"MemoryOS [CHAT]: {elapsed}ms, {len(response)} chars, budget={max_tokens}")
         return response
 
     # ── Query Mode (search + summarize) ───────────────────────

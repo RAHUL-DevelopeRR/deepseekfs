@@ -55,8 +55,8 @@ class ScoringWeights:
 class LLMSettings:
     """Per-profile LLM configuration."""
     temperature: float = 0.5
-    max_tokens_chat: int = 150
-    max_tokens_agent: int = 300
+    max_tokens_chat: int = 512
+    max_tokens_agent: int = 400
     max_agent_turns: int = 6
 
     def to_dict(self) -> Dict[str, Any]:
@@ -71,8 +71,8 @@ class LLMSettings:
     def from_dict(d: Dict) -> "LLMSettings":
         return LLMSettings(
             temperature=d.get("temperature", 0.5),
-            max_tokens_chat=d.get("max_tokens_chat", 150),
-            max_tokens_agent=d.get("max_tokens_agent", 300),
+            max_tokens_chat=d.get("max_tokens_chat", 512),
+            max_tokens_agent=d.get("max_tokens_agent", 400),
             max_agent_turns=d.get("max_agent_turns", 6),
         )
 

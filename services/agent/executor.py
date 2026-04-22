@@ -68,6 +68,57 @@ class TaskExecutor:
             self._tool_schemas = get_tool_schemas()
         return self._tool_schemas
 
+    def _select_relevant_schemas(self, goal: str) -> List[Dict]:
+        """Select only relevant tool schemas based on the goal.
+        
+        Sending all 14 schemas to a 3B model creates a massive prompt
+        (2000+ tokens) and causes 60-90 second inference times.
+        Selecting 4-6 relevant tools cuts this to ~5-10 seconds.
+        """
+        keywords = goal.lower()
+        all_schemas = self._get_schemas()
+
+        # Tool relevance scoring based on keywords
+        _TOOL_KEYWORDS = {
+            "file_read":       {"read", "open", "content", "view", "show"},
+            "file_write":      {"write", "create", "save", "make"},
+            "file_edit":       {"edit", "modify", "change", "update"},
+            "file_delete":     {"delete", "remove", "trash", "erase"},
+            "folder_create":   {"folder", "directory", "mkdir", "create folder"},
+            "folder_list":     {"list", "dir", "folder", "what's in", "show folder"},
+            "folder_search":   {"search", "find", "locate", "where"},
+            "folder_organize": {"organize", "sort", "clean", "arrange"},
+            "semantic_search": {"search", "find", "about", "related"},
+            "summarize":       {"summarize", "summary", "describe", "overview"},
+            "shell":           {"run", "command", "shell", "cmd", "pip", "npm", "git"},
+            "python_exec":     {"python", "code", "script", "execute", "run python"},
+            "glob":            {"glob", "pattern", "find files", "wildcard"},
+            "ocr":             {"ocr", "image", "text from", "screenshot"},
+        }
+
+        scored = []
+        for schema in all_schemas:
+            name = schema.get("function", {}).get("name", "")
+            kw_set = _TOOL_KEYWORDS.get(name, set())
+            score = sum(1 for kw in kw_set if kw in keywords)
+            scored.append((score, schema))
+
+        # Sort by relevance, take top 5
+        scored.sort(key=lambda x: x[0], reverse=True)
+        selected = [s for _, s in scored[:5]]
+
+        # Always include at least folder_list and file_read (most common)
+        names = {s.get("function", {}).get("name") for s in selected}
+        for fallback in ["folder_list", "file_read"]:
+            if fallback not in names:
+                for s in all_schemas:
+                    if s.get("function", {}).get("name") == fallback:
+                        selected.append(s)
+                        break
+
+        logger.info(f"Executor: Selected {len(selected)} tools for: {goal[:50]}")
+        return selected
+
     # ── Main execution loop ───────────────────────────────────
 
     def run(self, task: Task) -> str:
@@ -109,7 +160,7 @@ class TaskExecutor:
     def _execute_loop(self, task: Task) -> str:
         """Core ReAct loop with native function calling."""
         engine = self._get_engine()
-        schemas = self._get_schemas()
+        schemas = self._select_relevant_schemas(task.goal)
         store = get_event_store()
 
         from services.agent_context import build_action_context

@@ -74,7 +74,7 @@ class TestProfile:
     def test_llm_settings(self):
         p = Profile(name="test")
         assert p.llm.temperature == 0.5
-        assert p.llm.max_tokens_chat == 150
+        assert p.llm.max_tokens_chat == 512
 
 
 class TestProfileManager:
