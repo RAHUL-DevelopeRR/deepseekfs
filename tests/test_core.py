@@ -58,10 +58,12 @@ class TestConfig:
 class TestWarmupScript:
     """Validate warmup script structure."""
 
+    @pytest.mark.skip(reason="warmup_encyl.py removed in v5.2+ refactor")
     def test_warmup_exists(self):
         warmup_path = os.path.join(ROOT, 'warmup_encyl.py')
         assert os.path.exists(warmup_path)
 
+    @pytest.mark.skip(reason="warmup_encyl.py removed in v5.2+ refactor")
     def test_warmup_importable(self):
         spec = importlib.util.spec_from_file_location(
             'warmup_encyl',

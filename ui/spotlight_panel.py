@@ -38,6 +38,8 @@ from PyQt6.QtWidgets import QFileIconProvider
 from PyQt6.QtCore import QFileInfo
 from services.ollama_service import get_ollama
 from ui.memory_lane_panel import MemoryLanePanel
+from ui.memoryos_panel import MemoryOSPanel
+from ui.activity_panel import ActivityPanel
 
 # ── resolve assets path ──────────────────────────────────────
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -136,6 +138,8 @@ SCOPES = {
              ".c",".h",".cs",".rb",".php",".swift",".kt",".html",".css"},
     "docs": {".md",".txt",".pdf",".docx",".doc",".pptx",".xlsx",".xls",".csv"},
     "media":{".mp4",".mkv",".avi",".mov",".png",".jpg",".jpeg",".gif",".webp",".webm"},
+    "memoryos": "__memoryos__",
+    "activity": "__activity__",
 }
 
 def _icon(ext: str):
@@ -161,14 +165,15 @@ class _MSG(_ct.Structure):
     ]
 
 class HotkeyFilter(QAbstractNativeEventFilter):
-    def __init__(self, cb):
+    def __init__(self, cb, hotkey_id=None):
         super().__init__()
         self._cb = cb
+        self._hotkey_id = hotkey_id if hotkey_id is not None else HOTKEY_ID
     def nativeEventFilter(self, et, msg):
         if et in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             try:
                 m = _ct.cast(int(msg), _ct.POINTER(_MSG)).contents
-                if m.message == WM_HOTKEY and m.wParam == HOTKEY_ID:
+                if m.message == WM_HOTKEY and m.wParam == self._hotkey_id:
                     self._cb()
                     return True, 0
             except Exception:
@@ -1334,7 +1339,9 @@ class SpotlightPanel(QWidget):
         pr.setContentsMargins(4, 0, 4, 0)
         self._pills: list[ScopePill] = []
         for label, key in [("All","all"),("Files","files"),("Folders","folders"),
-                           ("Code","code"),("Docs","docs"),("Media","media")]:
+                           ("Code","code"),("Docs","docs"),("Media","media"),
+                           ("\U0001f9e0 MemoryOS","memoryos"),
+                           ("\U0001f4ca Activity","activity")]:
             pill = ScopePill(label, key, active=(key=="all"))
             pill.clicked.connect(self._set_scope)
             pr.addWidget(pill)
@@ -1490,6 +1497,15 @@ class SpotlightPanel(QWidget):
         self.scroll.setWidget(self.rw)
         root.addWidget(self.scroll, 1)
 
+        # ── MEMORYOS CHAT PANEL (hidden by default, shown when MemoryOS pill is clicked) ──
+        self._mos_panel = MemoryOSPanel(self)
+        root.addWidget(self._mos_panel, 1)
+
+        # ── ACTIVITY PANEL (hidden by default, shown when Activity pill is clicked) ──
+        self._activity_panel = ActivityPanel(self)
+        self._activity_panel.hide()
+        root.addWidget(self._activity_panel, 1)
+
         # ── STATUS LINE ──
         self.status = QLabel("")
         self.status.setStyleSheet(f"font-size: 11px; color: rgba(255,255,255,0.22); background: transparent; padding: 3px 6px;")
@@ -1610,6 +1626,19 @@ class SpotlightPanel(QWidget):
     def _set_scope(self, k):
         self._scope = k
         for p in self._pills: p.set_active(p._key == k)
+
+        if k == "memoryos":
+            self._exit_activity_mode()
+            self._enter_memoryos_mode()
+            return
+        elif k == "activity":
+            self._exit_memoryos_mode()
+            self._enter_activity_mode()
+            return
+        else:
+            self._exit_memoryos_mode()
+            self._exit_activity_mode()
+
         if self._all:    self._filter()
         elif self.search.text().strip(): self._deb.start()
 
@@ -2567,6 +2596,49 @@ class SpotlightPanel(QWidget):
         self._tray.hide(); QApplication.quit()
 
     # ── DWM Acrylic ──────────────────────────────────────────
+    # ── MemoryOS Mode (delegates to ui/memoryos_panel.py) ────────
+    def _enter_memoryos_mode(self):
+        """Switch to MemoryOS chat mode."""
+        try:
+            self.scroll.hide()
+            self._jbi_widget.hide()
+            self._mos_panel.activate()
+            self.search.inp.setPlaceholderText("Ask MemoryOS... (e.g. 'organize my Downloads')")
+            self.status.setText("MemoryOS - Agent Mode")
+        except Exception as e:
+            logger.error(f"MemoryOS mode failed: {e}")
+
+    def _exit_memoryos_mode(self):
+        """Switch back to search mode."""
+        try:
+            if self._mos_panel.is_active:
+                self._mos_panel.deactivate()
+            self.scroll.show()
+            self.search.inp.setPlaceholderText("Search files, folders, content...")
+            self.status.setText(f"{self._idx_count:,} files indexed")
+        except Exception as e:
+            logger.error(f"Exit MemoryOS mode failed: {e}")
+
+    def _enter_activity_mode(self):
+        """Switch to Activity timeline view."""
+        try:
+            self.scroll.hide()
+            self._jbi_widget.hide()
+            self._activity_panel.show()
+            self._activity_panel._force_refresh()
+            self.search.inp.setPlaceholderText("Activity Timeline")
+            self.status.setText("Activity - Event Log")
+        except Exception as e:
+            logger.error(f"Activity mode failed: {e}")
+
+    def _exit_activity_mode(self):
+        """Exit Activity timeline view."""
+        try:
+            self._activity_panel.hide()
+            self.scroll.show()
+        except Exception as e:
+            logger.error(f"Exit Activity mode failed: {e}")
+
     def _acrylic(self):
         try:
             hwnd = int(self.winId())

@@ -1,16 +1,21 @@
 """
-Neuron - Desktop Entry Point (v5.0.0)
+Neuron - Desktop Entry Point (v5.2.0)
 ======================================
 Bootstraps the PyQt6 application:
   - Pre-loads torch DLLs when running as frozen exe
   - Shows a splash screen while DesktopService loads
-  - Registers global hotkey (Shift+Space)
+  - Registers global hotkey (Shift+Space) for search panel
+  - Registers overlay hotkey (Ctrl+Shift+R) for research overlay
+  - Sets AppUserModelID for Windows system integration
   - Launches SpotlightPanel (the real UI in ui/spotlight_panel.py)
 
 Usage:
     python run_desktop.py
 """
 from __future__ import annotations
+
+# Patch Jinja2 BEFORE any llama_cpp imports (SmolLM3 compatibility)
+import services.jinja2_patches  # noqa: F401
 
 # ═══════════════════════════════════════════════════════════════
 # MUST BE FIRST — Pre-load ALL PyTorch DLLs before any imports
@@ -62,6 +67,38 @@ sys.path.insert(0, str(ROOT))
 # ── Core imports (must happen BEFORE PyQt6) ───────────────────
 import app.config as config
 from app.logger import logger
+
+# ═══════════════════════════════════════════════════════════════
+# CRITICAL: Load llama.cpp BEFORE PyQt6
+# PyQt6's DLLs conflict with llama_backend_init(), causing
+# "access violation reading 0x0000000000000000" if loaded after.
+# ═══════════════════════════════════════════════════════════════
+def _preload_llm():
+    """Pre-load LLM into RAM before PyQt6 poisons the DLL space."""
+    try:
+        logger.info("Encyl: Pre-loading AI model (before PyQt6)...")
+        from services.llm_engine import get_llm_engine
+        engine = get_llm_engine()
+        ok = engine.load_model()
+        if ok:
+            logger.info(f"Encyl: AI model ready (ctx={engine._model.n_ctx()})")
+        else:
+            logger.info(f"Encyl: Model load deferred: {engine.load_error}")
+    except Exception as e:
+        logger.warning(f"Encyl: Pre-load skipped: {e}")
+
+_preload_llm()
+# ═══════════════════════════════════════════════════════════════
+
+# ── Plugin Discovery ─────────────────────────────────────────
+try:
+    from services.plugins import register_plugins
+    _n_plugins = register_plugins()
+    if _n_plugins:
+        logger.info(f"Plugins: {_n_plugins} external tool(s) loaded")
+except Exception as e:
+    logger.warning(f"Plugins: discovery skipped: {e}")
+
 from services.desktop_service import DesktopService
 
 from PyQt6.QtWidgets import QApplication, QSplashScreen
@@ -71,8 +108,12 @@ from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap, QBitmap,
 
 # ── Hotkey constants ──────────────────────────────────────────
 HOTKEY_ID = 0xBFFF
+OVERLAY_HOTKEY_ID = 0xBFFE  # Ctrl+Shift+R for Research Overlay
 MOD_SHIFT = 0x0004
+MOD_CTRL  = 0x0002
+MOD_CTRL_SHIFT = MOD_CTRL | MOD_SHIFT
 VK_SPACE  = 0x20
+VK_R      = 0x52
 
 
 # ─────────────────────────────────────────────────────────────
@@ -135,10 +176,20 @@ def make_white_bg_icon(path: str, size: int = 64) -> QPixmap:
 # Entry point
 # ─────────────────────────────────────────────────────────────
 def main():
+    # ── 0. Set AppUserModelID BEFORE QApplication ──
+    # This makes Windows correctly identify the app in Startup Apps,
+    # Default Apps, taskbar grouping, and notification settings.
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "Rahul.Neuron.Desktop.5.2"
+        )
+    except Exception:
+        pass  # Non-critical on non-Windows
+
     # ── 1. App object FIRST ──
     app = QApplication(sys.argv)
     app.setApplicationName("Neuron")
-    app.setApplicationVersion("5.0.0")
+    app.setApplicationVersion("5.2.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
 
@@ -181,7 +232,7 @@ def main():
     signal.signal(signal.SIGINT, lambda *_: (_cleanup(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
 
-    # ── 4. Create service (heavy — loads AI model in background) ──
+    # ── 4. Create service (loads embedder + index in background) ──
     service = DesktopService()
 
     # ── 5. Build the main panel (from ui/spotlight_panel.py) ──
@@ -238,6 +289,35 @@ def main():
                     hotkey_ok = True
             QTimer.singleShot(500, _retry_hotkey)
 
+    # ── 8. Register Research Overlay hotkey (Ctrl+Shift+R) ──
+    _overlay = None
+    overlay_hotkey_ok = False
+    if platform.system() == "Windows":
+        overlay_hotkey_ok = ctypes.windll.user32.RegisterHotKey(
+            None, OVERLAY_HOTKEY_ID, MOD_CTRL_SHIFT, VK_R
+        )
+        if overlay_hotkey_ok:
+            logger.info("Research Overlay hotkey registered: Ctrl+Shift+R")
+
+            def _toggle_overlay():
+                nonlocal _overlay
+                try:
+                    if _overlay is None:
+                        from ui.research_overlay import ResearchOverlay
+                        _overlay = ResearchOverlay()
+                    if _overlay.isVisible():
+                        _overlay.hide()
+                    else:
+                        _overlay.show()
+                        _overlay.raise_()
+                except Exception as e:
+                    logger.error(f"Research Overlay error: {e}")
+
+            overlay_filter = HotkeyFilter(_toggle_overlay, hotkey_id=OVERLAY_HOTKEY_ID)
+            app.installNativeEventFilter(overlay_filter)
+        else:
+            logger.warning("Research Overlay hotkey (Ctrl+Shift+R) registration failed")
+
     # Show panel on startup
     panel.toggle_panel()
 
@@ -245,6 +325,8 @@ def main():
 
     if hotkey_ok:
         ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+    if overlay_hotkey_ok:
+        ctypes.windll.user32.UnregisterHotKey(None, OVERLAY_HOTKEY_ID)
 
     sys.exit(ret)
 
