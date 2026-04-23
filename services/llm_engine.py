@@ -357,6 +357,46 @@ class LLMEngine:
             except Exception as e:
                 logger.error(f"LLMEngine: Chat error: {e}")
                 return f"[AI error: {e}]"
+
+    def chat_stream(
+        self,
+        messages: List[dict],
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Iterator[str]:
+        """Stream tokens for a multi-turn conversation.
+        
+        Same API as chat() but yields tokens incrementally.
+        The caller collects them for display + final assembly.
+        
+        Yields individual token strings. The caller should:
+          1. Display each token immediately (perceived ~300ms TTFT)
+          2. Concatenate all tokens for the final response
+          3. Strip <think> blocks from the assembled text
+        """
+        if not self._loaded:
+            if not self.load_model():
+                yield f"[AI unavailable: {self._load_error or 'model not loaded'}]"
+                return
+
+        with self._lock:
+            try:
+                stream = self._model.create_chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=True,
+                )
+
+                for chunk in stream:
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    token = delta.get("content", "")
+                    if token:
+                        yield token
+
+            except Exception as e:
+                logger.error(f"LLMEngine: Stream error: {e}")
+                yield f"\n[AI error: {e}]"
     
     def chat_with_tools(
         self,

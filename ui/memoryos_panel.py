@@ -48,19 +48,25 @@ MODE_PLACEHOLDERS = {
 
 
 class MemoryOSPanel(QFrame):
-    """Three-mode MemoryOS chat interface."""
+    """Three-mode MemoryOS chat interface with streaming."""
 
     _sig_response = pyqtSignal(str, str)  # (html, mode)
     _sig_error = pyqtSignal(str)
+    _sig_token = pyqtSignal(str)          # streaming token
+    _sig_stream_end = pyqtSignal()        # streaming complete
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
         self._active = False
         self._mode = "auto"  # Default mode (model decides)
+        self._streaming = False  # True while tokens are arriving
+        self._stream_mode = ""  # Mode during current stream
 
         self._sig_response.connect(self._on_response)
         self._sig_error.connect(self._on_error)
+        self._sig_token.connect(self._on_token)
+        self._sig_stream_end.connect(self._on_stream_end)
 
         self._build_ui()
 
@@ -264,25 +270,83 @@ class MemoryOSPanel(QFrame):
             agent = get_memory_os()
             agent.on_confirmation_needed = lambda name, desc, args: True
 
+            # Wire streaming callback → emits signal per token
+            self._stream_mode = mode
+            agent.on_token = lambda token: self._sig_token.emit(token)
+
             logger.info(f"MemoryOSPanel: [{mode.upper()}] {text!r}")
             response = agent.chat(text, mode=mode)
             logger.info(f"MemoryOSPanel: Response ({len(response) if response else 0} chars)")
 
+            # Disconnect streaming
+            agent.on_token = None
+
             if not response or not response.strip():
                 response = "(No response generated. Try rephrasing your query.)"
 
-            safe = (
-                response
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>")
-            )
-            self._sig_response.emit(safe, mode)
+            # If we were streaming, signal end instead of full response
+            if self._streaming:
+                self._sig_stream_end.emit()
+            else:
+                safe = (
+                    response
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\n", "<br>")
+                )
+                self._sig_response.emit(safe, mode)
 
         except Exception as e:
             logger.error(f"MemoryOS agent error: {e}", exc_info=True)
+            agent_ref = None
+            try:
+                from services.memory_os import get_memory_os
+                agent_ref = get_memory_os()
+                agent_ref.on_token = None
+            except Exception:
+                pass
             self._sig_error.emit(str(e))
+
+    def _on_token(self, token: str):
+        """Handle a single streaming token (main thread, signal-safe)."""
+        if not self._streaming:
+            # First token — create the response block header
+            self._streaming = True
+            color, _ = MODE_COLORS.get(self._stream_mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
+            label = MODE_LABELS.get(self._stream_mode, "MemoryOS")
+            self._append_html(
+                f'<div style="color: rgba(255,255,255,0.85); margin: 6px 0; '
+                f'padding: 8px; background: rgba(255,255,255,0.03); '
+                f'border-radius: 6px; border-left: 3px solid {color};">'
+                f'<b style="color: {color};">{label}:</b><br>'
+            )
+            self._set_status(f"Streaming...")
+
+        # Append token text — escape HTML
+        safe = token.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe = safe.replace("\n", "<br>")
+
+        # Insert at end of chat
+        cursor = self._chat.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._chat.setTextCursor(cursor)
+        cursor.insertHtml(safe)
+        vbar = self._chat.verticalScrollBar()
+        vbar.setValue(vbar.maximum())
+
+    def _on_stream_end(self):
+        """Streaming complete — close the response block."""
+        self._streaming = False
+        # Close the div tag
+        cursor = self._chat.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._chat.setTextCursor(cursor)
+        cursor.insertHtml("</div>")
+
+        self._input.setEnabled(True)
+        self._input.setFocus()
+        self._set_status("Ready")
 
     def _on_response(self, safe_html: str, mode: str):
         color, _ = MODE_COLORS.get(mode, ("#7c8aff", "rgba(100,120,255,0.3)"))

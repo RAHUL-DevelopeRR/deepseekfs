@@ -101,29 +101,27 @@ class MemoryOSAgent:
       - TaskQueue     for persistence
       - EventStore    for observability
       - ProfileManager for user settings
+      - ResponseCache for persistent response caching
     
     UI callbacks:
       on_step(task, step)         — live step streaming
       on_thinking(task, message)  — "working..." indicators
       on_confirmation(name, args) — tool approval dialog
       on_task_update(task)        — task status changed
+      on_token(token)             — streaming token callback
     """
 
     def __init__(self):
         self._engine = None
         self._executor: Optional[TaskExecutor] = None
         self._conversation: List[Dict] = []
-        self._lock = threading.Lock()
-
-        # Response cache (LRU, 64 entries) — avoids re-inference for repeated queries
-        self._response_cache: Dict[str, str] = {}
-        self._cache_max = 64
 
         # UI callbacks (set by panel)
         self.on_step: Optional[Callable] = None
         self.on_thinking: Optional[Callable] = None
         self.on_confirmation: Optional[Callable] = None
         self.on_task_update: Optional[Callable] = None
+        self.on_token: Optional[Callable] = None  # Streaming callback
 
     def _get_engine(self):
         if self._engine is None:
@@ -147,29 +145,32 @@ class MemoryOSAgent:
     # ── Public API ────────────────────────────────────────────
 
     def chat(self, user_message: str, mode: str = "auto") -> str:
-        """Process user message. Thread-safe.
+        """Process user message.
+        
+        Thread-safety is provided by LLMEngine's internal lock.
+        No MemoryOS-level lock needed — removing it eliminates
+        the UI freeze during long inference.
         
         Routing:
           - "auto" → keyword-based intent detection
           - "query" → force semantic search
           - "action" → force tool calling
         """
-        with self._lock:
-            store = get_event_store()
-            store.insert(AgentEvent(
-                event_type=EventType.USER_INPUT.value,
-                input_summary=user_message[:300],
-            ))
+        store = get_event_store()
+        store.insert(AgentEvent(
+            event_type=EventType.USER_INPUT.value,
+            input_summary=user_message[:300],
+        ))
 
-            # Determine mode
-            effective = mode if mode != "auto" else _detect_intent(user_message)
+        # Determine mode
+        effective = mode if mode != "auto" else _detect_intent(user_message)
 
-            if effective == "query":
-                return self._query_mode(user_message)
-            elif effective == "action":
-                return self._action_mode(user_message)
-            else:
-                return self._chat_mode(user_message)
+        if effective == "query":
+            return self._query_mode(user_message)
+        elif effective == "action":
+            return self._action_mode(user_message)
+        else:
+            return self._chat_mode(user_message)
 
     def submit_task(self, goal: str, mode: str = "auto") -> Task:
         """Submit a task to the queue and execute it.
@@ -208,18 +209,24 @@ class MemoryOSAgent:
     }
 
     def _chat_mode(self, user_message: str) -> str:
-        """Direct conversation. No tools, minimal context.
+        """Direct conversation with streaming + persistent caching.
         
         Performance tiers:
-          1. Greetings:    0ms (hardcoded, no LLM)
-          2. Cached:       0ms (LRU cache hit)
-          3. Short query: ~1-2s (100 tokens)
-          4. Code:        ~5-15s (800 tokens)
-          5. Normal:      ~2-5s (512 tokens)
+          1. Greetings:    0ms   (hardcoded, no LLM)
+          2. Cache hit:    <5ms  (SQLite lookup)
+          3. Streaming:    ~300ms TTFT, tokens appear live
+        
+        Token budget:
+          - Short query: 100 tokens
+          - Code request: 800 tokens
+          - Normal: profile default (512)
         """
+        from services.cache import get_response_cache
+        from services.llm_engine import _strip_thinking
+
         low = user_message.lower().strip().rstrip("!?.")
 
-        # Tier 1: Instant greeting response (0ms)
+        # ── Tier 1: Instant greeting (0ms) ────────────────────
         if low in self._GREETINGS:
             response = self._GREETINGS[low]
             self._conversation.append({"role": "user", "content": user_message})
@@ -227,16 +234,17 @@ class MemoryOSAgent:
             logger.info(f"MemoryOS [CHAT]: 0ms (greeting), {len(response)} chars")
             return response
 
-        # Tier 2: Cache hit (0ms)
-        cache_key = low[:100]
-        if cache_key in self._response_cache:
-            response = self._response_cache[cache_key]
+        # ── Tier 2: Persistent cache hit (<5ms) ───────────────
+        cache_key = low[:120]
+        cache = get_response_cache()
+        cached = cache.get(cache_key)
+        if cached is not None:
             self._conversation.append({"role": "user", "content": user_message})
-            self._conversation.append({"role": "assistant", "content": response})
-            logger.info(f"MemoryOS [CHAT]: 0ms (cached), {len(response)} chars")
-            return response
+            self._conversation.append({"role": "assistant", "content": cached})
+            logger.info(f"MemoryOS [CHAT]: <5ms (cached), {len(cached)} chars")
+            return cached
 
-        # Tier 3-5: LLM inference
+        # ── Tier 3: LLM inference with streaming ─────────────
         engine = self._get_engine()
         profile = get_profile_manager().get_active()
 
@@ -256,11 +264,31 @@ class MemoryOSAgent:
             max_tokens = profile.llm.max_tokens_chat
 
         t0 = time.time()
-        response = engine.chat(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=profile.llm.temperature,
-        )
+
+        # Stream if callback is set, otherwise batch
+        if self.on_token is not None:
+            # Streaming mode — emit tokens live
+            chunks = []
+            for token in engine.chat_stream(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=profile.llm.temperature,
+            ):
+                chunks.append(token)
+                try:
+                    self.on_token(token)
+                except Exception:
+                    pass  # UI callback failure shouldn't kill inference
+            raw = "".join(chunks)
+            response = _strip_thinking(raw.strip()) if raw else ""
+        else:
+            # Batch mode (fallback)
+            response = engine.chat(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=profile.llm.temperature,
+            )
+
         elapsed = int((time.time() - t0) * 1000)
 
         store = get_event_store()
@@ -269,12 +297,9 @@ class MemoryOSAgent:
         if not response or not response.strip():
             response = "Hello! I'm Neuron. How can I help you?"
 
-        # Cache short responses for instant replay
-        if len(response) < 300 and len(low.split()) <= 6:
-            self._response_cache[cache_key] = response
-            if len(self._response_cache) > self._cache_max:
-                oldest = next(iter(self._response_cache))
-                del self._response_cache[oldest]
+        # Persist to cache (short answers only, not code blocks)
+        if len(response) < 500 and len(low.split()) <= 8:
+            cache.put(cache_key, response)
 
         self._conversation.append({"role": "assistant", "content": response})
         logger.info(f"MemoryOS [CHAT]: {elapsed}ms, {len(response)} chars, budget={max_tokens}")
