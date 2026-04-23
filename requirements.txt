@@ -74,3 +74,4 @@ xlsxwriter==3.2.9
 llama-cpp-python>=0.3.0
 vosk>=0.3.45
 pyaudiowpatch>=0.2.14
+spacy>=3.7.0

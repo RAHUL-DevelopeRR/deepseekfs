@@ -126,6 +126,9 @@ _NOISE_WORDS = {
     "me", "my", "the", "all", "for", "about", "with",
     "related", "regarding", "on", "of", "in", "from",
     "large", "small", "big", "tiny", "not",
+    "other", "every", "each", "available", "found",
+    "have", "please", "can", "you", "that", "this",
+    "where", "what", "which", "how", "any",
 }
 
 # ── Path keywords ────────────────────────────────────────────────────────

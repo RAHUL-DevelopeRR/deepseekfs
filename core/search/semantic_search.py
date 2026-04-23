@@ -16,7 +16,7 @@ from core.time.scoring import (
     extract_time_target, calculate_target_time_score,
 )
 from core.indexing.index_builder import get_index
-from core.search.query_parser import extract_intent
+from core.search.nlp_parser import parse_query, extract_intent
 from core.search.query_corrector import get_corrector
 from core.search.llm_reranker import get_reranker
 
@@ -64,9 +64,24 @@ class SemanticSearch:
             # ── Parse query for date targets ──────────────────
             target_time, cleaned_query = extract_time_target(query)
 
-            # ── Parse query for intent (exts, path, size, negation) ──
-            cleaned_query, target_exts, path_filter, size_filter, excluded_paths = \
-                extract_intent(cleaned_query)
+            # ── NLP-powered query parsing ──────────────────────
+            # spaCy analyzes grammar to extract file types, paths,
+            # size filters, and whether this is enumeration vs semantic.
+            parsed = parse_query(cleaned_query)
+            cleaned_query = parsed.semantic_query
+            target_exts = parsed.target_exts
+            path_filter = parsed.path_filter
+            size_filter = parsed.size_filter
+            excluded_paths = parsed.excluded_paths
+
+            # ── Enumeration fast-path ──────────────────────────
+            # NLP determined user wants ALL files of a type (not
+            # files ABOUT a topic). Bypass FAISS → direct SQL.
+            if parsed.is_enumeration:
+                return self._enumeration_search(
+                    index_builder, target_exts, path_filter,
+                    size_filter, excluded_paths, top_k, query,
+                )
 
             # Use cleaned query for embedding; if corrected, also prepare corrected embedding
             search_text = cleaned_query if len(cleaned_query) >= 3 else query
@@ -292,4 +307,87 @@ class SemanticSearch:
 
         except Exception as e:
             logger.error(f"Search error: {e}")
+            return []
+
+    # ── Enumeration fast-path ─────────────────────────────────
+    def _enumeration_search(
+        self,
+        index_builder,
+        target_exts: list,
+        path_filter: str | None,
+        size_filter: str | None,
+        excluded_paths: list,
+        top_k: int,
+        original_query: str,
+    ) -> list:
+        """List ALL files matching an extension filter, sorted by recency.
+
+        Used when the user's intent is enumeration ("list all python files")
+        rather than semantic search ("python files about machine learning").
+        Bypasses FAISS entirely — goes straight to SQLite.
+        """
+        try:
+            db = index_builder._db
+            conn = db._conn()
+
+            # Build SQL WHERE clause for extensions
+            placeholders = ", ".join("?" for _ in target_exts)
+            sql = f"""
+                SELECT * FROM files
+                WHERE LOWER(extension) IN ({placeholders})
+            """
+            params: list = [ext.lower() for ext in target_exts]
+
+            # Path filter
+            if path_filter:
+                sql += " AND LOWER(path) LIKE ?"
+                params.append(f"%{path_filter.lower()}%")
+
+            # Excluded paths
+            for exc in excluded_paths:
+                sql += " AND LOWER(path) NOT LIKE ?"
+                params.append(f"%{exc.lower()}%")
+
+            # Size filter
+            if size_filter == "large":
+                sql += f" AND size >= {_LARGE_FILE_THRESHOLD}"
+            elif size_filter == "small":
+                sql += f" AND size <= {_SMALL_FILE_THRESHOLD}"
+
+            sql += " ORDER BY modified_time DESC"
+            sql += f" LIMIT {top_k}"
+
+            rows = conn.execute(sql, params).fetchall()
+
+            results = []
+            for row in rows:
+                rd = dict(row)
+                fpath = rd["path"]
+                if not Path(fpath).exists():
+                    continue
+
+                # Time score: more recent = higher
+                from core.time.scoring import calculate_time_score
+                time_score = calculate_time_score(rd.get("modified_time", 0))
+
+                results.append({
+                    "path": fpath,
+                    "name": rd.get("name", ""),
+                    "extension": rd.get("extension", ""),
+                    "size": rd.get("size", 0),
+                    "modified_time": rd.get("modified_time", 0),
+                    "semantic_score": 1.0,  # All are exact matches
+                    "time_score": round(time_score, 4),
+                    "combined_score": round(0.5 + 0.5 * time_score, 4),
+                    "open_count": rd.get("open_count", 0),
+                })
+
+            logger.info(
+                f"Enumeration: '{original_query}' -> {len(results)} results "
+                f"(exts={target_exts}, path={path_filter})"
+            )
+            return results
+
+        except Exception as e:
+            logger.error(f"Enumeration search error: {e}")
             return []
