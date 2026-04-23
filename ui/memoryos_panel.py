@@ -323,15 +323,13 @@ class MemoryOSPanel(QFrame):
             )
             self._set_status(f"Streaming...")
 
-        # Append token text — escape HTML
-        safe = token.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        safe = safe.replace("\n", "<br>")
-
-        # Insert at end of chat
+        # Append token — use insertText to preserve whitespace
+        # (insertHtml strips leading/trailing spaces, causing the no-space bug)
+        text = token.replace("\r", "")
         cursor = self._chat.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self._chat.setTextCursor(cursor)
-        cursor.insertHtml(safe)
+        cursor.insertText(text)
         vbar = self._chat.verticalScrollBar()
         vbar.setValue(vbar.maximum())
 

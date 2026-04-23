@@ -19,6 +19,7 @@ Does NOT own the LLM, tools, or event store.
 from __future__ import annotations
 
 import json
+import re
 import time
 import threading
 from typing import Optional, List, Dict, Callable
@@ -30,65 +31,22 @@ from services.tools import ALL_TOOLS, get_tool_schemas
 from services.profiles import get_profile_manager
 
 
-# ── Intent Detection (lightweight, no LLM) ───────────────────
-
-_ACTION_SIGNALS = frozenset({
-    "organize", "move", "copy", "rename", "delete", "remove",
-    "list files", "show files", "show folder", "dir",
-    "install", "pip", "npm", "git", "build",
-})
-
-_SEARCH_SIGNALS = frozenset({
-    "find", "search", "locate", "where is", "look for",
-    "which file", "show me", "get my",
-})
-
-# These override ACTION signals — if present, route to CHAT
-_CHAT_OVERRIDES = frozenset({
-    "code", "program", "script", "algorithm", "function",
-    "class", "implement", "write a", "create a", "generate a",
-    "help me", "explain", "how to", "what is", "debug",
-    "example", "tutorial", "syntax", "logic", "simulation",
-})
-
-# These FORCE action mode — explicit file/system operations only
-_STRONG_ACTION = frozenset({
-    "organize my", "move the", "delete the", "remove the",
-    "rename the", "copy the", "run command", "execute command",
-    "open folder", "list folder", "create folder", "make folder",
-    "create file", "save file", "write file",
-})
-
+# ── Intent Detection (embedding-based, no hardcodes) ─────────
 
 def _detect_intent(text: str) -> str:
-    """Lightweight intent detection. Returns: chat | query | action.
+    """Classify user intent using embedding similarity.
     
-    Priority:
-      1. Search signals → query
-      2. Strong action phrases → action
-      3. Chat overrides → chat (even if "create" is present)
-      4. Weak action signals → action
-      5. Default → chat
+    Uses cosine similarity against pre-computed centroids
+    from storage/intent_examples.json.
+    
+    Returns: chat | query | action
+    Latency: ~5ms (embedding only, no LLM)
+    Fallback: 'chat' if classifier unavailable
     """
-    words = text.lower()
-
-    # 1. Search always wins
-    if any(sig in words for sig in _SEARCH_SIGNALS):
-        return "query"
-
-    # 2. Strong action phrases (explicit file/system ops)
-    if any(sig in words for sig in _STRONG_ACTION):
-        return "action"
-
-    # 3. Chat overrides trump weak action signals
-    if any(sig in words for sig in _CHAT_OVERRIDES):
-        return "chat"
-
-    # 4. Weak action signals
-    if any(sig in words for sig in _ACTION_SIGNALS):
-        return "action"
-
-    return "chat"
+    from services.intent import get_intent_classifier
+    classifier = get_intent_classifier()
+    intent, confidence = classifier.classify(text)
+    return intent
 
 
 # ── MemoryOS Agent ────────────────────────────────────────────
@@ -295,6 +253,12 @@ class MemoryOSAgent:
         store.insert(AgentEvent.llm_inference(elapsed))
 
         if not response or not response.strip():
+            response = "Hello! I'm Neuron. How can I help you?"
+
+        # Sanitize: strip hallucinated tool-call syntax from chat output
+        # SmolLM3-3B sometimes outputs 'functions.tool_name:' as plain text
+        response = re.sub(r'functions\.\w+:.*', '', response).strip()
+        if not response:
             response = "Hello! I'm Neuron. How can I help you?"
 
         # Persist to cache (short answers only, not code blocks)
