@@ -18,7 +18,7 @@ from __future__ import annotations
 import threading
 
 from PyQt6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout,
+    QFrame, QVBoxLayout, QHBoxLayout, QWidget,
     QTextEdit, QLineEdit, QPushButton, QLabel,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -62,6 +62,12 @@ class MemoryOSPanel(QFrame):
         self._mode = "auto"  # Default mode (model decides)
         self._streaming = False  # True while tokens are arriving
         self._stream_mode = ""  # Mode during current stream
+
+        # RLHF feedback state
+        self._last_query = ""
+        self._last_response = ""
+        self._last_intent = ""
+        self._last_confidence = 0.0
 
         self._sig_response.connect(self._on_response)
         self._sig_error.connect(self._on_error)
@@ -118,6 +124,9 @@ class MemoryOSPanel(QFrame):
         """)
         self._chat.setHtml(self._welcome_html())
         layout.addWidget(self._chat, stretch=1)
+
+        # RLHF feedback bar (inline, between chat and input)
+        self._build_feedback_bar(layout)
 
         # Input row
         input_row = QHBoxLayout()
@@ -240,6 +249,11 @@ class MemoryOSPanel(QFrame):
             return
         self._input.clear()
         self._input.setEnabled(False)
+        self._hide_feedback_bar()  # Hide previous feedback bar
+
+        # Store for feedback
+        self._last_query = text
+        self._last_response = ""
 
         mode_label = MODE_LABELS[self._mode].upper()
         self._append_message("You", text, color="#65B8FF", badge=mode_label)
@@ -277,6 +291,9 @@ class MemoryOSPanel(QFrame):
             logger.info(f"MemoryOSPanel: [{mode.upper()}] {text!r}")
             response = agent.chat(text, mode=mode)
             logger.info(f"MemoryOSPanel: Response ({len(response) if response else 0} chars)")
+
+            # Store response for feedback
+            self._last_response = response or ""
 
             # Disconnect streaming
             agent.on_token = None
@@ -345,6 +362,7 @@ class MemoryOSPanel(QFrame):
         self._input.setEnabled(True)
         self._input.setFocus()
         self._set_status("Ready")
+        self._show_feedback_bar()  # Show 👍/👎 after stream ends
 
     def _on_response(self, safe_html: str, mode: str):
         color, _ = MODE_COLORS.get(mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
@@ -360,6 +378,7 @@ class MemoryOSPanel(QFrame):
         self._input.setEnabled(True)
         self._input.setFocus()
         self._set_status("Ready")
+        self._show_feedback_bar()  # Show 👍/👎 after response
 
     def _on_error(self, error_msg: str):
         self._append_html(
@@ -405,6 +424,116 @@ class MemoryOSPanel(QFrame):
                 parent = parent.parent()
         except Exception:
             pass
+
+    # ── RLHF Feedback Bar ─────────────────────────────────────
+
+    def _build_feedback_bar(self, layout: QVBoxLayout):
+        """Create the inline feedback bar (hidden by default)."""
+        self._feedback_bar = QWidget()
+        self._feedback_bar.setFixedHeight(32)
+        self._feedback_bar.setStyleSheet("background: transparent;")
+        self._feedback_bar.hide()
+
+        bar_layout = QHBoxLayout(self._feedback_bar)
+        bar_layout.setContentsMargins(8, 2, 8, 2)
+        bar_layout.setSpacing(6)
+
+        lbl = QLabel("Was this helpful?")
+        lbl.setStyleSheet(
+            f"color: rgba(255,255,255,0.3); font-family: {FN}; "
+            f"font-size: 11px; background: transparent;"
+        )
+        bar_layout.addWidget(lbl)
+
+        self._btn_thumbs_up = QPushButton("👍")
+        self._btn_thumbs_up.setFixedSize(28, 24)
+        self._btn_thumbs_up.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_thumbs_up.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 6px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background: rgba(76,175,80,0.2);
+                border-color: rgba(76,175,80,0.4);
+            }}
+        """)
+        self._btn_thumbs_up.clicked.connect(lambda: self._record_feedback(positive=True))
+        bar_layout.addWidget(self._btn_thumbs_up)
+
+        self._btn_thumbs_down = QPushButton("👎")
+        self._btn_thumbs_down.setFixedSize(28, 24)
+        self._btn_thumbs_down.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_thumbs_down.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 6px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background: rgba(244,67,54,0.2);
+                border-color: rgba(244,67,54,0.4);
+            }}
+        """)
+        self._btn_thumbs_down.clicked.connect(lambda: self._record_feedback(positive=False))
+        bar_layout.addWidget(self._btn_thumbs_down)
+
+        self._feedback_label = QLabel("")
+        self._feedback_label.setStyleSheet(
+            f"color: rgba(255,255,255,0.25); font-family: {FN}; "
+            f"font-size: 10px; background: transparent;"
+        )
+        bar_layout.addWidget(self._feedback_label)
+
+        bar_layout.addStretch()
+        layout.addWidget(self._feedback_bar)
+
+    def _show_feedback_bar(self):
+        """Show the feedback bar after a response."""
+        if hasattr(self, '_feedback_bar'):
+            self._feedback_label.setText("")
+            self._btn_thumbs_up.setEnabled(True)
+            self._btn_thumbs_down.setEnabled(True)
+            self._feedback_bar.show()
+
+    def _hide_feedback_bar(self):
+        """Hide the feedback bar."""
+        if hasattr(self, '_feedback_bar'):
+            self._feedback_bar.hide()
+
+    def _record_feedback(self, positive: bool):
+        """Record user feedback via the RLHF store."""
+        if not self._last_query or not self._last_response:
+            return
+
+        try:
+            from services.feedback import get_feedback_store, Rating
+            store = get_feedback_store()
+            rating = Rating.POSITIVE if positive else Rating.NEGATIVE
+            store.record(
+                query=self._last_query,
+                response=self._last_response,
+                rating=rating,
+                mode=self._mode,
+                intent=self._last_intent,
+                confidence=self._last_confidence,
+            )
+
+            # Visual confirmation
+            emoji = "👍" if positive else "👎"
+            self._feedback_label.setText(f"  {emoji} Feedback recorded")
+            self._btn_thumbs_up.setEnabled(False)
+            self._btn_thumbs_down.setEnabled(False)
+
+            logger.info(
+                f"RLHF: {'positive' if positive else 'negative'} for "
+                f"'{self._last_query[:40]}'"
+            )
+        except Exception as e:
+            logger.error(f"RLHF feedback failed: {e}")
 
     @staticmethod
     def _welcome_html() -> str:

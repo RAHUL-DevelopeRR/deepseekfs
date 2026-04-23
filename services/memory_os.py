@@ -413,6 +413,12 @@ class MemoryOSAgent:
         if self.on_task_update:
             self.on_task_update(task)
 
+        # Sanitize: strip hallucinated tool-call syntax from output
+        if result:
+            result = re.sub(r'functions\.\w+:.*', '', result).strip()
+        if not result:
+            result = "Completed the requested action."
+
         return result
 
     # ── Background Task Runner ────────────────────────────────
