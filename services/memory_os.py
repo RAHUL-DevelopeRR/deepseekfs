@@ -225,18 +225,68 @@ class MemoryOSAgent:
 
         # Stream if callback is set, otherwise batch
         if self.on_token is not None:
-            # Streaming mode — emit tokens live
+            # Streaming mode — emit tokens live, suppress <think> blocks
             chunks = []
+            in_think = False
+            think_buffer = ""
+
             for token in engine.chat_stream(
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=profile.llm.temperature,
             ):
                 chunks.append(token)
+                think_buffer += token
+
+                # Detect <think> opening
+                if not in_think and "<think>" in think_buffer:
+                    # Emit any text BEFORE <think>
+                    before = think_buffer.split("<think>", 1)[0]
+                    if before:
+                        try:
+                            self.on_token(before)
+                        except Exception:
+                            pass
+                    in_think = True
+                    think_buffer = ""
+                    continue
+
+                # Detect </think> closing
+                if in_think and "</think>" in think_buffer:
+                    # Discard everything inside think block
+                    after = think_buffer.split("</think>", 1)[1]
+                    in_think = False
+                    think_buffer = ""
+                    if after:
+                        try:
+                            self.on_token(after)
+                        except Exception:
+                            pass
+                    continue
+
+                # If inside think block, suppress (don't emit)
+                if in_think:
+                    continue
+
+                # Not in think block — emit and clear buffer
+                # But wait for potential partial "<think" at end
+                if "<" in think_buffer and not think_buffer.endswith(">"):
+                    # Might be start of <think> tag — wait for more
+                    continue
+
                 try:
-                    self.on_token(token)
+                    self.on_token(think_buffer)
                 except Exception:
-                    pass  # UI callback failure shouldn't kill inference
+                    pass
+                think_buffer = ""
+
+            # Flush any remaining buffer
+            if think_buffer and not in_think:
+                try:
+                    self.on_token(think_buffer)
+                except Exception:
+                    pass
+
             raw = "".join(chunks)
             response = _strip_thinking(raw.strip()) if raw else ""
         else:
