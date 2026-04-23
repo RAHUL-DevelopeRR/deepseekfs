@@ -108,6 +108,7 @@ _FILE_CONTEXT_WORDS = {
     "presentation", "presentations", "spreadsheet", "spreadsheets",
     "code", "script", "scripts", "program", "programs",
     "report", "reports", "sheet", "sheets",
+    "project", "projects", "notebook", "notebooks", "app", "apps",
 }
 
 # Strong keywords that always trigger extension filtering

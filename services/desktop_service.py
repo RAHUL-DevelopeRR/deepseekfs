@@ -91,7 +91,10 @@ class DesktopService:
         if si._index_has_only_samples():
             si._wipe_index("sample-only index")
         if si._watch_paths_changed():
-            si._wipe_index("watch paths changed")
+            logger.info(
+                "Watch paths changed since last run; keeping existing index "
+                "and scanning current folders."
+            )
 
         idx = get_index()
         total_new = 0

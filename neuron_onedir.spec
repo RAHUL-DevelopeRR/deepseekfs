@@ -1,9 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Neuron v4.7 — Full PyInstaller --onedir spec
-=============================================
-Bundles the ENTIRE app (Python + all packages + model) into a
-self-contained folder. No venv needed on the target machine.
+Neuron v5.0 - PyInstaller --onedir spec (ONNX)
+===============================================
+Bundles the desktop app with ONNX Runtime for neural embeddings.
+No PyTorch/torch dependency — uses the same MiniLM model exported
+to ONNX format for identical search quality without DLL conflicts.
 
 Build:
     pyinstaller neuron_onedir.spec --noconfirm
@@ -15,6 +16,11 @@ import os
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import copy_metadata
+
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("USE_FLAX", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("QT_API", "pyqt6")
 
 block_cipher = None
 
@@ -30,20 +36,15 @@ datas = [
     ('ui', 'ui'),
     # Assets (icons, images)
     ('assets', 'assets'),
-    # Pre-cached AI model (so first run doesn't need internet)
-    ('storage/models', 'storage/models'),
+    # ONNX model (neural search without torch)
+    ('storage/models/onnx', 'storage/models/onnx'),
     # Docs
     ('docs', 'docs'),
 ]
 
-# Explicitly copy vital metadata for HF/SentenceTransformers that PyInstaller misses
-datas += copy_metadata('sentence_transformers')
-datas += copy_metadata('transformers')
-datas += copy_metadata('huggingface_hub')
-datas += copy_metadata('tokenizers')
+# Explicitly copy metadata PyInstaller misses for runtime dependencies.
 datas += copy_metadata('tqdm')
 datas += copy_metadata('regex')
-datas += copy_metadata('safetensors')
 
 # Only include datas that exist
 datas = [(src, dst) for src, dst in datas if os.path.exists(src)]
@@ -65,23 +66,6 @@ hiddenimports = [
     'services.desktop_service', 'services.startup_indexer',
     'services.ollama_service',
     'ui.spotlight_panel', 'ui.memory_lane_panel', 'ui.icons',
-    # sentence-transformers and its deps
-    'sentence_transformers',
-    'sentence_transformers.models',
-    'sentence_transformers.models.Transformer',
-    'sentence_transformers.models.Pooling',
-    'sentence_transformers.models.Normalize',
-    'transformers',
-    'transformers.models',
-    'transformers.models.bert',
-    'transformers.models.bert.modeling_bert',
-    'transformers.models.bert.tokenization_bert',
-    'transformers.models.bert.tokenization_bert_fast',
-    'tokenizers',
-    # torch (CPU)
-    'torch',
-    'torch.nn',
-    'torch.nn.functional',
     # faiss
     'faiss',
     # file parsers
@@ -91,17 +75,15 @@ hiddenimports = [
     'openpyxl',
     'lxml', 'lxml.etree',
     'pdfminer', 'pdfminer.high_level',
+    # ONNX Runtime (replaces torch for neural embeddings)
+    'onnxruntime',
+    'tokenizers',
     # other deps
     'watchdog', 'watchdog.observers', 'watchdog.events',
     'dateparser',
-    'sklearn', 'sklearn.utils',
     'numpy',
-    'scipy',
-    'huggingface_hub',
-    'safetensors',
     'tqdm',
     'regex',
-    'requests',
     'certifi',
     'yaml',
     'sqlite3',
@@ -116,9 +98,30 @@ hiddenimports = [
 excludes = [
     'tkinter', 'unittest', 'test', 'tests',
     'matplotlib', 'IPython', 'notebook', 'jupyter',
+    'pytest', 'py', 'sphinx', 'docutils',
+    'pandas', 'pyarrow', 'numba', 'llvmlite', 'sqlalchemy',
+    'sklearn', 'scipy',
+    'onnxruntime',
+    'qtpy', 'PyQt5', 'PySide6', 'PySide2',
+    'tensorflow', 'tensorflow_hub', 'tf_keras', 'keras', 'jax', 'flax',
     'tensorboard', 'torch.cuda', 'torch.distributed',
     'torch.testing', 'torch.utils.tensorboard',
-    'torchvision', 'torchaudio',
+    'torch', 'torchvision', 'torchaudio',
+    'transformers', 'sentence_transformers', 'tokenizers',
+    'huggingface_hub', 'safetensors',
+    'torch._dynamo', 'torch._inductor', 'torch._export',
+    'torch._functorch', 'torch._higher_order_ops', 'torch._subclasses',
+    'functorch', 'torch.func', 'torch.compiler', 'torch.onnx',
+    'torch.ao', 'torch.quantization', 'torch.export', 'torch.masked',
+    'torch.profiler', 'torch.utils', 'torch.utils.data',
+    'torch.utils.benchmark', 'torch.utils.tensorboard',
+    'torch.distributions', 'torch.special', 'torch.sparse', 'torch.optim',
+    'torch.signal', 'torch.mps', 'torch.cpu', 'torch.amp',
+    'torch.nn.intrinsic', 'torch.nn.qat', 'torch.nn.quantized',
+    'torch.nn.quantizable',
+    'scipy._lib.array_api_compat.torch',
+    'sympy', 'mpmath', 'IPython', 'ipykernel', 'ipywidgets', 'jupyter',
+    'debugpy', 'traitlets', 'pydantic', 'httpx', 'aiohttp',
     'PIL',  # We don't need Pillow for the Qt app
 ]
 

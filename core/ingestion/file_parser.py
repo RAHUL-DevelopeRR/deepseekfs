@@ -252,3 +252,8 @@ class FileParser:
             "created_time": stat.st_ctime,
             "extension": Path(file_path).suffix.lower(),
         }
+
+
+def extract_text(file_path: str) -> Optional[str]:
+    """Compatibility wrapper for callers/tests that expect extract_text."""
+    return FileParser.parse(file_path)

@@ -1,28 +1,37 @@
 =============================================
-Neuron v4.7 — Production Portability Release
+Neuron v5.0 - Crash-safe Indexing Release
 =============================================
 
-Welcome to Neuron! 
+Welcome to Neuron.
 
-Neuron is an open-source, offline-first semantic search engine designed to help you find your files by meaning, not just keywords. It includes its own bundled AI embedding matrix natively packaged for Windows.
+Neuron is an open-source, offline-first semantic search engine designed to
+help you find your files by meaning, not just keywords.
+
+This release fixes the startup/indexing failure path:
+* watch-path changes no longer wipe the working index before scanning
+* Windows profile and OneDrive folders are detected more reliably
+* the embedding stack runs in PyTorch-only mode to avoid TensorFlow DLL/import
+  issues
+* a fallback embedder keeps indexing/search available if MiniLM cannot load
 
 ---------------------------------------------
-⚠️ Note regarding Windows SmartScreen ⚠️
+Windows SmartScreen note
 ---------------------------------------------
-Because Neuron is newly released and an indie open-source project, it does not currently use an expensive Extended Validation (EV) Code Signing Certificate. 
+Because Neuron is an indie open-source project, it does not currently use an
+expensive EV code-signing certificate.
 
 If Windows presents a blue "Windows protected your PC" SmartScreen warning:
-1. Click "More info" 
+1. Click "More info"
 2. Click "Run anyway"
 
-Neuron is completely safe, does not use telemetry, and all source code is publicly accessible on our GitHub repository. This warning is a standard Microsoft precaution for newly published executables without expensive corporate signing keys and will naturally resolve automatically as Neuron gains more downloads globally.
+Neuron is local-first and does not use telemetry.
 
 ---------------------------------------------
 Requirements
 ---------------------------------------------
 * Windows 10/11 (64-bit)
-* 4 GB RAM minimum (8 GB highly recommended)
+* 4 GB RAM minimum (8 GB recommended)
 * 500 MB free disk space
 
-You do not need to install Python or any dependencies on your system.
-This installer brings a completely self-contained deployment to your machine.
+You do not need to install Python or any dependencies. This installer brings a
+self-contained deployment to your machine.

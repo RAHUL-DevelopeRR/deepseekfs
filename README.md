@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="assets/HeiNeuron.png" alt="Neuron" width="160"/>
+  <img src="assets/neuron_icon.png" alt="Neuron circular logo" width="120"/>
 </p>
 
-<h1 align="center">Neuron v4.6</h1>
+<h1 align="center">Neuron v5.0</h1>
 <p align="center">
   <b>AI-Powered Semantic File Intelligence for Windows</b><br/>
   <i>Search smarter. Understand your files. Summarize anything.</i>
 </p>
 
 <p align="center">
-  <a href="https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest"><img src="https://img.shields.io/badge/⬇_Download-NeuronSetup_v4.2.exe-6366f1?style=for-the-badge&logo=windows" /></a>
+  <a href="https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest"><img src="https://img.shields.io/badge/Download-NeuronSetup_v5.0.exe-6366f1?style=for-the-badge&logo=windows" /></a>
   <a href="https://zero-x.live"><img src="https://img.shields.io/badge/🌐_Website-zero--x.live-00d4aa?style=for-the-badge" /></a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.2-6366f1?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-5.0-6366f1?style=flat-square" />
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/python-3.11-green?style=flat-square" />
   <img src="https://img.shields.io/badge/AI-Ollama%20%2B%20Llama%203.2-orange?style=flat-square" />
@@ -47,7 +47,7 @@
 
 ### Option 1: Installer (Recommended)
 
-1. Download **[NeuronSetup_v4.2.exe](https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest)** from Releases
+1. Download **[NeuronSetup_v5.0.exe](https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest)** from Releases
 2. Run the installer → check **"Install Ollama"** if you want AI summarization
 3. Launch Neuron from Desktop/Start Menu
 4. Press `Shift+Space` to open the search panel
@@ -235,7 +235,7 @@ deepseekfs/
 │   ├── refactor_to_9_10.md # Refactor checklist
 │   └── pre_install_info.txt
 ├── assets/
-│   └── neuron_icon.ico     # DNA helix app icon
+│   └── neuron_icon.ico      # Circular Neuron app icon
 ├── storage/                # Runtime data (FAISS index, SQLite, user config)
 │   └── user_config.json
 │
@@ -259,7 +259,7 @@ deepseekfs/
 
 ---
 
-## 🛠️ Building v4.6 (.exe)
+## 🛠️ Building v5.0 (.exe)
 
 > Run these commands on your local Windows machine with Python venv active.
 
@@ -276,7 +276,7 @@ pyinstaller neuron.spec --noconfirm --clean
 # 4. Package with Inno Setup (requires Inno Setup 6+)
 iscc neuron_installer.iss
 
-# 5. The installer will be at: installer_output/NeuronSetup_v4.6.exe
+# 5. The installer will be at: installer_output/NeuronSetup_v5.0.exe
 ```
 
 ---

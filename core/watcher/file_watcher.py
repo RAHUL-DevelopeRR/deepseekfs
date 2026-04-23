@@ -36,12 +36,19 @@ class FileEventHandler(FileSystemEventHandler):
             logger.info(f"File moved: {event.src_path} → {event.dest_path}")
 
     def _process_file(self, file_path: str):
-        """Process file if supported"""
+        """Process file if supported, then evaluate watch hooks."""
         ext = Path(file_path).suffix.lower()
         if ext in config.SUPPORTED_EXTENSIONS:
             logger.info(f"New file detected: {file_path}")
             if self.index_builder.add_file(file_path):
                 self.index_builder.save()
+
+            # Evaluate watch rules (non-blocking)
+            try:
+                from services.watch_rules import get_watch_hooks
+                get_watch_hooks().evaluate(file_path, "created")
+            except Exception:
+                pass  # Watch hooks are optional
 
 class FileWatcher:
     """Monitor file system for new files"""
