@@ -22,6 +22,10 @@ LLM_MODEL_REPO = "bartowski/HuggingFaceTB_SmolLM3-3B-GGUF"
 LLM_MODEL_FILE = "HuggingFaceTB_SmolLM3-3B-Q4_K_M.gguf"
 LLM_MODEL_SIZE_MB = 1800  # approximate
 
+CODER_MODEL_REPO = "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF"
+CODER_MODEL_FILE = "qwen2.5-coder-0.5b-instruct-q4_0.gguf"
+CODER_MODEL_SIZE_MB = 420  # approximate
+
 VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.22.zip"
 VOSK_MODEL_NAME = "vosk-model-small-en-us-0.22"
 VOSK_MODEL_SIZE_MB = 50
@@ -70,9 +74,24 @@ def get_llm_model_path() -> Optional[Path]:
     
     # Also check for any .gguf file (user may have renamed or used a different model)
     for f in models_dir.glob("*.gguf"):
+        if f.name == CODER_MODEL_FILE:
+            continue
         logger.info(f"ModelManager: Found alternative GGUF model: {f.name}")
         return f
     
+    return None
+
+
+def get_coder_model_path() -> Optional[Path]:
+    """Find the Qwen Coder GGUF model file used for offline code/tool planning."""
+    app_local = Path(__file__).resolve().parent.parent / "storage" / "models" / CODER_MODEL_FILE
+    if app_local.is_file():
+        return app_local
+
+    model_path = get_models_dir() / CODER_MODEL_FILE
+    if model_path.is_file():
+        return model_path
+
     return None
 
 
@@ -91,6 +110,11 @@ def get_vosk_model_path() -> Optional[Path]:
 def is_llm_model_available() -> bool:
     """Quick check if the LLM model is ready to use."""
     return get_llm_model_path() is not None
+
+
+def is_coder_model_available() -> bool:
+    """Quick check if the offline Qwen Coder model is ready."""
+    return get_coder_model_path() is not None
 
 
 def is_vosk_model_available() -> bool:
@@ -157,6 +181,56 @@ def download_llm_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
         if model_path.exists():
             model_path.unlink()
         raise RuntimeError(f"Failed to download AI model: {e}")
+
+
+def download_coder_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
+    """Download the Qwen 2.5 Coder GGUF model from HuggingFace."""
+    models_dir = get_models_dir()
+    model_path = models_dir / CODER_MODEL_FILE
+
+    if model_path.is_file():
+        logger.info(f"ModelManager: Coder model already exists at {model_path}")
+        if progress_cb:
+            progress_cb(1.0, "Coder model ready")
+        return model_path
+
+    logger.info(f"ModelManager: Downloading {CODER_MODEL_FILE} from {CODER_MODEL_REPO}...")
+    if progress_cb:
+        progress_cb(0.0, f"Downloading {CODER_MODEL_FILE} (~{CODER_MODEL_SIZE_MB}MB)...")
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        downloaded_path = hf_hub_download(
+            repo_id=CODER_MODEL_REPO,
+            filename=CODER_MODEL_FILE,
+            local_dir=str(models_dir),
+        )
+
+        result_path = Path(downloaded_path)
+        if not result_path.is_file():
+            raise FileNotFoundError(f"Download completed but file not found at {result_path}")
+
+        if result_path != model_path and result_path.is_file():
+            shutil.move(str(result_path), str(model_path))
+            result_path = model_path
+
+        size_mb = result_path.stat().st_size / (1024 * 1024)
+        logger.info(f"ModelManager: Coder model downloaded ({size_mb:.0f}MB) -> {result_path}")
+        if progress_cb:
+            progress_cb(1.0, f"Coder model ready ({size_mb:.0f}MB)")
+
+        return result_path
+    except ImportError:
+        raise RuntimeError(
+            "huggingface_hub is required to download the coder model. "
+            "Install it with: pip install huggingface-hub"
+        )
+    except Exception as e:
+        logger.error(f"ModelManager: Coder model download failed: {e}")
+        if model_path.exists():
+            model_path.unlink()
+        raise RuntimeError(f"Failed to download coder model: {e}")
 
 
 def download_vosk_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
@@ -227,6 +301,12 @@ def get_model_status() -> dict:
             "path": str(get_llm_model_path()) if is_llm_model_available() else None,
             "name": LLM_MODEL_FILE,
             "size_mb": LLM_MODEL_SIZE_MB,
+        },
+        "coder": {
+            "available": is_coder_model_available(),
+            "path": str(get_coder_model_path()) if is_coder_model_available() else None,
+            "name": CODER_MODEL_FILE,
+            "size_mb": CODER_MODEL_SIZE_MB,
         },
         "vosk": {
             "available": is_vosk_model_available(),

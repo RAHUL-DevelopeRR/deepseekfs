@@ -2,7 +2,7 @@
 Neuron — Embedding-Based Intent Classifier
 =============================================
 Classifies user queries into: chat | query | action
-using cosine similarity against pre-embedded example centroids.
+using cosine similarity against pre-embedded examples and intent centroids.
 
 No hardcoded keywords. No LLM inference. ~5ms per classification.
 
@@ -47,6 +47,7 @@ class IntentClassifier:
 
     def __init__(self, examples_path: Path = _EXAMPLES_PATH):
         self._centroids: Dict[str, np.ndarray] = {}
+        self._examples: Dict[str, np.ndarray] = {}
         self._ready = False
         self._load_time_ms = 0
 
@@ -90,6 +91,9 @@ class IntentClassifier:
             texts = examples[intent]
             vectors = embedder.encode(texts)  # (N, 384)
             
+            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+            vectors = np.divide(vectors, np.clip(norms, 1e-9, None))
+
             # Centroid = mean of all vectors, then L2 normalize
             centroid = np.mean(vectors, axis=0)
             norm = np.linalg.norm(centroid)
@@ -97,6 +101,7 @@ class IntentClassifier:
                 centroid = centroid / norm
             
             self._centroids[intent] = centroid
+            self._examples[intent] = vectors
             logger.info(
                 f"IntentClassifier: '{intent}' centroid from "
                 f"{len(texts)} examples"
@@ -124,11 +129,18 @@ class IntentClassifier:
             if norm > 0:
                 query_vec = query_vec / norm
 
-            # Cosine similarity against each centroid
+            # Blend broad intent shape with nearest-example similarity. This
+            # keeps classification data-driven while avoiding centroid drift.
             scores = {}
             for intent, centroid in self._centroids.items():
-                similarity = float(np.dot(query_vec, centroid))
-                scores[intent] = similarity
+                centroid_similarity = float(np.dot(query_vec, centroid))
+                examples = self._examples.get(intent)
+                nearest_similarity = (
+                    float(np.max(examples @ query_vec))
+                    if examples is not None and len(examples) > 0
+                    else centroid_similarity
+                )
+                scores[intent] = (0.35 * centroid_similarity) + (0.65 * nearest_similarity)
 
             # Pick the highest
             best_intent = max(scores, key=scores.get)
@@ -162,6 +174,7 @@ class IntentClassifier:
         return {
             "ready": self._ready,
             "intents": list(self._centroids.keys()),
+            "examples": {intent: len(vectors) for intent, vectors in self._examples.items()},
             "load_time_ms": self._load_time_ms,
         }
 

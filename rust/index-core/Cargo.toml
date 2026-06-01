@@ -1,0 +1,12 @@
+[package]
+name = "neuron_index_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "neuron_index_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neuron-index-core"
+path = "src/main.rs"

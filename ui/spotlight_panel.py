@@ -1,5 +1,5 @@
-"""
-Neuron — AI File Intelligence Panel (PyQt6)  ·  Windows 11 Explorer Edition
+﻿"""
+Neuron â€” AI File Intelligence Panel (PyQt6)  Â·  Windows 11 Explorer Edition
 ============================================================================
 Windows 11 dark theme explorer with Encyl AI summarization.
 Shift+Space to toggle.  Keyboard navigation.  Win11-native design language.
@@ -34,1107 +34,20 @@ from PyQt6.QtGui import (
 import app.config as config
 from app.logger import logger
 from services.desktop_service import DesktopService
+from services.ollama_service import get_ollama
 from PyQt6.QtWidgets import QFileIconProvider
 from PyQt6.QtCore import QFileInfo
-from services.ollama_service import get_ollama
+from ui.activity_panel import ActivityPanel
 from ui.memory_lane_panel import MemoryLanePanel
 from ui.memoryos_panel import MemoryOSPanel
-from ui.activity_panel import ActivityPanel
 
-# ── resolve assets path ──────────────────────────────────────
-_ASSETS = Path(__file__).resolve().parent.parent / "assets"
-_ICON   = _ASSETS / "neuron_icon.ico" if (_ASSETS / "neuron_icon.ico").exists() else _ASSETS / "icon.ico"
+from ui.spotlight_components import (
+    C, R, SCOPES, _ICON,
+    HotkeyFilter, IndexThread, SearchThread, AskAIThread, SummarizeThread,
+    GlowSearchBar, ScopePill, ColumnHeader, CatHeader, ResultRow,
+    ActionCard, SuggestionChip, SettingsOverlay,
+)
 
-# ── Windows shell icon provider (real file icons) ────────────
-_FILE_ICON_PROVIDER = None
-
-def _get_shell_icon(file_path: str, size: int = 16) -> QPixmap:
-    """Get the actual Windows shell icon for a file (what Explorer shows)."""
-    global _FILE_ICON_PROVIDER
-    try:
-        if _FILE_ICON_PROVIDER is None:
-            _FILE_ICON_PROVIDER = QFileIconProvider()
-        fi = QFileInfo(file_path)
-        icon = _FILE_ICON_PROVIDER.icon(fi)
-        return icon.pixmap(QSize(size, size))
-    except Exception:
-        return QPixmap()
-# ═════════════════════════════════════════════════════════════
-# DESIGN CONSTANTS  —  Windows 11 Explorer visual language
-# ═════════════════════════════════════════════════════════════
-W, H = 920, 720
-R = 8                          # corner radius (Win11 uses subtle rounding)
-
-HOTKEY_ID = 0xBFFF
-MOD_SHIFT = 0x0004
-VK_SPACE  = 0x20
-WM_HOTKEY = 0x0312
-
-# ── colour tokens ────────────────────────────────────────────
-class C:
-    """Central palette – Windows 11 dark theme."""
-    # -- panel chrome (Win11 dark) -------
-    PANEL_BG       = QColor(25, 25, 25, 245)         # #191919
-    PANEL_BORDER   = QColor(51, 51, 51, 200)
-    TOP_SHEEN      = QColor(255, 255, 255, 4)
-    # -- search bar ---------
-    SEARCH_BG      = QColor(255, 255, 255, 8)
-    SEARCH_BORDER  = QColor(255, 255, 255, 10)
-    SEARCH_GLOW    = QColor(0, 120, 212, 80)         # Win11 accent blue
-    # -- content text -------
-    T1  = QColor(255, 255, 255, 235)                 # primary
-    T2  = QColor(153, 153, 153, 255)                 # secondary #999
-    T3  = QColor(102, 102, 102, 255)                 # tertiary #666
-    T4  = QColor(255, 255, 255, 36)                  # quaternary
-    # -- accents (Win11) ----
-    BLUE           = "#0078D4"
-    BLUE_Q         = QColor(0, 120, 212)
-    BLUE_DIM       = QColor(0, 120, 212, 50)
-    BLUE_GLOW      = QColor(0, 120, 212, 50)
-    GREEN          = QColor(52, 199, 89)
-    # -- surface (Win11) ----
-    CARD_IDLE      = QColor(255, 255, 255, 0)
-    CARD_HOVER     = QColor(45, 45, 45, 255)         # #2D2D2D
-    CARD_SELECTED  = QColor(0, 120, 212, 50)
-    CARD_SEL_BDR   = QColor(0, 120, 212, 90)
-    DIVIDER        = QColor(51, 51, 51, 255)          # #333
-
-FN  = "'Segoe UI Variable Display', 'Segoe UI', 'Inter', system-ui, sans-serif"
-MN  = "'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace"
-
-# ── file icon map ────────────────────────────────────────────
-_I = {
-    ".py":("🐍","#3B82F6","PY"),   ".ipynb":("📓","#8B5CF6","NB"),
-    ".js":("⚡","#EAB308","JS"),   ".ts":("🔷","#3B82F6","TS"),
-    ".jsx":("⚛️","#22D3EE","JSX"), ".tsx":("⚛️","#3B82F6","TSX"),
-    ".rs":("🦀","#E57A44","RS"),   ".go":("🐹","#00ADD8","GO"),
-    ".java":("☕","#F59E0B","JV"),  ".cpp":("⚙️","#60A5FA","C++"),
-    ".c":("⚙️","#94A3B8","C"),     ".h":("⚙️","#94A3B8","H"),
-    ".cs":("🟣","#A78BFA","C#"),   ".rb":("💎","#EF4444","RB"),
-    ".php":("🐘","#A78BFA","PHP"), ".swift":("🐦","#F97316","SW"),
-    ".kt":("🟣","#A855F6","KT"),   ".html":("🌐","#EF4444","HTM"),
-    ".css":("🎨","#38BDF8","CSS"), ".md":("📝","#94A3B8","MD"),
-    ".txt":("📄","#94A3B8","TXT"), ".log":("📋","#94A3B8","LOG"),
-    ".pdf":("📕","#EF4444","PDF"), ".docx":("📘","#2563EB","DOC"),
-    ".doc":("📘","#2563EB","DOC"), ".xlsx":("📗","#22C55E","XLS"),
-    ".xls":("📗","#22C55E","XLS"), ".csv":("📊","#22C55E","CSV"),
-    ".pptx":("📙","#F97316","PPT"),
-    ".json":("{ }","#F5B74A","JSON"), ".xml":("< >","#F5B74A","XML"),
-    ".yaml":("🔧","#A78BFA","YML"), ".yml":("🔧","#A78BFA","YML"),
-    ".toml":("🔧","#A78BFA","TML"), ".env":("🔐","#A78BFA","ENV"),
-    ".ini":("🔧","#94A3B8","INI"), ".cfg":("🔧","#94A3B8","CFG"),
-    ".mp4":("🎬","#A855F6","MP4"), ".mkv":("🎬","#A855F6","MKV"),
-    ".avi":("🎬","#A855F6","AVI"), ".mov":("🎬","#A855F6","MOV"),
-    ".png":("🖼️","#EC4899","PNG"),  ".jpg":("🖼️","#EC4899","JPG"),
-    ".jpeg":("🖼️","#EC4899","JPG"), ".gif":("🖼️","#EC4899","GIF"),
-    ".webp":("🖼️","#EC4899","WBP"),
-    ".zip":("📦","#FBBF24","ZIP"), ".exe":("⚙️","#A78BFA","EXE"),
-}
-_D = ("📄","#64748B","FILE")
-
-SCOPES = {
-    "all": None, "files": None, "folders": "__dir__",
-    "code": {".py",".js",".ts",".jsx",".tsx",".rs",".go",".java",".cpp",
-             ".c",".h",".cs",".rb",".php",".swift",".kt",".html",".css"},
-    "docs": {".md",".txt",".pdf",".docx",".doc",".pptx",".xlsx",".xls",".csv"},
-    "media":{".mp4",".mkv",".avi",".mov",".png",".jpg",".jpeg",".gif",".webp",".webm"},
-    "memoryos": "__memoryos__",
-    "activity": "__activity__",
-}
-
-def _icon(ext: str):
-    return _I.get(ext.lower(), _D)
-
-
-# ═════════════════════════════════════════════════════════════
-# Win32 native hotkey listener
-# BUG5-FIX: uses proper ctypes.Structure MSG struct
-# ═════════════════════════════════════════════════════════════
-import ctypes as _ct
-
-class _MSG(_ct.Structure):
-    """Correct Win32 MSG struct — avoids MSVC/MinGW padding fragility."""
-    _fields_ = [
-        ("hwnd",    _ct.c_void_p),
-        ("message", _ct.c_uint),
-        ("wParam",  _ct.c_ulonglong),
-        ("lParam",  _ct.c_longlong),
-        ("time",    _ct.c_ulong),
-        ("pt_x",    _ct.c_long),
-        ("pt_y",    _ct.c_long),
-    ]
-
-class HotkeyFilter(QAbstractNativeEventFilter):
-    def __init__(self, cb, hotkey_id=None):
-        super().__init__()
-        self._cb = cb
-        self._hotkey_id = hotkey_id if hotkey_id is not None else HOTKEY_ID
-    def nativeEventFilter(self, et, msg):
-        if et in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
-            try:
-                m = _ct.cast(int(msg), _ct.POINTER(_MSG)).contents
-                if m.message == WM_HOTKEY and m.wParam == self._hotkey_id:
-                    self._cb()
-                    return True, 0
-            except Exception:
-                pass
-        return False, 0
-
-
-# ═════════════════════════════════════════════════════════════
-# Background workers
-# ═════════════════════════════════════════════════════════════
-class IndexThread(QThread):
-    status   = pyqtSignal(str)
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(int)
-    def __init__(self, svc):
-        super().__init__()
-        self._s = svc
-    def run(self):
-        try:
-            n = self._s.run_indexing(on_status=self.status.emit,
-                                     on_progress=self.progress.emit)
-            self.finished.emit(n)
-        except Exception as e:
-            logger.error(f"IndexThread: {e}")
-            self.finished.emit(0)
-
-class SearchThread(QThread):
-    results = pyqtSignal(list)
-    error   = pyqtSignal(str)
-    def __init__(self, svc, q, k=20, use_llm=False):
-        super().__init__()
-        self._s, self._q, self._k, self._llm = svc, q, k, use_llm
-    def run(self):
-        try:    self.results.emit(self._s.search(self._q, self._k, use_llm_rerank=self._llm))
-        except Exception as e: self.error.emit(str(e))
-
-class AskAIThread(QThread):
-    """Ask Ollama a question grounded in file search results."""
-    answer = pyqtSignal(str)
-    error  = pyqtSignal(str)
-    def __init__(self, question: str, file_contexts: list):
-        super().__init__()
-        self._q, self._ctx = question, file_contexts
-    def run(self):
-        try:
-            ai = get_ollama()
-            if not ai.is_available():
-                self.error.emit("Ollama not running. Start with: ollama serve")
-                return
-            ans = ai.ask_about_files(self._q, self._ctx)
-            self.answer.emit(ans)
-        except Exception as e:
-            self.error.emit(str(e))
-
-class SummarizeThread(QThread):
-    """Summarize a single file via Ollama."""
-    summary = pyqtSignal(str, str)  # (path, summary text)
-    error   = pyqtSignal(str)
-    def __init__(self, path: str):
-        super().__init__()
-        self._path = path
-    def run(self):
-        try:
-            ai = get_ollama()
-            if not ai.is_available():
-                self.error.emit("Ollama not running. Start with: ollama serve")
-                return
-            s = ai.summarize_file(self._path)
-            self.summary.emit(self._path, s)
-        except Exception as e:
-            self.error.emit(str(e))
-
-
-# ═════════════════════════════════════════════════════════════
-# Micro-widgets
-# ═════════════════════════════════════════════════════════════
-
-# ── animated blue-glow search field ──────────────────────────
-class GlowSearchBar(QFrame):
-    """Windows 11 compact search bar — clean, professional."""
-    textChanged = pyqtSignal(str)
-    returnPressed = pyqtSignal()
-    tabPressed = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(32)
-        self.setObjectName("GlowSearch")
-
-        # subtle focus glow
-        self._glow = QGraphicsDropShadowEffect(self)
-        self._glow.setBlurRadius(0)
-        self._glow.setOffset(0, 0)
-        self._glow.setColor(C.SEARCH_GLOW)
-        self.setGraphicsEffect(self._glow)
-
-        self._glow_anim = QPropertyAnimation(self._glow, b"blurRadius")
-        self._glow_anim.setDuration(300)
-        self._glow_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self.setStyleSheet(f"""
-            #GlowSearch {{
-                background: rgba(255,255,255,0.06);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 4px;
-            }}
-        """)
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 0, 10, 0)
-        lay.setSpacing(8)
-
-        # the actual input — clean, no emoji
-        self.inp = QLineEdit()
-        self.inp.setPlaceholderText("Search")
-        self.inp.setStyleSheet(f"""
-            QLineEdit {{
-                border: none; background: transparent;
-                color: rgba(255,255,255,0.90);
-                font-family: {FN}; font-size: 13px; font-weight: 400;
-                padding: 0;
-                selection-background-color: rgba(0,120,212,0.30);
-            }}
-            QLineEdit::placeholder {{
-                color: rgba(255,255,255,0.30); font-weight: 400;
-            }}
-        """)
-        self.inp.textChanged.connect(self.textChanged.emit)
-        self.inp.returnPressed.connect(self.returnPressed.emit)
-        lay.addWidget(self.inp, 1)
-
-        # search icon (Segoe Fluent Icons — same as Win11 Explorer)
-        search_icon = QLabel("\uE721")
-        search_icon.setFixedWidth(20)
-        search_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        search_icon.setStyleSheet("font-family: 'Segoe Fluent Icons'; font-size: 12px; color: rgba(255,255,255,0.35); background: transparent;")
-        lay.addWidget(search_icon)
-
-        # wire focus events
-        self.inp.installEventFilter(self)
-
-    # forward focus helpers
-    def text(self):          return self.inp.text()
-    def setFocus(self):      self.inp.setFocus()
-    def selectAll(self):     self.inp.selectAll()
-    def clear(self):         self.inp.clear()
-
-    def eventFilter(self, obj, ev):
-        if obj is self.inp:
-            # ── Intercept Tab key for Encyl summarize ──
-            if ev.type() == ev.Type.KeyPress:
-                key = ev.key()
-                if key == Qt.Key.Key_Tab:
-                    self.tabPressed.emit()
-                    return True  # consume the event
-                elif key in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Escape):
-                    # Forward navigation keys to parent panel
-                    parent = self.parent()
-                    while parent and not hasattr(parent, 'keyPressEvent'):
-                        parent = parent.parent()
-                    if parent:
-                        parent.keyPressEvent(ev)
-                        return True
-            elif ev.type() == ev.Type.FocusIn:
-                self.setStyleSheet(f"""
-                    #GlowSearch {{
-                        background: rgba(255,255,255,0.08);
-                        border: 1px solid rgba(0,120,212,0.50);
-                        border-radius: 4px;
-                    }}
-                """)
-                self._glow_anim.stop()
-                self._glow_anim.setStartValue(0)
-                self._glow_anim.setEndValue(32)
-                self._glow_anim.start()
-            elif ev.type() == ev.Type.FocusOut:
-                self.setStyleSheet(f"""
-                    #GlowSearch {{
-                        background: rgba(255,255,255,0.06);
-                        border: 1px solid rgba(255,255,255,0.08);
-                        border-radius: 4px;
-                    }}
-                """)
-                self._glow_anim.stop()
-                self._glow_anim.setStartValue(self._glow.blurRadius())
-                self._glow_anim.setEndValue(0)
-                self._glow_anim.start()
-        return False
-
-
-# ── scope pill ───────────────────────────────────────────────
-class ScopePill(QLabel):
-    clicked = pyqtSignal(str)
-
-    _CSS_IDLE = f"""
-        padding: 5px 16px; border-radius: 14px;
-        font-family: {FN}; font-size: 12px; font-weight: 500;
-        color: rgba(255,255,255,0.40); background: transparent;
-        border: 1px solid transparent;
-    """
-    _CSS_ACTIVE = f"""
-        padding: 5px 16px; border-radius: 14px;
-        font-family: {FN}; font-size: 12px; font-weight: 600;
-        color: #65B8FF; background: rgba(56,156,255,0.12);
-        border: 1px solid rgba(56,156,255,0.22);
-    """
-    _CSS_HOVER = f"""
-        padding: 5px 16px; border-radius: 14px;
-        font-family: {FN}; font-size: 12px; font-weight: 500;
-        color: rgba(255,255,255,0.70); background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.04);
-    """
-
-    def __init__(self, text, key, active=False, parent=None):
-        super().__init__(text, parent)
-        self._key, self._active = key, active
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(30)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._refresh()
-
-    def _refresh(self):
-        self.setStyleSheet(self._CSS_ACTIVE if self._active else self._CSS_IDLE)
-
-    def set_active(self, a):
-        self._active = a; self._refresh()
-
-    def mousePressEvent(self, e): self.clicked.emit(self._key)
-    def enterEvent(self, e):
-        if not self._active: self.setStyleSheet(self._CSS_HOVER)
-    def leaveEvent(self, e):  self._refresh()
-
-
-# ── column header (Win11 style) ──────────────────────────────
-class ColumnHeader(QFrame):
-    """Windows 11 File Explorer column header bar."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(26)
-        self.setStyleSheet(f"""
-            ColumnHeader {{
-                background: rgba(255,255,255,0.02);
-                border-bottom: 1px solid #333;
-            }}
-        """)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 0, 12, 0)
-        lay.setSpacing(0)
-
-        cols = [("Name", 320), ("Date modified", 160), ("Type", 140), ("Size", 80)]
-        for label, w in cols:
-            lbl = QLabel(label)
-            lbl.setFixedWidth(w)
-            lbl.setStyleSheet(f"""
-                font-family: {FN}; font-size: 11px; font-weight: 600;
-                color: rgba(255,255,255,0.50); background: transparent;
-                padding-left: 4px;
-            """)
-            lay.addWidget(lbl)
-        lay.addStretch()
-
-
-# ── category header ──────────────────────────────────────────
-class CatHeader(QFrame):
-    def __init__(self, title, count=0, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(28)
-        self.setStyleSheet("background: transparent;")
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 12, 2)
-        t = QLabel(title.upper())
-        t.setStyleSheet(f"""
-            font-family: {FN}; font-size: 10px; font-weight: 700;
-            letter-spacing: 1px; color: rgba(255,255,255,0.25);
-            background: transparent;
-        """)
-        lay.addWidget(t)
-        lay.addStretch()
-        if count > 0:
-            c = QLabel(f"{count} results")
-            c.setStyleSheet(f"font-size: 10px; color: rgba(255,255,255,0.14); background: transparent;")
-            lay.addWidget(c)
-
-
-# ── helper: get file metadata ────────────────────────────────
-def _file_meta(path_str):
-    """Get date modified, type name, size for a file."""
-    p = Path(path_str)
-    ext = p.suffix.lower()
-    # Type name
-    _type_names = {
-        ".py":"Python File",".js":"JavaScript",".ts":"TypeScript",".html":"HTML Document",
-        ".css":"Stylesheet",".json":"JSON File",".md":"Markdown",".txt":"Text File",
-        ".pdf":"PDF Document",".docx":"DOCX Document",".doc":"DOC Document",
-        ".pptx":"PPTX Presentation",".xlsx":"Excel Spreadsheet",".xls":"Excel Spreadsheet",
-        ".csv":"CSV File",".mp4":"MP4 Video",".mkv":"MKV Video",".avi":"AVI Video",
-        ".mov":"MOV Video",".webm":"WebM Video",".png":"PNG Image",".jpg":"JPEG Image",
-        ".jpeg":"JPEG Image",".gif":"GIF Image",".wav":"WAV Audio",".mp3":"MP3 Audio",
-        ".zip":"ZIP Archive",".exe":"Application",".env":"Environment File",
-        ".ini":"Configuration",".xml":"XML File",".log":"Log File",
-        ".java":"Java File",".cpp":"C++ File",".c":"C File",".go":"Go File",
-        ".rs":"Rust File",".yaml":"YAML File",".yml":"YAML File",".toml":"TOML File",
-    }
-    type_name = _type_names.get(ext, f"{ext[1:].upper()} File" if ext else "File")
-    # Date + size
-    try:
-        stat = p.stat()
-        from datetime import datetime
-        date_str = datetime.fromtimestamp(stat.st_mtime).strftime("%d-%m-%Y %H:%M")
-        size = stat.st_size
-        if size < 1024: size_str = f"{size} B"
-        elif size < 1024**2: size_str = f"{size//1024:,} KB"
-        elif size < 1024**3: size_str = f"{size/1024**2:.1f} MB"
-        else: size_str = f"{size/1024**3:.1f} GB"
-    except Exception:
-        date_str = "—"
-        size_str = "—"
-    return date_str, type_name, size_str
-
-
-# ── result row (Win11 Explorer style) ────────────────────────
-class ResultRow(QFrame):
-    clicked = pyqtSignal(str)
-
-    def __init__(self, hit, top=False, parent=None):
-        super().__init__(parent)
-        self._path = hit.get("path", "")
-        ext = hit.get("extension", Path(self._path).suffix).lower()
-        emoji, accent, badge = _icon(ext)
-        name = hit.get("name", Path(self._path).name)
-        self._sel = False
-
-        h = 30
-        self.setFixedHeight(h)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._apply(False, False)
-
-        # Get file metadata
-        date_str, type_name, size_str = _file_meta(self._path)
-
-        root = QHBoxLayout(self)
-        root.setContentsMargins(12, 0, 12, 0)
-        root.setSpacing(0)
-
-        # ── Icon (real Windows shell icon) ──
-        ic = QLabel()
-        ic.setFixedSize(20, 20)
-        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ic.setStyleSheet("background: transparent; padding: 0; margin: 0;")
-        pixmap = _get_shell_icon(self._path, 16)
-        if not pixmap.isNull():
-            ic.setPixmap(pixmap)
-        root.addWidget(ic)
-
-        # ── Name column (320px) ──
-        nl = QLabel(name)
-        nl.setFixedWidth(298)
-        nl.setStyleSheet(f"""
-            font-family: {FN}; font-size: 12px; font-weight: {'600' if top else '400'};
-            color: {'#60CDFF' if top else 'rgba(255,255,255,0.88)'}; background: transparent;
-            padding-left: 6px;
-        """)
-        root.addWidget(nl)
-
-        # ── Date modified column (160px) ──
-        dl = QLabel(date_str)
-        dl.setFixedWidth(160)
-        dl.setStyleSheet(f"""
-            font-family: {FN}; font-size: 11px; font-weight: 400;
-            color: rgba(255,255,255,0.45); background: transparent;
-            padding-left: 4px;
-        """)
-        root.addWidget(dl)
-
-        # ── Type column (140px) ──
-        tl = QLabel(type_name)
-        tl.setFixedWidth(140)
-        tl.setStyleSheet(f"""
-            font-family: {FN}; font-size: 11px; font-weight: 400;
-            color: rgba(255,255,255,0.45); background: transparent;
-            padding-left: 4px;
-        """)
-        root.addWidget(tl)
-
-        # ── Size column (80px) ──
-        szl = QLabel(size_str)
-        szl.setFixedWidth(80)
-        szl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        szl.setStyleSheet(f"""
-            font-family: {FN}; font-size: 11px; font-weight: 400;
-            color: rgba(255,255,255,0.40); background: transparent;
-        """)
-        root.addWidget(szl)
-        root.addStretch()
-
-    # ── state management (Win11 selection colors) ──
-    def _apply(self, sel, hov):
-        if sel:
-            self.setStyleSheet(f"""
-                ResultRow {{
-                    background: rgba(0,120,212,0.25);
-                    border: 1px solid rgba(0,120,212,0.40);
-                    border-radius: 4px;
-                }}
-            """)
-        elif hov:
-            self.setStyleSheet(f"""
-                ResultRow {{
-                    background: rgba(255,255,255,0.04);
-                    border: 1px solid transparent;
-                    border-radius: 4px;
-                }}
-            """)
-        else:
-            self.setStyleSheet(f"""
-                ResultRow {{
-                    background: transparent;
-                    border: 1px solid transparent;
-                    border-radius: 4px;
-                }}
-            """)
-
-    def set_selected(self, s):
-        self._sel = s; self._apply(s, False)
-
-    def enterEvent(self, e):
-        if not self._sel: self._apply(False, True)
-    def leaveEvent(self, e):
-        self._apply(self._sel, False)
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self._path)
-        elif e.button() == Qt.MouseButton.RightButton:
-            self._show_context_menu(e.globalPosition().toPoint())
-
-    def _show_context_menu(self, pos):
-        """Full Windows 11 context menu — uses Segoe Fluent Icons (system icons)."""
-        # ── Segoe Fluent Icons codepoints (same as Windows 11 Explorer) ──
-        SFI = "Segoe Fluent Icons"
-        ICO_CUT     = "\uE8C6"
-        ICO_COPY    = "\uE8C8"
-        ICO_RENAME  = "\uE8AC"
-        ICO_SHARE   = "\uE72D"
-        ICO_DELETE  = "\uE74D"
-        ICO_OPEN    = "\uE8E5"
-        ICO_OPENWITH= "\uE17D"
-        ICO_FOLDER  = "\uE8B7"
-        ICO_PROPS   = "\uE946"
-        ICO_STAR    = "\uE734"
-        ICO_COMPRESS= "\uE7B8"
-        ICO_LINK    = "\uE71B"
-        ICO_ADMIN   = "\uE7EF"
-        ICO_MORE    = "\uE712"
-        ICO_COPYPATH= "\uE8C8"
-        ICO_BRAIN   = "\uE945"
-        ICO_EDIT    = "\uE70F"
-
-        def _fluent_icon(codepoint, size=14, color="rgba(255,255,255,0.80)"):
-            """Render a Segoe Fluent Icons glyph to QIcon."""
-            px = QPixmap(size + 4, size + 4)
-            px.fill(QColor(0, 0, 0, 0))
-            p = QPainter(px)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            font = QFont(SFI, size)
-            p.setFont(font)
-            p.setPen(QColor(color))
-            p.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, codepoint)
-            p.end()
-            return QIcon(px)
-
-        menu = QMenu(self)
-        menu_css = f"""
-            QMenu {{
-                background: #2D2D2D;
-                border: 1px solid #3D3D3D;
-                border-radius: 8px;
-                padding: 4px 0;
-                font-family: {FN};
-                font-size: 12px;
-                min-width: 280px;
-            }}
-            QMenu::item {{
-                padding: 7px 16px 7px 8px;
-                color: rgba(255,255,255,0.90);
-                border-radius: 4px;
-                margin: 1px 4px;
-            }}
-            QMenu::item:selected {{
-                background: rgba(255,255,255,0.06);
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: #3D3D3D;
-                margin: 4px 12px;
-            }}
-            QMenu::item:disabled {{
-                color: rgba(255,255,255,0.25);
-            }}
-        """
-        menu.setStyleSheet(menu_css)
-
-        # ── Top toolbar: Cut | Copy | Rename | Share | Delete ──
-        from PyQt6.QtWidgets import QWidgetAction
-        toolbar = QFrame()
-        toolbar.setFixedHeight(52)
-        toolbar.setStyleSheet("background: transparent; border: none;")
-        tb_lay = QHBoxLayout(toolbar)
-        tb_lay.setContentsMargins(16, 4, 16, 4)
-        tb_lay.setSpacing(2)
-
-        tb_btn_css = f"""
-            QPushButton {{
-                background: transparent; border: none; border-radius: 6px;
-                color: rgba(255,255,255,0.75); font-family: {FN};
-                font-size: 10px; padding: 4px 2px;
-                min-width: 48px; min-height: 42px;
-            }}
-            QPushButton:hover {{ background: rgba(255,255,255,0.06); }}
-            QPushButton:pressed {{ background: rgba(255,255,255,0.03); }}
-        """
-
-        def _make_tb_btn(icon_char, label, callback):
-            btn = QPushButton()
-            btn_lay = QVBoxLayout(btn)
-            btn_lay.setContentsMargins(0, 2, 0, 2)
-            btn_lay.setSpacing(2)
-            sym = QLabel(icon_char)
-            sym.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            sym.setStyleSheet(f"font-family: '{SFI}'; font-size: 14px; color: rgba(255,255,255,0.75); background: transparent;")
-            lbl = QLabel(label)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"font-family: {FN}; font-size: 9px; color: rgba(255,255,255,0.50); background: transparent;")
-            btn_lay.addWidget(sym)
-            btn_lay.addWidget(lbl)
-            btn.setStyleSheet(tb_btn_css)
-            btn.clicked.connect(callback)
-            btn.clicked.connect(menu.close)
-            return btn
-
-        tb_lay.addWidget(_make_tb_btn(ICO_CUT, "Cut", self._cut_file))
-        tb_lay.addWidget(_make_tb_btn(ICO_COPY, "Copy", self._copy_file))
-        tb_lay.addWidget(_make_tb_btn(ICO_RENAME, "Rename", self._rename_file))
-        tb_lay.addWidget(_make_tb_btn(ICO_SHARE, "Share", self._share_file))
-        tb_lay.addWidget(_make_tb_btn(ICO_DELETE, "Delete", self._delete_file))
-
-        toolbar_action = QWidgetAction(menu)
-        toolbar_action.setDefaultWidget(toolbar)
-        menu.addAction(toolbar_action)
-
-        menu.addSeparator()
-
-        # ── Open (with file's own shell icon) ──
-        file_icon = QIcon()
-        pixmap = _get_shell_icon(self._path, 16)
-        if not pixmap.isNull():
-            file_icon = QIcon(pixmap)
-        a_open = menu.addAction(file_icon, "Open")
-        a_open.setShortcut("Enter")
-        a_open.triggered.connect(lambda: self.clicked.emit(self._path))
-
-        # ── Open with → submenu ──
-        open_with = menu.addMenu("Open with")
-        open_with.setIcon(_fluent_icon(ICO_OPENWITH))
-        open_with.setStyleSheet(menu_css)
-        a_notepad = open_with.addAction("Notepad")
-        a_notepad.triggered.connect(lambda: subprocess.Popen(["notepad.exe", self._path]))
-        a_choose = open_with.addAction("Choose another app")
-        a_choose.triggered.connect(self._open_with_dialog)
-
-        # ── Open file location ──
-        a_folder = menu.addAction(_fluent_icon(ICO_FOLDER), "Open file location")
-        a_folder.triggered.connect(self._open_location)
-
-        ext = Path(self._path).suffix.lower()
-        if ext == ".exe":
-            menu.addSeparator()
-            a_admin = menu.addAction(_fluent_icon(ICO_ADMIN), "Run as administrator")
-            a_admin.triggered.connect(self._run_as_admin)
-
-        menu.addSeparator()
-
-        # ── Add to Favorites ──
-        a_fav = menu.addAction(_fluent_icon(ICO_STAR), "Add to Favorites")
-        a_fav.setEnabled(False)  # placeholder
-
-        # ── Compress to... ──
-        a_compress = menu.addAction(_fluent_icon(ICO_COMPRESS), "Compress to...")
-        a_compress.setEnabled(False)  # placeholder
-
-        # ── Copy as path ──
-        a_copy_path = menu.addAction(_fluent_icon(ICO_LINK), "Copy as path")
-        a_copy_path.setShortcut("Ctrl+Shift+C")
-        a_copy_path.triggered.connect(self._copy_path)
-
-        # ── Properties ──
-        a_props = menu.addAction(_fluent_icon(ICO_PROPS), "Properties")
-        a_props.setShortcut("Alt+Enter")
-        a_props.triggered.connect(self._show_properties)
-
-        menu.addSeparator()
-
-        # ── Summarize with Encyl (Neuron exclusive) ──
-        a_encyl = menu.addAction(_fluent_icon(ICO_BRAIN), "Summarize with Encyl")
-        a_encyl.triggered.connect(lambda: self._trigger_encyl())
-
-        # ── Edit in Notepad ──
-        a_edit = menu.addAction(_fluent_icon(ICO_EDIT), "Edit in Notepad")
-        a_edit.triggered.connect(lambda: subprocess.Popen(["notepad.exe", self._path]))
-
-        menu.addSeparator()
-
-        # ── Show more options ──
-        a_more = menu.addAction(_fluent_icon(ICO_MORE), "Show more options")
-        a_more.triggered.connect(self._show_legacy_menu)
-
-        menu.exec(pos)
-
-    # ── Context menu action handlers ──────────────────────────
-    def _trigger_encyl(self):
-        parent = self.parent()
-        while parent:
-            if hasattr(parent, '_summarize_selected'):
-                parent._summarize_selected()
-                break
-            parent = parent.parent()
-
-    def _open_location(self):
-        if platform.system() == "Windows":
-            subprocess.Popen(f'explorer /select,"{self._path}"')
-
-    def _copy_path(self):
-        QApplication.clipboard().setText(self._path)
-
-    def _copy_name(self):
-        QApplication.clipboard().setText(Path(self._path).name)
-
-    def _copy_file(self):
-        """Copy file to clipboard (Windows shell clipboard format)."""
-        if platform.system() == "Windows":
-            try:
-                subprocess.run(
-                    ["powershell", "-Command",
-                     f"Set-Clipboard -Path '{self._path}'"],
-                    capture_output=True, timeout=5
-                )
-            except Exception:
-                QApplication.clipboard().setText(self._path)
-
-    def _cut_file(self):
-        """Cut = copy + mark for move (just copies path for now)."""
-        self._copy_file()
-
-    def _delete_file(self):
-        """Send file to Recycle Bin using Windows shell."""
-        if platform.system() == "Windows":
-            try:
-                import ctypes
-                from ctypes import wintypes
-                # Use SHFileOperation to send to recycle bin
-                class SHFILEOPSTRUCT(ctypes.Structure):
-                    _fields_ = [
-                        ("hwnd", wintypes.HWND),
-                        ("wFunc", ctypes.c_uint),
-                        ("pFrom", ctypes.c_wchar_p),
-                        ("pTo", ctypes.c_wchar_p),
-                        ("fFlags", ctypes.c_ushort),
-                        ("fAnyOperationsAborted", wintypes.BOOL),
-                        ("hNameMappings", ctypes.c_void_p),
-                        ("lpszProgressTitle", ctypes.c_wchar_p),
-                    ]
-                FO_DELETE = 3
-                FOF_ALLOWUNDO = 0x40
-                FOF_NOCONFIRMATION = 0x10
-                op = SHFILEOPSTRUCT()
-                op.wFunc = FO_DELETE
-                op.pFrom = self._path + '\0'
-                op.fFlags = FOF_ALLOWUNDO  # Send to recycle bin, with confirmation
-                ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
-            except Exception:
-                pass
-
-    def _rename_file(self):
-        """Open rename dialog."""
-        from PyQt6.QtWidgets import QInputDialog
-        name = Path(self._path).name
-        new_name, ok = QInputDialog.getText(self, "Rename", "New name:", text=name)
-        if ok and new_name and new_name != name:
-            try:
-                new_path = Path(self._path).parent / new_name
-                Path(self._path).rename(new_path)
-            except Exception:
-                pass
-
-    def _share_file(self):
-        """Open Windows Share dialog."""
-        if platform.system() == "Windows":
-            try:
-                subprocess.Popen(
-                    ["powershell", "-Command",
-                     f"explorer.exe shell:sendto"],
-                    shell=True
-                )
-            except Exception:
-                pass
-
-    def _run_as_admin(self):
-        """Run executable as administrator."""
-        if platform.system() == "Windows":
-            try:
-                import ctypes
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", self._path, None, None, 1
-                )
-            except Exception:
-                pass
-
-    def _open_with_dialog(self):
-        """Open Windows 'Open with' dialog."""
-        if platform.system() == "Windows":
-            try:
-                subprocess.Popen(
-                    f'rundll32.exe shell32.dll,OpenAs_RunDLL "{self._path}"'
-                )
-            except Exception:
-                pass
-
-    def _show_properties(self):
-        """Open Windows file Properties dialog."""
-        if platform.system() == "Windows":
-            try:
-                import ctypes
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "properties", self._path, None, None, 1
-                )
-            except Exception:
-                pass
-
-    def _show_legacy_menu(self):
-        """Open legacy Windows context menu (Shift+Right-click behavior)."""
-        if platform.system() == "Windows":
-            try:
-                folder = str(Path(self._path).parent)
-                subprocess.Popen(f'explorer /select,"{self._path}"')
-            except Exception:
-                pass
-
-
-# ── action card ──────────────────────────────────────────────
-class ActionCard(QFrame):
-    action_clicked = pyqtSignal(str)
-
-    def __init__(self, emoji, label, shortcut, aid, parent=None):
-        super().__init__(parent)
-        self._aid = aid
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(90)
-        self.setStyleSheet(f"""
-            ActionCard {{
-                background: rgba(255,255,255,0.025);
-                border: 1px solid rgba(255,255,255,0.05);
-                border-radius: 14px;
-            }}
-            ActionCard:hover {{
-                background: rgba(255,255,255,0.06);
-                border-color: rgba(56,156,255,0.18);
-            }}
-        """)
-        vb = QVBoxLayout(self)
-        vb.setContentsMargins(10, 16, 10, 12)
-        vb.setSpacing(6)
-        vb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # icon in a subtle circle
-        ic = QLabel(emoji)
-        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ic.setFixedSize(36, 36)
-        ic.setStyleSheet("font-size: 20px; background: rgba(56,156,255,0.08); border-radius: 18px;")
-        vb.addWidget(ic, 0, Qt.AlignmentFlag.AlignCenter)
-
-        lbl = QLabel(label)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet(f"font-family: {FN}; font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.72); background: transparent;")
-        vb.addWidget(lbl)
-
-        sc = QLabel(shortcut)
-        sc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sc.setStyleSheet(f"font-family: {MN}; font-size: 9px; color: rgba(255,255,255,0.18); background: transparent;")
-        vb.addWidget(sc)
-
-    def mousePressEvent(self, e):
-        self.action_clicked.emit(self._aid)
-
-
-# ── suggestion chip (for "Jump back in") ─────────────────────
-class SuggestionChip(QFrame):
-    """Compact file suggestion chip with icon and truncated name."""
-    clicked = pyqtSignal(str)
-
-    def __init__(self, file_path: str, parent=None):
-        super().__init__(parent)
-        self._path = file_path
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(32)
-        self.setStyleSheet(f"""
-            SuggestionChip {{
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 0 12px;
-            }}
-            SuggestionChip:hover {{
-                background: rgba(0,120,212,0.15);
-                border-color: rgba(0,120,212,0.30);
-            }}
-        """)
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 0, 12, 0)
-        lay.setSpacing(6)
-
-        # Icon
-        ic = QLabel()
-        ic.setFixedSize(16, 16)
-        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pixmap = _get_shell_icon(file_path, 16)
-        if not pixmap.isNull():
-            ic.setPixmap(pixmap)
-        else:
-            ic.setText("📄")
-            ic.setStyleSheet("font-size: 12px; background: transparent;")
-        lay.addWidget(ic)
-
-        # Name (truncated)
-        name = Path(file_path).name
-        if len(name) > 30:
-            name = name[:27] + "..."
-        lbl = QLabel(name)
-        lbl.setStyleSheet(f"""
-            font-family: {FN}; font-size: 11px; font-weight: 500;
-            color: rgba(255,255,255,0.75); background: transparent;
-        """)
-        lay.addWidget(lbl)
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self._path)
-
-# ── settings overlay ─────────────────────────────────────────
-class SettingsOverlay(QFrame):
-    closed = pyqtSignal()
-    reindex = pyqtSignal()
-    paths_changed = pyqtSignal()
-
-    def __init__(self, svc, parent=None):
-        super().__init__(parent)
-        self._svc = svc
-        self.setStyleSheet(f"""
-            SettingsOverlay {{
-                background: rgba(14,14,18,0.96);
-                border: 1px solid rgba(255,255,255,0.10);
-                border-radius: 20px;
-            }}
-        """)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(28, 22, 28, 22)
-        root.setSpacing(16)
-
-        # header
-        hdr = QHBoxLayout()
-        t = QLabel("⚙️  Settings")
-        t.setStyleSheet(f"font-family: {FN}; font-size: 18px; font-weight: 700; color: rgba(255,255,255,0.92); background: transparent;")
-        hdr.addWidget(t); hdr.addStretch()
-        x = QLabel("✕"); x.setFixedSize(28,28)
-        x.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        x.setCursor(Qt.CursorShape.PointingHandCursor)
-        x.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.06); border-radius: 6px;")
-        x.mousePressEvent = lambda e: self.closed.emit()
-        hdr.addWidget(x)
-        root.addLayout(hdr)
-
-        # divider
-        d = QFrame(); d.setFixedHeight(1); d.setStyleSheet("background: rgba(255,255,255,0.06);")
-        root.addWidget(d)
-
-        # stats
-        cnt = svc.total_indexed()
-        ps = svc.get_watch_paths()
-        st = QLabel(f"📊  {cnt:,} files indexed  ·  {len(ps)} watch directories")
-        st.setStyleSheet(f"font-size: 12px; color: rgba(255,255,255,0.5); background: transparent;")
-        root.addWidget(st)
-
-        # watch paths
-        wl = QLabel("Watch Paths")
-        wl.setStyleSheet(f"font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.80); background: transparent;")
-        root.addWidget(wl)
-        self._pc = QVBoxLayout(); self._pc.setSpacing(3)
-        for p in ps:
-            l = QLabel(f"  📂  {p}")
-            l.setStyleSheet(f"font-size: 11px; color: rgba(255,255,255,0.35); background: transparent;")
-            l.setMaximumWidth(550)
-            self._pc.addWidget(l)
-        root.addLayout(self._pc)
-
-        # add folder
-        ab = QPushButton("＋  Add Folder")
-        ab.setCursor(Qt.CursorShape.PointingHandCursor)
-        ab.setStyleSheet(f"""
-            QPushButton {{ background: rgba(255,255,255,0.04); border: 1px dashed rgba(255,255,255,0.12);
-            border-radius: 10px; color: rgba(255,255,255,0.5); font-size: 12px; font-weight: 600; padding: 10px; }}
-            QPushButton:hover {{ background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.8); }}
-        """)
-        ab.clicked.connect(self._add)
-        root.addWidget(ab)
-
-        # reindex
-        rb = QPushButton("🔄  Re-index Now")
-        rb.setCursor(Qt.CursorShape.PointingHandCursor)
-        rb.setStyleSheet(f"""
-            QPushButton {{ background: rgba(56,156,255,0.45); border: none; border-radius: 10px;
-            color: white; font-size: 12px; font-weight: 700; padding: 12px; }}
-            QPushButton:hover {{ background: rgba(56,156,255,0.65); }}
-        """)
-        rb.clicked.connect(lambda: (self.reindex.emit(), self.closed.emit()))
-        root.addWidget(rb)
-
-        # top-k slider
-        cfg = svc.get_config()
-        tr = QHBoxLayout()
-        tl = QLabel("Results count")
-        tl.setStyleSheet(f"font-size: 12px; color: rgba(255,255,255,0.5); background: transparent;")
-        tr.addWidget(tl); tr.addStretch()
-        self._tv = QLabel(str(cfg.get("top_k", 20)))
-        self._tv.setStyleSheet(f"font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.85); background: transparent;")
-        tr.addWidget(self._tv)
-        root.addLayout(tr)
-        sl = QSlider(Qt.Orientation.Horizontal)
-        sl.setRange(5, 50); sl.setValue(cfg.get("top_k", 20))
-        sl.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ background: rgba(255,255,255,0.06); height: 4px; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: {C.BLUE}; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }}
-            QSlider::sub-page:horizontal {{ background: rgba(56,156,255,0.3); border-radius: 2px; }}
-        """)
-        sl.valueChanged.connect(lambda v: (self._tv.setText(str(v)), self._topk(v)))
-        root.addWidget(sl)
-        root.addStretch()
-
-    def _add(self):
-        f = QFileDialog.getExistingDirectory(self, "Select Folder")
-        if f and self._svc.add_watch_path(f):
-            l = QLabel(f"  📂  {f}")
-            l.setStyleSheet(f"font-size: 11px; color: rgba(255,255,255,0.35); background: transparent;")
-            self._pc.addWidget(l)
-            self.paths_changed.emit()
-
-    def _topk(self, v):
-        c = self._svc.get_config(); c["top_k"] = v; self._svc.save_config(c)
-
-
-# ═════════════════════════════════════════════════════════════
-# THE SPOTLIGHT PANEL  —  main widget
-# ═════════════════════════════════════════════════════════════
 class SpotlightPanel(QWidget):
 
     def __init__(self, svc: DesktopService):
@@ -1169,7 +82,7 @@ class SpotlightPanel(QWidget):
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        # Dynamic height — fit the screen
+        # Dynamic height â€” fit the screen
         self._resize_to_screen()
 
         self._build()
@@ -1194,7 +107,7 @@ class SpotlightPanel(QWidget):
         except Exception:
             pass
 
-    # ── glass background painting ────────────────────────────
+    # â”€â”€ glass background painting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1227,13 +140,13 @@ class SpotlightPanel(QWidget):
 
         p.end()
 
-    # ── build ui ─────────────────────────────────────────────
+    # â”€â”€ build ui â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 10)
         root.setSpacing(0)
 
-        # ── NAVIGATION BAR (Win11 style) ──
+        # â”€â”€ NAVIGATION BAR (Win11 style) â”€â”€
         nav = QHBoxLayout()
         nav.setSpacing(2)
         nav.setContentsMargins(0, 0, 0, 8)
@@ -1251,41 +164,41 @@ class SpotlightPanel(QWidget):
         self._history: list[str] = []
         self._hist_idx = -1
 
-        self._btn_back = QPushButton("←")
+        self._btn_back = QPushButton("â†")
         self._btn_back.setStyleSheet(nav_btn_css)
         self._btn_back.setToolTip("Back (previous search)")
         self._btn_back.setEnabled(False)
         self._btn_back.clicked.connect(self._nav_back)
         nav.addWidget(self._btn_back)
 
-        self._btn_fwd = QPushButton("→")
+        self._btn_fwd = QPushButton("â†’")
         self._btn_fwd.setStyleSheet(nav_btn_css)
         self._btn_fwd.setToolTip("Forward (next search)")
         self._btn_fwd.setEnabled(False)
         self._btn_fwd.clicked.connect(self._nav_forward)
         nav.addWidget(self._btn_fwd)
 
-        self._btn_up = QPushButton("↑")
+        self._btn_up = QPushButton("â†‘")
         self._btn_up.setStyleSheet(nav_btn_css)
         self._btn_up.setToolTip("Up (clear search, show recent)")
         self._btn_up.clicked.connect(self._nav_up)
         nav.addWidget(self._btn_up)
 
-        self._btn_refresh = QPushButton("↻")
+        self._btn_refresh = QPushButton("â†»")
         self._btn_refresh.setStyleSheet(nav_btn_css)
         self._btn_refresh.setToolTip("Refresh (re-run search / re-index)")
         self._btn_refresh.clicked.connect(self._nav_refresh)
         nav.addWidget(self._btn_refresh)
 
-        self._btn_memory = QPushButton("📅")
+        self._btn_memory = QPushButton("ðŸ“…")
         self._btn_memory.setStyleSheet(nav_btn_css)
-        self._btn_memory.setToolTip("Memory Lane — daily activity recap")
+        self._btn_memory.setToolTip("Memory Lane â€” daily activity recap")
         self._btn_memory.clicked.connect(self._toggle_memory_lane)
         nav.addWidget(self._btn_memory)
 
         nav.addSpacing(12)
 
-        # ── SEARCH BAR (right-aligned in nav) ──
+        # â”€â”€ SEARCH BAR (right-aligned in nav) â”€â”€
         self.search = GlowSearchBar(self)
         self.search.textChanged.connect(self._on_text)
         self.search.returnPressed.connect(self._open_sel)
@@ -1294,7 +207,7 @@ class SpotlightPanel(QWidget):
 
         root.addLayout(nav)
 
-        # ── ENCYL LOADING BAR (hidden by default) ──
+        # â”€â”€ ENCYL LOADING BAR (hidden by default) â”€â”€
         self._encyl_loading = QFrame()
         self._encyl_loading.setFixedHeight(36)
         self._encyl_loading.setStyleSheet(f"""
@@ -1306,10 +219,10 @@ class SpotlightPanel(QWidget):
         """)
         el_lay = QHBoxLayout(self._encyl_loading)
         el_lay.setContentsMargins(12, 0, 12, 0)
-        self._encyl_spinner = QLabel("⟳")
+        self._encyl_spinner = QLabel("âŸ³")
         self._encyl_spinner.setStyleSheet(f"font-size: 14px; color: #0078D4; background: transparent;")
         el_lay.addWidget(self._encyl_spinner)
-        self._encyl_status = QLabel("🧠 Encyl is reading...")
+        self._encyl_status = QLabel("ðŸ§  Encyl is reading...")
         self._encyl_status.setStyleSheet(f"font-family: {FN}; font-size: 11px; color: rgba(255,255,255,0.7); background: transparent;")
         el_lay.addWidget(self._encyl_status, 1)
         self._encyl_pbar = QFrame()
@@ -1319,21 +232,21 @@ class SpotlightPanel(QWidget):
         self._encyl_loading.hide()
         root.addWidget(self._encyl_loading)
 
-        # ── ENCYL LOADING ANIMATION TIMER ──
+        # â”€â”€ ENCYL LOADING ANIMATION TIMER â”€â”€
         self._encyl_timer = QTimer(self)
         self._encyl_timer.setInterval(2000)
         self._encyl_phase = 0
         self._encyl_phases = [
-            "🧠 Reading file contents...",
-            "🧠 Processing with Encyl...",
-            "🧠 Generating summary...",
-            "🧠 Almost done...",
+            "ðŸ§  Reading file contents...",
+            "ðŸ§  Processing with Encyl...",
+            "ðŸ§  Generating summary...",
+            "ðŸ§  Almost done...",
         ]
         self._encyl_timer.timeout.connect(self._advance_encyl_phase)
 
         root.addSpacing(6)
 
-        # ── SCOPE PILLS ──
+        # â”€â”€ SCOPE PILLS â”€â”€
         pr = QHBoxLayout()
         pr.setSpacing(4)
         pr.setContentsMargins(4, 0, 4, 0)
@@ -1350,7 +263,7 @@ class SpotlightPanel(QWidget):
         root.addLayout(pr)
         root.addSpacing(8)
 
-        # ── JUMP BACK IN SUGGESTIONS ──
+        # â”€â”€ JUMP BACK IN SUGGESTIONS â”€â”€
         self._jbi_widget = QWidget()
         self._jbi_widget.setStyleSheet("background: transparent;")
         jbi_lay = QVBoxLayout(self._jbi_widget)
@@ -1377,13 +290,13 @@ class SpotlightPanel(QWidget):
         self._jbi_widget.hide()
         root.addWidget(self._jbi_widget)
 
-        # ── DIVIDER ──
+        # â”€â”€ DIVIDER â”€â”€
         dv = QFrame(); dv.setFixedHeight(1)
         dv.setStyleSheet("background: rgba(255,255,255,0.06);")
         root.addWidget(dv)
         root.addSpacing(2)
 
-        # ── SCROLL AREA ──
+        # â”€â”€ SCROLL AREA â”€â”€
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1410,7 +323,7 @@ class SpotlightPanel(QWidget):
         self.rl.setSpacing(2)
 
         # empty-state
-        self.empty = QLabel("Type to search your files\n\nIndexes Desktop · Documents · Downloads\nand more across your machine")
+        self.empty = QLabel("Type to search your files\n\nIndexes Desktop Â· Documents Â· Downloads\nand more across your machine")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setWordWrap(True)
         self.empty.setStyleSheet(f"""
@@ -1433,7 +346,7 @@ class SpotlightPanel(QWidget):
         tc_lay.setContentsMargins(16, 12, 16, 12)
         tc_lay.setSpacing(6)
         tc_hdr = QHBoxLayout()
-        tc_title = QLabel("📊 Today's Activity")
+        tc_title = QLabel("ðŸ“Š Today's Activity")
         tc_title.setStyleSheet(f"font-family: {FN}; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.65); background: transparent;")
         tc_hdr.addWidget(tc_title)
         tc_hdr.addStretch()
@@ -1446,7 +359,7 @@ class SpotlightPanel(QWidget):
         self._today_stats.setStyleSheet(f"font-family: {FN}; font-size: 11px; color: rgba(255,255,255,0.35); background: transparent;")
         tc_lay.addWidget(self._today_stats)
         # "Try @query" hint
-        tc_hint = QLabel("💡 Type @yesterday or @last week to search your activity")
+        tc_hint = QLabel("ðŸ’¡ Type @yesterday or @last week to search your activity")
         tc_hint.setStyleSheet(f"font-family: {MN}; font-size: 9px; color: rgba(0,120,212,0.50); background: transparent;")
         tc_lay.addWidget(tc_hint)
         self.rl.addWidget(self._today_card)
@@ -1456,9 +369,9 @@ class SpotlightPanel(QWidget):
         al = QVBoxLayout(self._acw); al.setContentsMargins(0,0,0,0); al.setSpacing(6)
         al.addWidget(CatHeader("Quick Actions"))
         ag = QHBoxLayout(); ag.setSpacing(10)
-        for em, lb, sc, aid in [("🔄","Re-index","Ctrl R","reindex"),
-                                 ("📂","Add Folder","Ctrl O","add_path"),
-                                 ("⚙️","Settings","Ctrl ,","settings")]:
+        for em, lb, sc, aid in [("ðŸ”„","Re-index","Ctrl R","reindex"),
+                                 ("ðŸ“‚","Add Folder","Ctrl O","add_path"),
+                                 ("âš™ï¸","Settings","Ctrl ,","settings")]:
             c = ActionCard(em, lb, sc, aid)
             c.action_clicked.connect(self._action)
             ag.addWidget(c)
@@ -1470,10 +383,10 @@ class SpotlightPanel(QWidget):
         sl2 = QVBoxLayout(self._sgw); sl2.setContentsMargins(0,6,0,0); sl2.setSpacing(2)
         sl2.addWidget(CatHeader("Tips"))
         for em, nm, ds in [
-            ("💡", "Semantic search", "Use natural language — \"files about machine learning\""),
-            ("🧠", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
-            ("⏰", "Time filters", "Try \"modified last week\" or \"created today\""),
-            ("📅", "Activity search", "Type @yesterday to see your recent work sessions"),
+            ("ðŸ’¡", "Semantic search", "Use natural language â€” \"files about machine learning\""),
+            ("ðŸ§ ", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
+            ("â°", "Time filters", "Try \"modified last week\" or \"created today\""),
+            ("ðŸ“…", "Activity search", "Type @yesterday to see your recent work sessions"),
         ]:
             sf = QFrame(); sf.setFixedHeight(42)
             sf.setStyleSheet("background: transparent; border-radius: 10px;")
@@ -1497,21 +410,21 @@ class SpotlightPanel(QWidget):
         self.scroll.setWidget(self.rw)
         root.addWidget(self.scroll, 1)
 
-        # ── MEMORYOS CHAT PANEL (hidden by default, shown when MemoryOS pill is clicked) ──
+        # â”€â”€ MEMORYOS CHAT PANEL (hidden by default, shown when MemoryOS pill is clicked) â”€â”€
         self._mos_panel = MemoryOSPanel(self)
         root.addWidget(self._mos_panel, 1)
 
-        # ── ACTIVITY PANEL (hidden by default, shown when Activity pill is clicked) ──
+        # â”€â”€ ACTIVITY PANEL (hidden by default, shown when Activity pill is clicked) â”€â”€
         self._activity_panel = ActivityPanel(self)
         self._activity_panel.hide()
         root.addWidget(self._activity_panel, 1)
 
-        # ── STATUS LINE ──
+        # â”€â”€ STATUS LINE â”€â”€
         self.status = QLabel("")
         self.status.setStyleSheet(f"font-size: 11px; color: rgba(255,255,255,0.22); background: transparent; padding: 3px 6px;")
         root.addWidget(self.status)
 
-        # ── BOTTOM BAR ──
+        # â”€â”€ BOTTOM BAR â”€â”€
         root.addSpacing(4)
         bd = QFrame(); bd.setFixedHeight(1)
         bd.setStyleSheet("background: rgba(255,255,255,0.04);")
@@ -1531,12 +444,12 @@ class SpotlightPanel(QWidget):
         bb.addSpacing(6)
 
         # green pulse dot
-        dot = QLabel("●")
+        dot = QLabel("â—")
         dot.setStyleSheet("font-size: 7px; color: #34C759; background: transparent;")
         bb.addWidget(dot)
         bb.addSpacing(4)
 
-        self.idx_lbl = QLabel("Indexing…")
+        self.idx_lbl = QLabel("Indexingâ€¦")
         self.idx_lbl.setStyleSheet(f"font-size: 10px; color: rgba(255,255,255,0.18); background: transparent;")
         bb.addWidget(self.idx_lbl)
 
@@ -1546,28 +459,28 @@ class SpotlightPanel(QWidget):
         bb.addWidget(self._streak_lbl)
         bb.addStretch()
 
-        for txt in ["↑↓ nav", "↵ open", "Tab Encyl", "?query ask", "^C copy", "Esc close"]:
+        for txt in ["â†‘â†“ nav", "â†µ open", "Tab Encyl", "?query ask", "^C copy", "Esc close"]:
             h = QLabel(txt)
             h.setStyleSheet(f"font-size: 9px; color: rgba(255,255,255,0.14); background: transparent;")
             bb.addWidget(h)
             if txt != "Esc close":
-                sep = QLabel("·")
+                sep = QLabel("Â·")
                 sep.setStyleSheet("color: rgba(255,255,255,0.10); font-size: 9px; background: transparent;")
                 bb.addWidget(sep)
 
         # Ollama status
         ai = get_ollama()
         ai_ok = ai.is_available()
-        self.ai_lbl = QLabel("🧠 Encyl" if ai_ok else "🧠 ✗")
+        self.ai_lbl = QLabel("ðŸ§  Encyl" if ai_ok else "ðŸ§  âœ—")
         self.ai_lbl.setStyleSheet(f"font-size: 9px; color: {'rgba(52,199,89,0.7)' if ai_ok else 'rgba(255,255,255,0.14)'}; background: transparent; margin-left: 8px;")
-        self.ai_lbl.setToolTip("Encyl AI connected — type ? to ask" if ai_ok else "Encyl offline — start Ollama with 'ollama serve'")
+        self.ai_lbl.setToolTip("Encyl AI connected â€” type ? to ask" if ai_ok else "Encyl offline â€” start Ollama with 'ollama serve'")
         bb.addWidget(self.ai_lbl)
 
         root.addLayout(bb)
 
-    # ═════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     # RESULTS MANAGEMENT
-    # ═════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     def _clear(self):
         self._rows.clear(); self._sel = -1
         while self.rl.count() > 0:
@@ -1591,7 +504,7 @@ class SpotlightPanel(QWidget):
         self._hide_empty()
         if not hits:
             self.status.setText("No results found")
-            self._show_empty("No matching files — try different keywords")
+            self._show_empty("No matching files â€” try different keywords")
             self.rl.addWidget(self.empty)
             self.rl.addWidget(self._acw)
             self.rl.addWidget(self._sgw)
@@ -1622,7 +535,7 @@ class SpotlightPanel(QWidget):
         if self._rows:
             self._sel = 0; self._rows[0].set_selected(True)
 
-    # ── scope ────────────────────────────────────────────────
+    # â”€â”€ scope â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _set_scope(self, k):
         self._scope = k
         for p in self._pills: p.set_active(p._key == k)
@@ -1649,7 +562,7 @@ class SpotlightPanel(QWidget):
         else: filtered = self._all
         self._populate(filtered)
 
-    # ── "Jump back in" suggestions ───────────────────────────
+    # â”€â”€ "Jump back in" suggestions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _populate_jump_back_in(self):
         """Populate 'Jump back in' suggestions with recent files."""
         # Clear existing chips
@@ -1725,7 +638,7 @@ class SpotlightPanel(QWidget):
         except Exception as e:
             logger.warning(f"Failed to add revisit suggestions: {e}")
 
-    # ── Activity Search (Memory OS) ──────────────────────────
+    # â”€â”€ Activity Search (Memory OS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _do_activity_search(self, query: str):
         """Handle @ activity queries like '@yesterday' or '@last week python files'."""
         import datetime
@@ -1741,7 +654,7 @@ class SpotlightPanel(QWidget):
         try:
             events = self._svc.get_recent_events(limit=500)
             if not events:
-                self._show_empty("No activity recorded yet — use Neuron to build your timeline")
+                self._show_empty("No activity recorded yet â€” use Neuron to build your timeline")
                 self.rl.addWidget(self.empty)
                 self.rl.addWidget(self._today_card)
                 self.rl.addWidget(self._acw)
@@ -1834,7 +747,7 @@ class SpotlightPanel(QWidget):
 
             # Session header
             day_str = start_time.strftime("%A, %b %d")
-            time_str = f"{start_time.strftime('%I:%M %p')} – {end_time.strftime('%I:%M %p')}"
+            time_str = f"{start_time.strftime('%I:%M %p')} â€“ {end_time.strftime('%I:%M %p')}"
             duration = start_time - end_time
             dur_min = max(1, int(abs(duration.total_seconds()) / 60))
             dur_str = f"{dur_min}min" if dur_min < 60 else f"{dur_min // 60}h {dur_min % 60}m"
@@ -1851,16 +764,16 @@ class SpotlightPanel(QWidget):
             sh_lay = QHBoxLayout(session_hdr)
             sh_lay.setContentsMargins(12, 8, 12, 8)
 
-            sh_icon = QLabel("📂")
+            sh_icon = QLabel("ðŸ“‚")
             sh_icon.setStyleSheet("font-size: 14px; background: transparent;")
             sh_lay.addWidget(sh_icon)
 
             sh_info = QVBoxLayout()
             sh_info.setSpacing(0)
-            sh_title = QLabel(f"{day_str}  ·  {time_str}")
+            sh_title = QLabel(f"{day_str}  Â·  {time_str}")
             sh_title.setStyleSheet(f"font-family: {FN}; font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.70); background: transparent;")
             sh_info.addWidget(sh_title)
-            sh_detail = QLabel(f"{len(session)} events · {dur_str}")
+            sh_detail = QLabel(f"{len(session)} events Â· {dur_str}")
             sh_detail.setStyleSheet(f"font-family: {MN}; font-size: 9px; color: rgba(255,255,255,0.30); background: transparent;")
             sh_info.addWidget(sh_detail)
             sh_lay.addLayout(sh_info, 1)
@@ -1878,8 +791,8 @@ class SpotlightPanel(QWidget):
                     continue
 
                 event_type = ev.get('event_type', 'access')
-                type_emoji = {"open": "📂", "search": "🔍", "summarize": "🧠",
-                              "index": "📄", "access": "👁"}.get(event_type, "📄")
+                type_emoji = {"open": "ðŸ“‚", "search": "ðŸ”", "summarize": "ðŸ§ ",
+                              "index": "ðŸ“„", "access": "ðŸ‘"}.get(event_type, "ðŸ“„")
 
                 hit = {
                     'path': fp,
@@ -1958,7 +871,7 @@ class SpotlightPanel(QWidget):
                 keyword = re.sub(r'\d+\s*days?\s*ago', '', q).strip()
 
         if not time_range:
-            # No time pattern found — treat entire query as keyword, search all time
+            # No time pattern found â€” treat entire query as keyword, search all time
             keyword = q
 
         return time_range, keyword
@@ -1979,14 +892,14 @@ class SpotlightPanel(QWidget):
                 if opens: parts.append(f"{opens} file{'s' if opens != 1 else ''} opened")
                 if summaries: parts.append(f"{summaries} summar{'ies' if summaries != 1 else 'y'}")
                 if parts:
-                    self._today_stats.setText(" · ".join(parts))
+                    self._today_stats.setText(" Â· ".join(parts))
                 else:
-                    self._today_stats.setText("No activity yet today — start searching!")
+                    self._today_stats.setText("No activity yet today â€” start searching!")
             else:
-                self._today_stats.setText("No activity yet today — start searching!")
+                self._today_stats.setText("No activity yet today â€” start searching!")
 
             if streak > 0:
-                self._today_streak.setText(f"🔥 {streak} day{'s' if streak != 1 else ''} streak")
+                self._today_streak.setText(f"ðŸ”¥ {streak} day{'s' if streak != 1 else ''} streak")
             else:
                 self._today_streak.setText("")
         except Exception as e:
@@ -1998,7 +911,7 @@ class SpotlightPanel(QWidget):
         try:
             streak = self._svc.get_streak_days()
             if streak > 0:
-                self._streak_lbl.setText(f"🔥 {streak}d streak")
+                self._streak_lbl.setText(f"ðŸ”¥ {streak}d streak")
             else:
                 self._streak_lbl.setText("")
         except Exception:
@@ -2055,7 +968,7 @@ class SpotlightPanel(QWidget):
             from app.logger import logger
             logger.error(f"Re-index failed: {e}")
 
-    # ── tray ─────────────────────────────────────────────────
+    # â”€â”€ tray â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tray(self):
         self._tray = QSystemTrayIcon(self)
         # BUG3-FIX: use white-background circular icon for tray
@@ -2086,7 +999,7 @@ class SpotlightPanel(QWidget):
             lambda r: self.toggle_panel() if r in (
                 QSystemTrayIcon.ActivationReason.Trigger,
                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
-        self._tray.setToolTip("Neuron — Shift+Space to search")
+        self._tray.setToolTip("Neuron â€” Shift+Space to search")
         self._tray.show()
         self._update_tray_tooltip()
 
@@ -2095,14 +1008,14 @@ class SpotlightPanel(QWidget):
         try:
             streak = self._svc.get_streak_days()
             if streak > 0:
-                tooltip = f"Neuron — Shift+Space to search\n{streak} day{'s' if streak != 1 else ''} streak 🔥"
+                tooltip = f"Neuron â€” Shift+Space to search\n{streak} day{'s' if streak != 1 else ''} streak ðŸ”¥"
             else:
-                tooltip = "Neuron — Shift+Space to search"
+                tooltip = "Neuron â€” Shift+Space to search"
             self._tray.setToolTip(tooltip)
         except Exception:
-            self._tray.setToolTip("Neuron — Shift+Space to search")
+            self._tray.setToolTip("Neuron â€” Shift+Space to search")
 
-    # ── indexing ─────────────────────────────────────────────
+    # â”€â”€ indexing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _refresh_idx_count(self):
         """Poll the real DB count and update label. Runs every 3s."""
         try:
@@ -2124,15 +1037,15 @@ class SpotlightPanel(QWidget):
             if existing > 0:
                 self.idx_lbl.setText(f"{existing:,} files indexed")
             else:
-                self.idx_lbl.setText("Indexing…")
+                self.idx_lbl.setText("Indexingâ€¦")
         except Exception:
-            self.idx_lbl.setText("Indexing…")
+            self.idx_lbl.setText("Indexingâ€¦")
 
         self._indexing = True
         self._it = IndexThread(self._svc)
         self._it.status.connect(lambda m: self.idx_lbl.setText(m))
         self._it.progress.connect(
-            lambda d, t: self.idx_lbl.setText(f"Indexing… {min(int(d/t*100),99)}%") if t > 0 else None)
+            lambda d, t: self.idx_lbl.setText(f"Indexingâ€¦ {min(int(d/t*100),99)}%") if t > 0 else None)
         self._it.finished.connect(self._idx_done)
         self._it.start()
 
@@ -2140,7 +1053,7 @@ class SpotlightPanel(QWidget):
         self._indexing = False
         self._idx_count = self._svc.total_indexed()
         self.idx_lbl.setText(f"{self._idx_count:,} files indexed")
-        # Stop live refresh — indexing is done
+        # Stop live refresh â€” indexing is done
         try:
             self._live_refresh_timer.stop()
         except Exception:
@@ -2148,7 +1061,7 @@ class SpotlightPanel(QWidget):
         # Update tray tooltip with streak
         self._update_tray_tooltip()
 
-    # ── Navigation (← → ↑ ↻) ────────────────────────────────
+    # â”€â”€ Navigation (â† â†’ â†‘ â†») â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _nav_back(self):
         if self._hist_idx > 0:
             self._hist_idx -= 1
@@ -2195,7 +1108,7 @@ class SpotlightPanel(QWidget):
         self._hist_idx = len(self._history) - 1
         self._update_nav_btns()
 
-    # ── Encyl Loading Animation ──────────────────────────────
+    # â”€â”€ Encyl Loading Animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _start_encyl_loading(self, msg: str = ""):
         self._encyl_phase = 0
         self._encyl_status.setText(msg or self._encyl_phases[0])
@@ -2215,7 +1128,7 @@ class SpotlightPanel(QWidget):
         self._encyl_loading.hide()
         self._encyl_pbar.setFixedWidth(80)
 
-    # ── search ───────────────────────────────────────────────
+    # â”€â”€ search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _on_text(self, t):
         if t.strip():
             self._deb.start()
@@ -2245,27 +1158,27 @@ class SpotlightPanel(QWidget):
         # Track search history for navigation
         self._push_history(q)
 
-        # ── "? question" → Ask AI mode ──
+        # â”€â”€ "? question" â†’ Ask AI mode â”€â”€
         if q.startswith("?"):
             question = q[1:].strip()
             if not question: return
-            self._start_encyl_loading("🧠 Encyl is searching your files...")
+            self._start_encyl_loading("ðŸ§  Encyl is searching your files...")
             self._ask_ai(question)
             return
 
-        # ── "@ query" → Activity search mode (Memory OS) ──
+        # â”€â”€ "@ query" â†’ Activity search mode (Memory OS) â”€â”€
         if q.startswith("@"):
             activity_query = q[1:].strip()
             if not activity_query: return
             self._do_activity_search(activity_query)
             return
 
-        # ── normal search (Phase 1: fast FAISS) ──
+        # â”€â”€ normal search (Phase 1: fast FAISS) â”€â”€
         self._dismiss_ai_panel()
         self._stop_encyl_loading()
         if self._idx_count == 0 and not self._indexing:
-            self.status.setText("Index empty — waiting for indexing…"); return
-        self.status.setText("Searching…")
+            self.status.setText("Index empty â€” waiting for indexingâ€¦"); return
+        self.status.setText("Searchingâ€¦")
         cfg = self._svc.get_config()
         self._st = SearchThread(self._svc, q, cfg.get("top_k", 20), use_llm=False)
         self._st.results.connect(self._on_results)
@@ -2285,12 +1198,12 @@ class SpotlightPanel(QWidget):
             from core.search.llm_reranker import get_reranker
             reranker = get_reranker()
             if not reranker.is_available():
-                return  # No Ollama — skip silently
+                return  # No Ollama â€” skip silently
         except Exception:
             return
 
         self._llm_active = True
-        self.status.setText(f"🧠 AI enhancing {result_count} results…")
+        self.status.setText(f"ðŸ§  AI enhancing {result_count} resultsâ€¦")
         cfg = self._svc.get_config()
         self._llm_st = SearchThread(self._svc, query, cfg.get("top_k", 20), use_llm=True)
         self._llm_st.results.connect(self._on_llm_results)
@@ -2303,17 +1216,17 @@ class SpotlightPanel(QWidget):
         self._on_llm_done()
         llm_count = sum(1 for h in hits if h.get("llm_score") is not None)
         if llm_count:
-            self.status.setText(f"✨ AI-enhanced • {len(hits)} results")
+            self.status.setText(f"âœ¨ AI-enhanced â€¢ {len(hits)} results")
         else:
             self.status.setText(f"{len(hits)} results")
 
     def _on_llm_done(self):
         self._llm_active = False
 
-    # ── AI BRAIN ─────────────────────────────────────────────
+    # â”€â”€ AI BRAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _ask_ai(self, question: str):
         """Search for relevant files, then ask Ollama about them."""
-        self.status.setText("🧠 Encyl is reading your files…")
+        self.status.setText("ðŸ§  Encyl is reading your filesâ€¦")
         # First, search for relevant files
         cfg = self._svc.get_config()
         try:
@@ -2330,7 +1243,7 @@ class SpotlightPanel(QWidget):
         self._all = hits
         self._filter()
 
-        self.status.setText("🧠 Encyl is thinking…")
+        self.status.setText("ðŸ§  Encyl is thinkingâ€¦")
         self._ait = AskAIThread(question, hits)
         self._ait.answer.connect(lambda ans: self._show_ai_answer(question, ans))
         self._ait.error.connect(self._handle_encyl_error)
@@ -2345,18 +1258,18 @@ class SpotlightPanel(QWidget):
         ai = get_ollama()
         ai.reset_availability()  # force re-check
         if not ai.is_available():
-            self.status.setText("⚠ Encyl offline — run 'ollama serve' in terminal")
-            self.ai_lbl.setText("🧠 ✗")
+            self.status.setText("âš  Encyl offline â€” run 'ollama serve' in terminal")
+            self.ai_lbl.setText("ðŸ§  âœ—")
             self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
             return
         # Update status to show it's connected
-        self.ai_lbl.setText("🧠 Encyl")
+        self.ai_lbl.setText("ðŸ§  Encyl")
         self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(52,199,89,0.7); background: transparent; margin-left: 8px;")
 
         path = self._rows[self._sel]._path
         name = Path(path).name
-        self.status.setText(f"🧠 Encyl is summarizing {name}…")
-        self._start_encyl_loading(f"🧠 Reading {name}...")
+        self.status.setText(f"ðŸ§  Encyl is summarizing {name}â€¦")
+        self._start_encyl_loading(f"ðŸ§  Reading {name}...")
         self._smt = SummarizeThread(path)
         self._smt.summary.connect(self._show_ai_summary)
         self._smt.error.connect(self._handle_encyl_error)
@@ -2380,11 +1293,11 @@ class SpotlightPanel(QWidget):
 
         # header
         hdr = QHBoxLayout()
-        hl = QLabel("🧠 Encyl Answer")
+        hl = QLabel("ðŸ§  Encyl Answer")
         hl.setStyleSheet(f"font-family: {FN}; font-size: 11px; font-weight: 700; color: #65B8FF; background: transparent;")
         hdr.addWidget(hl)
         hdr.addStretch()
-        x = QLabel("✕"); x.setFixedSize(22, 22)
+        x = QLabel("âœ•"); x.setFixedSize(22, 22)
         x.setAlignment(Qt.AlignmentFlag.AlignCenter)
         x.setCursor(Qt.CursorShape.PointingHandCursor)
         x.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); border-radius: 4px;")
@@ -2407,7 +1320,7 @@ class SpotlightPanel(QWidget):
 
         # insert at top of results layout
         self.rl.insertWidget(0, self._ai_panel)
-        self.status.setText(f'🧠 Encyl answered "{question[:40]}…"')
+        self.status.setText(f'ðŸ§  Encyl answered "{question[:40]}â€¦"')
 
     def _show_ai_summary(self, path: str, summary: str):
         """Display AI summary for a single file."""
@@ -2427,11 +1340,11 @@ class SpotlightPanel(QWidget):
         vb.setSpacing(8)
 
         hdr = QHBoxLayout()
-        hl = QLabel(f"🧠 Encyl Summary — {name}")
+        hl = QLabel(f"ðŸ§  Encyl Summary â€” {name}")
         hl.setStyleSheet(f"font-family: {FN}; font-size: 11px; font-weight: 700; color: #4ADE80; background: transparent;")
         hdr.addWidget(hl)
         hdr.addStretch()
-        x = QLabel("✕"); x.setFixedSize(22, 22)
+        x = QLabel("âœ•"); x.setFixedSize(22, 22)
         x.setAlignment(Qt.AlignmentFlag.AlignCenter)
         x.setCursor(Qt.CursorShape.PointingHandCursor)
         x.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); border-radius: 4px;")
@@ -2446,7 +1359,7 @@ class SpotlightPanel(QWidget):
         vb.addWidget(al)
 
         self.rl.insertWidget(0, self._ai_panel)
-        self.status.setText(f"🧠 Encyl summarized {name}")
+        self.status.setText(f"ðŸ§  Encyl summarized {name}")
 
     def _dismiss_ai_panel(self):
         if self._ai_panel:
@@ -2458,15 +1371,15 @@ class SpotlightPanel(QWidget):
         """User-friendly error messages for Encyl failures."""
         self._stop_encyl_loading()
         if "timed out" in error_msg.lower():
-            self.status.setText("⏳ Encyl is warming up — try again in a few seconds")
+            self.status.setText("â³ Encyl is warming up â€” try again in a few seconds")
         elif "not running" in error_msg.lower() or "connection" in error_msg.lower():
-            self.status.setText("⚠ Encyl offline — run 'ollama serve' in terminal")
-            self.ai_lbl.setText("🧠 ✗")
+            self.status.setText("âš  Encyl offline â€” run 'ollama serve' in terminal")
+            self.ai_lbl.setText("ðŸ§  âœ—")
             self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
         else:
-            self.status.setText(f"⚠ Encyl error: {error_msg[:60]}")
+            self.status.setText(f"âš  Encyl error: {error_msg[:60]}")
 
-    # ── file open ────────────────────────────────────────────
+    # â”€â”€ file open â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _open(self, path):
         if not path or not Path(path).exists():
             self.status.setText(f"Not found: {path}"); return
@@ -2489,7 +1402,7 @@ class SpotlightPanel(QWidget):
             QApplication.clipboard().setText(p)
             self.status.setText(f"Copied: {p}")
 
-    # ── keyboard nav ─────────────────────────────────────────
+    # â”€â”€ keyboard nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _move(self, d):
         if not self._rows: return
         old = self._sel
@@ -2498,13 +1411,13 @@ class SpotlightPanel(QWidget):
         self._sel = nw; self._rows[nw].set_selected(True)
         self.scroll.ensureWidgetVisible(self._rows[nw])
 
-    # ── show / hide / toggle ─────────────────────────────────
+    # â”€â”€ show / hide / toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def toggle_panel(self):
         if self._vis: self._hide()
         else:         self._show()
 
     def _resize_to_screen(self):
-        """Compute panel size from available screen — 90% height, capped at H."""
+        """Compute panel size from available screen â€” 90% height, capped at H."""
         scr = QGuiApplication.primaryScreen()
         if scr:
             avail = scr.availableGeometry()
@@ -2564,10 +1477,10 @@ class SpotlightPanel(QWidget):
         except: pass
 
 
-    # NOTE: No changeEvent override — panel stays until Shift+Space or Esc.
+    # NOTE: No changeEvent override â€” panel stays until Shift+Space or Esc.
     # This is intentional: the user explicitly requested persistent overlay.
 
-    # ── Tab intercept (Qt steals Tab before keyPressEvent) ─────
+    # â”€â”€ Tab intercept (Qt steals Tab before keyPressEvent) â”€â”€â”€â”€â”€
     def event(self, e):
         """Override event() to catch Tab key before Qt uses it for focus cycling."""
         from PyQt6.QtCore import QEvent
@@ -2595,8 +1508,8 @@ class SpotlightPanel(QWidget):
         except: pass
         self._tray.hide(); QApplication.quit()
 
-    # ── DWM Acrylic ──────────────────────────────────────────
-    # ── MemoryOS Mode (delegates to ui/memoryos_panel.py) ────────
+    # â”€â”€ DWM Acrylic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ MemoryOS Mode (delegates to ui/memoryos_panel.py) â”€â”€â”€â”€â”€â”€â”€â”€
     def _enter_memoryos_mode(self):
         """Switch to MemoryOS chat mode."""
         try:
