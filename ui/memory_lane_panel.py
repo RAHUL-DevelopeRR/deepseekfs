@@ -22,6 +22,7 @@ from PyQt6.QtGui import QFont, QColor
 import app.config as config
 from app.logger import logger
 from services.desktop_service import DesktopService
+from ui.icons import icon_pixmap, icon_label
 
 
 # ── colour tokens (match spotlight_panel) ────────────────────
@@ -106,7 +107,7 @@ class MemoryLanePanel(QFrame):
         header.addWidget(self._btn_today)
 
         # Close button
-        btn_close = QPushButton("✕")
+        btn_close = QPushButton("X")
         btn_close.setFixedSize(28, 28)
         btn_close.setStyleSheet(f"""
             QPushButton {{
@@ -193,9 +194,9 @@ class MemoryLanePanel(QFrame):
             summary.setSpacing(12)
 
             cards_data = [
-                ("📁", "Files Accessed", str(stats.get('files_accessed', 0))),
-                ("🔍", "Searches", str(stats.get('searches_performed', 0))),
-                ("📊", "Total Events", str(stats.get('total_events', 0))),
+                ("folder", "Files Accessed", str(stats.get('files_accessed', 0))),
+                ("search", "Searches", str(stats.get('searches_performed', 0))),
+                ("bar-chart-2", "Total Events", str(stats.get('total_events', 0))),
             ]
 
             for icon, label, value in cards_data:
@@ -310,7 +311,7 @@ class MemoryLanePanel(QFrame):
         layout.setSpacing(8)
 
         # Icon
-        icon = QLabel("🔍")
+        icon = QLabel("search")
         icon.setStyleSheet("font-size: 14px; background: transparent;")
         layout.addWidget(icon)
 
@@ -356,7 +357,7 @@ class MemoryLanePanel(QFrame):
         layout.setSpacing(8)
 
         # Icon
-        icon = QLabel("📄")
+        icon = icon_label("file", 16)
         icon.setStyleSheet("font-size: 14px; background: transparent;")
         layout.addWidget(icon)
 

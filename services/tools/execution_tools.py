@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,49 +12,108 @@ from app.logger import logger
 
 from .base import BaseTool, PermissionLevel, ToolParam, ToolResult
 
-BLOCKED_COMMANDS = {
+
+# ═══════════════════════════════════════════════════════════════
+# Command Classification — Hardened (v5.2)
+# ═══════════════════════════════════════════════════════════════
+#
+# Design principles:
+#   1. Every comparison is case-insensitive (Windows commands are
+#      case-insensitive, PowerShell cmdlets are case-insensitive).
+#   2. BLOCKED_BASES are checked as the *first token* only, so
+#      "format" blocks "format C:" but not "Format-Table".
+#   3. BLOCKED_PATTERNS are substring checks for multi-word phrases
+#      that are dangerous regardless of position.
+#   4. PowerShell aliases are included because an LLM may emit
+#      "ri -Recurse" instead of "Remove-Item -Recurse".
+#   5. SAFE_COMMANDS use startswith after lowering; they are the
+#      first token (or token + flag) of known read-only commands.
+
+# ── Dangerous base commands (checked as first token) ──────────
+# These are dangerous when they appear as the *command* itself.
+# We check the first whitespace-delimited token only, which
+# prevents false positives like "echo formatting disk" matching
+# "format".
+BLOCKED_BASES = {
+    # Disk / partition destruction
     "format",
     "diskpart",
-    "del /s",
-    "rmdir /s",
-    "rd /s",
-    "Remove-Item -Recurse -Force",
-    "rm -rf",
+    # Recursive file deletion — CMD
+    "del",          # "del /s" but "del" alone is still risky
+    "erase",        # CMD synonym for del
+    "rmdir",
+    "rd",
+    # Recursive file deletion — Unix / PowerShell
+    "rm",
+    "remove-item",
+    "ri",           # PowerShell alias for Remove-Item
+    # System control
     "shutdown",
-    "net user",
-    "reg delete",
+    "restart-computer",
+    "stop-computer",
+    # Account manipulation
+    "net",          # "net user", "net localgroup" — all risky
+    # Registry
+    "reg",
+    # PowerShell aliases for Remove-Item
+    "del",          # PowerShell aliases del → Remove-Item
 }
 
-SAFE_COMMANDS = {
-    "dir",
-    "ls",
-    "cd",
-    "pwd",
-    "echo",
-    "type",
-    "cat",
-    "more",
-    "where",
-    "which",
-    "whoami",
-    "hostname",
-    "ipconfig",
-    "Get-ChildItem",
-    "Get-Item",
-    "Get-Content",
-    "Get-Location",
-    "Get-Process",
-    "Get-Service",
-    "Test-Path",
-    "Measure-Object",
-    "python --version",
-    "pip --version",
-    "node --version",
-    "git status",
-    "git log",
-    "git branch",
-    "git diff",
-}
+# ── Dangerous multi-word patterns (substring check) ───────────
+# These catch compound invocations that are dangerous regardless
+# of where they appear in a pipeline.
+BLOCKED_PATTERNS = [
+    "rm -rf",
+    "rm -r",
+    "remove-item -recurse",
+    "ri -recurse",
+    "del /s",
+    "erase /s",
+    "rmdir /s",
+    "rd /s",
+    "format-volume",
+    "clear-disk",
+    "initialize-disk",
+    "reg delete",
+    "net user",
+    "net localgroup",
+    "stop-process -force",
+]
+
+# ── Pre-compile the patterns as lowered strings for fast lookup
+_BLOCKED_BASES_LOWER = {b.lower() for b in BLOCKED_BASES}
+_BLOCKED_PATTERNS_LOWER = [p.lower() for p in BLOCKED_PATTERNS]
+
+# ── Safe commands (checked as prefix of the full command) ─────
+# Read-only operations that can execute without user confirmation.
+SAFE_COMMANDS = [
+    # CMD / Unix basics
+    "dir", "ls", "cd", "pwd", "echo", "type", "cat", "more",
+    "where", "which", "whoami", "hostname", "ipconfig", "ifconfig",
+    "ping", "nslookup", "tracert",
+    # PowerShell read-only cmdlets
+    "get-childitem", "get-item", "get-content", "get-location",
+    "get-process", "get-service", "test-path", "measure-object",
+    "get-date", "get-host", "get-command", "get-alias",
+    "select-object", "where-object", "format-table", "format-list",
+    "out-string", "sort-object", "group-object",
+    # Version checks
+    "python --version", "python3 --version",
+    "pip --version", "pip3 --version",
+    "node --version", "npm --version", "npx --version",
+    "cargo --version", "rustc --version",
+    "java --version", "javac --version",
+    # Git read-only
+    "git status", "git log", "git branch", "git diff",
+    "git show", "git remote", "git tag",
+]
+
+# Pre-compute lowered for fast comparison
+_SAFE_COMMANDS_LOWER = [s.lower() for s in SAFE_COMMANDS]
+
+# Maximum output bytes returned to the caller to prevent memory
+# exhaustion from commands like "Get-ChildItem -Recurse C:\"
+_MAX_OUTPUT_CHARS = 16_000
 
 
 def _creation_flags() -> int:
@@ -71,13 +131,39 @@ class ShellTool(BaseTool):
     ]
 
     def _classify_command(self, command: str) -> PermissionLevel:
+        """Classify a command into SAFE / MODERATE / DANGEROUS.
+
+        Strategy (evaluated in order):
+          1. Check multi-word BLOCKED_PATTERNS as substring — catches
+             "rm -rf", "del /s" etc. even mid-pipeline.
+          2. Extract the first token and check BLOCKED_BASES — catches
+             "format C:" without blocking "Format-Table".
+          3. Check SAFE_COMMANDS as prefix — catches "git log --oneline".
+          4. Default to MODERATE (user confirmation required).
+        """
         cmd_lower = command.lower().strip()
-        for blocked in BLOCKED_COMMANDS:
-            if blocked.lower() in cmd_lower:
+
+        # ── 1. Dangerous substring patterns ──
+        for pattern in _BLOCKED_PATTERNS_LOWER:
+            if pattern in cmd_lower:
+                logger.warning(f"ShellTool: BLOCKED pattern '{pattern}' in: {command[:80]}")
                 return PermissionLevel.DANGEROUS
-        for safe in SAFE_COMMANDS:
-            if cmd_lower.startswith(safe.lower()):
+
+        # ── 2. Dangerous base command (first token) ──
+        # Split on whitespace, pipes, semicolons to get the actual command
+        # e.g. "echo hello | format C:" → check "echo" AND "format"
+        tokens = re.split(r'[|;&]', cmd_lower)
+        for segment in tokens:
+            first_token = segment.strip().split()[0] if segment.strip() else ""
+            if first_token in _BLOCKED_BASES_LOWER:
+                logger.warning(f"ShellTool: BLOCKED base '{first_token}' in: {command[:80]}")
+                return PermissionLevel.DANGEROUS
+
+        # ── 3. Safe prefix ──
+        for safe in _SAFE_COMMANDS_LOWER:
+            if cmd_lower.startswith(safe):
                 return PermissionLevel.SAFE
+
         return PermissionLevel.MODERATE
 
     def execute(self, command: str, cwd: str = "", timeout: int = 30, **kwargs) -> ToolResult:
@@ -106,7 +192,7 @@ class ShellTool(BaseTool):
                 output += result.stdout
             if result.stderr:
                 output += f"\n[stderr] {result.stderr}" if output else result.stderr
-            output = output.strip()[:5000]
+            output = output.strip()[:_MAX_OUTPUT_CHARS]
 
             if result.returncode == 0:
                 return ToolResult(True, output or "(command completed with no output)")

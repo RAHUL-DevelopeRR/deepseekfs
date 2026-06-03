@@ -18,19 +18,55 @@ from typing import Optional, Callable
 from app.logger import logger
 
 # ── Model Configuration ──────────────────────────────────────
-LLM_MODEL_REPO = "bartowski/HuggingFaceTB_SmolLM3-3B-GGUF"
-LLM_MODEL_FILE = "HuggingFaceTB_SmolLM3-3B-Q4_K_M.gguf"
-LLM_MODEL_SIZE_MB = 1800  # approximate
-
-CODER_MODEL_REPO = "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF"
-CODER_MODEL_FILE = "qwen2.5-coder-0.5b-instruct-q4_0.gguf"
-CODER_MODEL_SIZE_MB = 420  # approximate
+# Single unified model: Qwen 2.5 Coder 3B Instruct (Q5_K_M)
+# This replaces the old dual-model setup (SmolLM3-3B + Qwen 0.5B).
+# Qwen 2.5 Coder 3B handles chat, summarization, tool calling,
+# AND code generation — better at everything, ~2.1 GB on disk,
+# ~2.5 GB RAM.  Sweet spot for 8 GB machines.
+LLM_MODEL_REPO = "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
+LLM_MODEL_FILE = "qwen2.5-coder-3b-instruct-q5_k_m.gguf"
+LLM_MODEL_SIZE_MB = 2100  # approximate
 
 VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.22.zip"
 VOSK_MODEL_NAME = "vosk-model-small-en-us-0.22"
 VOSK_MODEL_SIZE_MB = 50
 
 ProgressCallback = Callable[[float, str], None]  # (progress_0_to_1, status_text)
+
+# ── Disk Space Guard ──────────────────────────────────────────
+# Downloads can be 420 MB to 1.8 GB.  Running out of disk mid-download
+# leaves a corrupt partial file that later causes a cryptic llama.cpp
+# crash.  Better to fail fast with a clear message.
+_DISK_SPACE_SAFETY_FACTOR = 1.5  # require 1.5× model size free
+
+
+def _check_disk_space(target_dir: Path, required_mb: int) -> None:
+    """Raise OSError if *target_dir* lacks enough free space.
+
+    Uses ``shutil.disk_usage`` which works on Windows, Linux, and macOS.
+    The safety factor accounts for temp files during extraction, partial
+    HuggingFace cache objects, and filesystem metadata overhead.
+    """
+    try:
+        usage = shutil.disk_usage(str(target_dir))
+        free_mb = usage.free / (1024 * 1024)
+        needed_mb = required_mb * _DISK_SPACE_SAFETY_FACTOR
+        if free_mb < needed_mb:
+            raise OSError(
+                f"Insufficient disk space on {target_dir.anchor}: "
+                f"{free_mb:.0f} MB free, need ~{needed_mb:.0f} MB "
+                f"({required_mb} MB model + safety margin). "
+                f"Free up space and try again."
+            )
+        logger.info(
+            f"ModelManager: disk check OK — {free_mb:.0f} MB free, "
+            f"need ~{needed_mb:.0f} MB"
+        )
+    except OSError:
+        raise  # re-raise our own OSError
+    except Exception as exc:
+        # Non-fatal: if disk_usage fails (e.g. unusual mount), log and proceed
+        logger.warning(f"ModelManager: disk space check skipped: {exc}")
 
 
 def get_models_dir() -> Path:
@@ -74,25 +110,17 @@ def get_llm_model_path() -> Optional[Path]:
     
     # Also check for any .gguf file (user may have renamed or used a different model)
     for f in models_dir.glob("*.gguf"):
-        if f.name == CODER_MODEL_FILE:
-            continue
         logger.info(f"ModelManager: Found alternative GGUF model: {f.name}")
         return f
     
     return None
 
 
+# Backward compatibility alias — the separate coder model no longer exists;
+# the unified Qwen 2.5 Coder 3B handles both roles.
 def get_coder_model_path() -> Optional[Path]:
-    """Find the Qwen Coder GGUF model file used for offline code/tool planning."""
-    app_local = Path(__file__).resolve().parent.parent / "storage" / "models" / CODER_MODEL_FILE
-    if app_local.is_file():
-        return app_local
-
-    model_path = get_models_dir() / CODER_MODEL_FILE
-    if model_path.is_file():
-        return model_path
-
-    return None
+    """Alias for get_llm_model_path() — unified model handles code too."""
+    return get_llm_model_path()
 
 
 def get_vosk_model_path() -> Optional[Path]:
@@ -113,8 +141,8 @@ def is_llm_model_available() -> bool:
 
 
 def is_coder_model_available() -> bool:
-    """Quick check if the offline Qwen Coder model is ready."""
-    return get_coder_model_path() is not None
+    """Alias — unified model serves both roles."""
+    return is_llm_model_available()
 
 
 def is_vosk_model_available() -> bool:
@@ -130,7 +158,11 @@ def download_llm_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
     """
     models_dir = get_models_dir()
     model_path = models_dir / LLM_MODEL_FILE
-    
+
+    # ── Disk space pre-check ──
+    _check_disk_space(models_dir, LLM_MODEL_SIZE_MB)
+
+
     if model_path.is_file():
         logger.info(f"ModelManager: LLM model already exists at {model_path}")
         if progress_cb:
@@ -183,56 +215,6 @@ def download_llm_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
         raise RuntimeError(f"Failed to download AI model: {e}")
 
 
-def download_coder_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
-    """Download the Qwen 2.5 Coder GGUF model from HuggingFace."""
-    models_dir = get_models_dir()
-    model_path = models_dir / CODER_MODEL_FILE
-
-    if model_path.is_file():
-        logger.info(f"ModelManager: Coder model already exists at {model_path}")
-        if progress_cb:
-            progress_cb(1.0, "Coder model ready")
-        return model_path
-
-    logger.info(f"ModelManager: Downloading {CODER_MODEL_FILE} from {CODER_MODEL_REPO}...")
-    if progress_cb:
-        progress_cb(0.0, f"Downloading {CODER_MODEL_FILE} (~{CODER_MODEL_SIZE_MB}MB)...")
-
-    try:
-        from huggingface_hub import hf_hub_download
-
-        downloaded_path = hf_hub_download(
-            repo_id=CODER_MODEL_REPO,
-            filename=CODER_MODEL_FILE,
-            local_dir=str(models_dir),
-        )
-
-        result_path = Path(downloaded_path)
-        if not result_path.is_file():
-            raise FileNotFoundError(f"Download completed but file not found at {result_path}")
-
-        if result_path != model_path and result_path.is_file():
-            shutil.move(str(result_path), str(model_path))
-            result_path = model_path
-
-        size_mb = result_path.stat().st_size / (1024 * 1024)
-        logger.info(f"ModelManager: Coder model downloaded ({size_mb:.0f}MB) -> {result_path}")
-        if progress_cb:
-            progress_cb(1.0, f"Coder model ready ({size_mb:.0f}MB)")
-
-        return result_path
-    except ImportError:
-        raise RuntimeError(
-            "huggingface_hub is required to download the coder model. "
-            "Install it with: pip install huggingface-hub"
-        )
-    except Exception as e:
-        logger.error(f"ModelManager: Coder model download failed: {e}")
-        if model_path.exists():
-            model_path.unlink()
-        raise RuntimeError(f"Failed to download coder model: {e}")
-
-
 def download_vosk_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
     """Download the Vosk speech recognition model.
     
@@ -240,6 +222,10 @@ def download_vosk_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
     """
     models_dir = get_models_dir()
     vosk_dir = models_dir / VOSK_MODEL_NAME
+
+    # ── Disk space pre-check ──
+    _check_disk_space(models_dir, VOSK_MODEL_SIZE_MB)
+
     
     if vosk_dir.is_dir() and (vosk_dir / "mfcc.conf").exists():
         logger.info(f"ModelManager: Vosk model already exists at {vosk_dir}")
@@ -301,12 +287,6 @@ def get_model_status() -> dict:
             "path": str(get_llm_model_path()) if is_llm_model_available() else None,
             "name": LLM_MODEL_FILE,
             "size_mb": LLM_MODEL_SIZE_MB,
-        },
-        "coder": {
-            "available": is_coder_model_available(),
-            "path": str(get_coder_model_path()) if is_coder_model_available() else None,
-            "name": CODER_MODEL_FILE,
-            "size_mb": CODER_MODEL_SIZE_MB,
         },
         "vosk": {
             "available": is_vosk_model_available(),

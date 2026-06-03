@@ -264,14 +264,20 @@ class TaskExecutor:
             return "[BLOCKED] Dangerous operation denied."
 
         if tool.permission == PermissionLevel.MODERATE:
-            if self.on_confirmation:
-                approved = self.on_confirmation(tool_name, raw_args)
-                if not approved:
-                    step.status = EventStatus.DENIED.value
-                    step.output = "User denied."
-                    if self.on_step:
-                        self.on_step(task, step)
-                    return "[DENIED] User declined this action."
+            if self.on_confirmation is None:
+                step.status = EventStatus.DENIED.value
+                step.output = "Confirmation required but unavailable."
+                if self.on_step:
+                    self.on_step(task, step)
+                return "[DENIED] Confirmation required but no confirmation handler is available."
+
+            approved = self.on_confirmation(tool_name, raw_args)
+            if not approved:
+                step.status = EventStatus.DENIED.value
+                step.output = "User denied."
+                if self.on_step:
+                    self.on_step(task, step)
+                return "[DENIED] User declined this action."
 
         # Validate arguments
         valid, cleaned_args, error = validate_tool_args(

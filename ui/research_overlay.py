@@ -110,14 +110,14 @@ class ResearchOverlay(QWidget):
         # ── Title bar ──
         title_bar = QHBoxLayout()
         
-        self._status_label = QLabel("🎙 Neuron Research")
+        self._status_label = QLabel("Neuron Research")
         self._status_label.setStyleSheet("color: #7c8aff; font-size: 12px; font-weight: bold;")
         title_bar.addWidget(self._status_label)
         
         title_bar.addStretch()
         
         # Stealth toggle button
-        self._stealth_btn = QPushButton("👁 Stealth")
+        self._stealth_btn = QPushButton("Stealth")
         self._stealth_btn.setFixedSize(80, 24)
         self._stealth_btn.setStyleSheet("""
             QPushButton {
@@ -241,7 +241,7 @@ class ResearchOverlay(QWidget):
         container_layout.addLayout(opacity_bar)
         
         # ── Disclaimer ──
-        disclaimer = QLabel("⚠ For research purposes only")
+        disclaimer = QLabel("For research purposes only")
         disclaimer.setStyleSheet("color: #555; font-size: 9px; font-style: italic;")
         disclaimer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         container_layout.addWidget(disclaimer)
@@ -276,7 +276,7 @@ class ResearchOverlay(QWidget):
             
             if self._stealth_enabled:
                 logger.info("ResearchOverlay: Stealth mode ENABLED — invisible to screen capture")
-                self._stealth_btn.setText("🛡 Stealth ON")
+                self._stealth_btn.setText("Stealth ON")
                 self._stealth_btn.setStyleSheet("""
                     QPushButton {
                         background-color: rgba(40, 120, 200, 200);
@@ -308,7 +308,7 @@ class ResearchOverlay(QWidget):
             self._stealth_enabled = False
             logger.info("ResearchOverlay: Stealth mode DISABLED")
             
-            self._stealth_btn.setText("👁 Stealth")
+            self._stealth_btn.setText("Stealth")
             self._stealth_btn.setStyleSheet("""
                 QPushButton {
                     background-color: rgba(60, 60, 80, 180);
@@ -345,7 +345,7 @@ class ResearchOverlay(QWidget):
             self._speech_service.on_partial = lambda t: self.speech_partial.emit(t)
             self._speech_service.on_final = lambda t: self.speech_detected.emit(t)
             self._speech_service.on_status = lambda s: self._status_label.setText(s)
-            self._speech_service.on_error = lambda e: self._speech_label.setText(f"❌ {e}")
+            self._speech_service.on_error = lambda e: self._speech_label.setText(f" {e}")
             
             if self._speech_service.start():
                 self._listening = True
@@ -373,7 +373,7 @@ class ResearchOverlay(QWidget):
         if self._speech_service:
             self._speech_service.stop()
         self._listening = False
-        self._status_label.setText("🎙 Neuron Research")
+        self._status_label.setText("Neuron Research")
         self._listen_btn.setText("▶ Listen")
         self._listen_btn.setStyleSheet("""
             QPushButton {
@@ -390,11 +390,11 @@ class ResearchOverlay(QWidget):
     
     def _on_speech_partial(self, text: str):
         """Update partial speech recognition."""
-        self._speech_label.setText(f'💬 "{text}..."')
+        self._speech_label.setText(f' "{text}..."')
     
     def _on_speech_final(self, text: str):
         """Handle complete sentence — send to LLM for answer."""
-        self._speech_label.setText(f'🗣 "{text}"')
+        self._speech_label.setText(f' "{text}"')
         self._answer_text.clear()
         self._current_answer = ""
         
@@ -436,7 +436,7 @@ class ResearchOverlay(QWidget):
     
     def _on_answer_complete(self, full_answer: str):
         """Handle completed answer."""
-        self._status_label.setText("🎙 Listening..." if self._listening else "🎙 Neuron Research")
+        self._status_label.setText("Listening..." if self._listening else "Neuron Research")
     
     # ── Opacity ───────────────────────────────────────────────
     

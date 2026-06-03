@@ -5,13 +5,14 @@ Direct in-process GGUF model inference.
 NO Ollama. NO server. NO network exposure.
 
 Architecture:
-- Uses llama-cpp-python to load SmolLM3-3B Q4_K_M GGUF
+- Uses llama-cpp-python to load Qwen 2.5 Coder 3B Instruct (Q5_K_M) GGUF
+- Single unified model for chat, summarization, tool calling, AND code
 - Model loaded once, kept in RAM for session lifetime
 - Thread-safe with lock (single inference at a time)
 - Lazy loading: model loaded on first inference call
 - SHA256 summary cache preserved from ollama_service.py
 
-Replaces: services/ollama_service.py's dependency on Ollama REST API
+Replaces: dual-model setup (SmolLM3-3B + Qwen 0.5B)
 """
 from __future__ import annotations
 
@@ -198,7 +199,7 @@ class LLMEngine:
                 flash_attn=True,
                 type_k=1,     # q8_0 KV cache (key)
                 type_v=1,     # q8_0 KV cache (value)
-                chat_format="chatml-function-calling",
+                chat_format="chatml",
             )
             
             # First attempt with 2048 context

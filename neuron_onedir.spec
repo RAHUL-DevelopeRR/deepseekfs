@@ -50,35 +50,86 @@ datas += copy_metadata('regex')
 datas = [(src, dst) for src, dst in datas if os.path.exists(src)]
 
 # ── Hidden imports ────────────────────────────────────────────
-# PyInstaller can't always find these through static analysis
+# PyInstaller can't always find these through static analysis.
+# Every module under app/, core/, services/, ui/ that is imported
+# at runtime MUST be listed here — especially those loaded via
+# lazy imports (llama_cpp, plugins) or dynamic registry patterns
+# (services.tools submodules).
 hiddenimports = [
-    # Our packages
+    # ── app ──
     'app', 'app.config', 'app.logger',
+
+    # ── core.indexing ──
     'core', 'core.indexing', 'core.indexing.index_builder',
+    'core.indexing.rust_discovery',
+
+    # ── core.embeddings ──
     'core.embeddings', 'core.embeddings.embedder',
+
+    # ── core.search ──
     'core.search', 'core.search.semantic_search',
     'core.search.query_parser', 'core.search.query_corrector',
-    'core.search.llm_reranker',
+    'core.search.llm_reranker', 'core.search.nlp_parser',
+
+    # ── core misc ──
     'core.ingestion', 'core.ingestion.file_parser',
     'core.time', 'core.time.scoring',
     'core.watcher', 'core.watcher.file_watcher',
     'core.activity', 'core.activity.activity_logger',
+
+    # ── services (top-level modules) ──
+    'services',
     'services.desktop_service', 'services.startup_indexer',
-    'services.ollama_service',
-    'ui.spotlight_panel', 'ui.memory_lane_panel', 'ui.icons',
-    # faiss
+    'services.ollama_service', 'services.llm_engine',
+    'services.memory_os', 'services.speech_service',
+    'services.model_manager', 'services.coder_engine',
+    'services.jinja2_patches', 'services.agent_context',
+
+    # ── services.agent ──
+    'services.agent', 'services.agent.executor',
+    'services.agent.queue', 'services.agent.task',
+
+    # ── services.tools (split from monolith in v5.2) ──
+    'services.tools', 'services.tools.base', 'services.tools.common',
+    'services.tools.file_tools', 'services.tools.folder_tools',
+    'services.tools.execution_tools', 'services.tools.search_tools',
+    'services.tools.registry',
+
+    # ── services sub-packages ──
+    'services.cache',
+    'services.events', 'services.events.store', 'services.events.types',
+    'services.feedback', 'services.feedback.store', 'services.feedback.types',
+    'services.intent',
+    'services.plugins', 'services.plugins.loader', 'services.plugins.protocol',
+    'services.profiles', 'services.profiles.manager', 'services.profiles.models',
+    'services.validation', 'services.validation.schema',
+    'services.watch_rules', 'services.watch_rules.hooks', 'services.watch_rules.rules',
+
+    # ── ui ──
+    'ui', 'ui.spotlight_panel', 'ui.spotlight_components',
+    'ui.memory_lane_panel', 'ui.memoryos_panel',
+    'ui.activity_panel', 'ui.research_overlay',
+    'ui.main_window', 'ui.icons',
+
+    # ── llama.cpp (lazy-loaded by CoderEngine + LLMEngine) ──
+    'llama_cpp',
+
+    # ── faiss ──
     'faiss',
-    # file parsers
+
+    # ── file parsers ──
     'fitz',            # PyMuPDF
     'docx',            # python-docx
     'pptx',            # python-pptx
     'openpyxl',
     'lxml', 'lxml.etree',
     'pdfminer', 'pdfminer.high_level',
-    # ONNX Runtime (replaces torch for neural embeddings)
+
+    # ── ONNX Runtime (neural embeddings) ──
     'onnxruntime',
     'tokenizers',
-    # other deps
+
+    # ── other deps ──
     'watchdog', 'watchdog.observers', 'watchdog.events',
     'dateparser',
     'numpy',

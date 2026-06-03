@@ -1,4 +1,4 @@
-﻿"""
+"""
 Neuron â€” AI File Intelligence Panel (PyQt6)  Â·  Windows 11 Explorer Edition
 ============================================================================
 Windows 11 dark theme explorer with Encyl AI summarization.
@@ -40,6 +40,7 @@ from services.ollama_service import get_ollama
 from ui.memory_lane_panel import MemoryLanePanel
 from ui.memoryos_panel import MemoryOSPanel
 from ui.activity_panel import ActivityPanel
+from ui.icons import icon_pixmap, icon_label
 
 # â”€â”€ resolve assets path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"

@@ -104,6 +104,7 @@ from services.desktop_service import DesktopService
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap, QBitmap, QRegion
+from ui.icon_helpers import make_circular_splash, make_white_bg_icon
 
 
 # ── Hotkey constants ──────────────────────────────────────────
@@ -114,62 +115,6 @@ MOD_CTRL  = 0x0002
 MOD_CTRL_SHIFT = MOD_CTRL | MOD_SHIFT
 VK_SPACE  = 0x20
 VK_R      = 0x52
-
-
-# ─────────────────────────────────────────────────────────────
-# Helpers used by ui/spotlight_panel.py
-# ─────────────────────────────────────────────────────────────
-def make_circular_splash(path: str, size: int = 280) -> QPixmap:
-    """Returns a perfectly circular QPixmap with transparent background (no white box)."""
-    # Create transparent canvas
-    result = QPixmap(size, size)
-    result.fill(Qt.GlobalColor.transparent)
-
-    overlay = QPixmap(path)
-    if overlay.isNull():
-        # Fallback: solid blue circle
-        p = QPainter(result)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor("#0078D4"))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(0, 0, size, size)
-        p.end()
-        return result
-
-    # Scale image to square
-    scaled = overlay.scaled(size, size,
-        Qt.AspectRatioMode.IgnoreAspectRatio,
-        Qt.TransformationMode.SmoothTransformation)
-
-    # Paint with circular clip
-    painter = QPainter(result)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    path = QPainterPath()
-    path.addEllipse(0, 0, size, size)
-    painter.setClipPath(path)
-    painter.drawPixmap(0, 0, scaled)
-    painter.end()
-    return result
-
-def make_white_bg_icon(path: str, size: int = 64) -> QPixmap:
-    """Returns a QPixmap with neuron_circular.png on a white circle background.
-    Used by the system tray to ensure visibility against dark taskbars."""
-    base = QPixmap(size, size)
-    base.fill(QColor("white"))
-    overlay = QPixmap(path)
-    if overlay.isNull():
-        return base
-    overlay = overlay.scaled(size, size,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation)
-    painter = QPainter(base)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    clip = QPainterPath()
-    clip.addEllipse(0, 0, size, size)
-    painter.setClipPath(clip)
-    painter.drawPixmap(0, 0, overlay)
-    painter.end()
-    return base
 
 
 # ─────────────────────────────────────────────────────────────

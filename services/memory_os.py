@@ -90,10 +90,11 @@ class MemoryOSAgent:
     def _get_executor(self) -> TaskExecutor:
         if self._executor is None:
             self._executor = TaskExecutor(engine=self._get_engine())
-            # Wire UI callbacks through to executor
-            self._executor.on_step = self.on_step
-            self._executor.on_thinking = self.on_thinking
-            self._executor.on_confirmation = self.on_confirmation
+        # Wire UI callbacks through on every access; UI callbacks can be attached
+        # after the singleton executor has already been created.
+        self._executor.on_step = self.on_step
+        self._executor.on_thinking = self.on_thinking
+        self._executor.on_confirmation = self.on_confirmation
         return self._executor
 
     def clear_history(self):

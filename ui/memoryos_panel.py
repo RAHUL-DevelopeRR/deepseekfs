@@ -19,7 +19,7 @@ import threading
 
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QWidget,
-    QTextEdit, QLineEdit, QPushButton, QLabel,
+    QTextEdit, QLineEdit, QPushButton, QLabel, QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -54,6 +54,7 @@ class MemoryOSPanel(QFrame):
     _sig_error = pyqtSignal(str)
     _sig_token = pyqtSignal(str)          # streaming token
     _sig_stream_end = pyqtSignal()        # streaming complete
+    _sig_confirm = pyqtSignal(str, object, object)  # tool name, args, request dict
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +74,7 @@ class MemoryOSPanel(QFrame):
         self._sig_error.connect(self._on_error)
         self._sig_token.connect(self._on_token)
         self._sig_stream_end.connect(self._on_stream_end)
+        self._sig_confirm.connect(self._on_confirm_request)
 
         self._build_ui()
 
@@ -282,7 +284,7 @@ class MemoryOSPanel(QFrame):
         try:
             from services.memory_os import get_memory_os
             agent = get_memory_os()
-            agent.on_confirmation_needed = lambda name, desc, args: True
+            agent.on_confirmation = self._confirm_tool_action
 
             # Wire streaming callback → emits signal per token
             self._stream_mode = mode
@@ -325,6 +327,34 @@ class MemoryOSPanel(QFrame):
                 pass
             self._sig_error.emit(str(e))
 
+    def _confirm_tool_action(self, tool_name: str, args: dict) -> bool:
+        request = {"event": threading.Event(), "approved": False}
+        self._sig_confirm.emit(tool_name, args, request)
+        if not request["event"].wait(timeout=300):
+            logger.warning(f"MemoryOS confirmation timed out for {tool_name}")
+            return False
+        return bool(request["approved"])
+
+    def _on_confirm_request(self, tool_name: str, args: dict, request: dict):
+        try:
+            details = "\n".join(f"{key}: {value}" for key, value in args.items())
+            message = (
+                f"Neuron wants to run a tool action.\n\n"
+                f"Tool: {tool_name}\n"
+                f"Arguments:\n{details or '(none)'}\n\n"
+                "Allow this action?"
+            )
+            reply = QMessageBox.question(
+                self,
+                "Confirm Neuron Action",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            request["approved"] = reply == QMessageBox.StandardButton.Yes
+        finally:
+            request["event"].set()
+
     def _on_token(self, token: str):
         """Handle a single streaming token (main thread, signal-safe)."""
         if not self._streaming:
@@ -362,7 +392,7 @@ class MemoryOSPanel(QFrame):
         self._input.setEnabled(True)
         self._input.setFocus()
         self._set_status("Ready")
-        self._show_feedback_bar()  # Show 👍/👎 after stream ends
+        self._show_feedback_bar()  # Show / after stream ends
 
     def _on_response(self, safe_html: str, mode: str):
         color, _ = MODE_COLORS.get(mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
@@ -378,7 +408,7 @@ class MemoryOSPanel(QFrame):
         self._input.setEnabled(True)
         self._input.setFocus()
         self._set_status("Ready")
-        self._show_feedback_bar()  # Show 👍/👎 after response
+        self._show_feedback_bar()  # Show / after response
 
     def _on_error(self, error_msg: str):
         self._append_html(
@@ -445,7 +475,7 @@ class MemoryOSPanel(QFrame):
         )
         bar_layout.addWidget(lbl)
 
-        self._btn_thumbs_up = QPushButton("👍")
+        self._btn_thumbs_up = QPushButton("+")
         self._btn_thumbs_up.setFixedSize(28, 24)
         self._btn_thumbs_up.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_thumbs_up.setStyleSheet(f"""
@@ -463,7 +493,7 @@ class MemoryOSPanel(QFrame):
         self._btn_thumbs_up.clicked.connect(lambda: self._record_feedback(positive=True))
         bar_layout.addWidget(self._btn_thumbs_up)
 
-        self._btn_thumbs_down = QPushButton("👎")
+        self._btn_thumbs_down = QPushButton("-")
         self._btn_thumbs_down.setFixedSize(28, 24)
         self._btn_thumbs_down.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_thumbs_down.setStyleSheet(f"""
@@ -523,7 +553,7 @@ class MemoryOSPanel(QFrame):
             )
 
             # Visual confirmation
-            emoji = "👍" if positive else "👎"
+            emoji = "+" if positive else "-"
             self._feedback_label.setText(f"  {emoji} Feedback recorded")
             self._btn_thumbs_up.setEnabled(False)
             self._btn_thumbs_down.setEnabled(False)
