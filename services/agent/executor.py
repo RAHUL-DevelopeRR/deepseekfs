@@ -18,13 +18,15 @@ Design:
 from __future__ import annotations
 
 import json
+import re
 import time
+from pathlib import Path
 from typing import Optional, Callable, Dict, List, Any
 
 from app.logger import logger
 from services.agent.task import Task, TaskStep, TaskStatus
 from services.events import AgentEvent, EventType, EventStatus, get_event_store
-from services.validation import validate_tool_args
+from services.validation import validate_tool_args, parse_arguments
 from services.tools import (
     ALL_TOOLS, get_tool, execute_tool, get_tool_schemas,
     ToolResult, PermissionLevel,
@@ -103,13 +105,14 @@ class TaskExecutor:
             score = sum(1 for kw in kw_set if kw in keywords)
             scored.append((score, schema))
 
-        # Sort by relevance, take top 5
+        # Sort by relevance, keep only tools that actually matched. Including
+        # zero-score write/delete tools confuses small local models.
         scored.sort(key=lambda x: x[0], reverse=True)
-        selected = [s for _, s in scored[:5]]
+        selected = [s for score, s in scored if score > 0][:5]
 
-        # Always include at least folder_list and file_read (most common)
+        # Always include safe read/list fallbacks for navigation context.
         names = {s.get("function", {}).get("name") for s in selected}
-        for fallback in ["folder_list", "file_read"]:
+        for fallback in ["folder_list", "file_read", "glob"]:
             if fallback not in names:
                 for s in all_schemas:
                     if s.get("function", {}).get("name") == fallback:
@@ -165,6 +168,8 @@ class TaskExecutor:
 
         from services.agent_context import build_action_context
         conversation: List[Dict] = []
+        seen_tool_calls: set[str] = set()
+        last_tool_result = ""
 
         for turn in range(MAX_TURNS):
             if self.on_thinking:
@@ -206,13 +211,26 @@ class TaskExecutor:
                 try:
                     tool_args = json.loads(fn.get("arguments", "{}"))
                 except json.JSONDecodeError:
-                    tool_args = {}
+                    tool_args = parse_arguments(fn.get("arguments", ""))
 
                 if tool_name and tool_name in ALL_TOOLS:
+                    signature = json.dumps(
+                        {"tool": tool_name, "args": tool_args},
+                        sort_keys=True,
+                        default=str,
+                    )
+                    if signature in seen_tool_calls:
+                        return (
+                            f"Stopped after repeated {tool_name} request. "
+                            f"Last result:\n{last_tool_result}"
+                        ).strip()
+                    seen_tool_calls.add(signature)
+
                     # Execute tool with validation + events
                     step_result = self._execute_tool_step(
                         task, tool_name, tool_args
                     )
+                    last_tool_result = step_result
 
                     # Add observation to conversation
                     conversation.append({
@@ -225,12 +243,63 @@ class TaskExecutor:
                     })
                     continue  # Next turn
 
+            fallback_call = self._extract_json_tool_call(content)
+            if fallback_call:
+                tool_name, tool_args = fallback_call
+                signature = json.dumps(
+                    {"tool": tool_name, "args": tool_args},
+                    sort_keys=True,
+                    default=str,
+                )
+                if signature in seen_tool_calls:
+                    return (
+                        f"Stopped after repeated {tool_name} request. "
+                        f"Last result:\n{last_tool_result}"
+                    ).strip()
+                seen_tool_calls.add(signature)
+                step_result = self._execute_tool_step(task, tool_name, tool_args)
+                last_tool_result = step_result
+                conversation.append({
+                    "role": "assistant",
+                    "content": content or f"Calling {tool_name}...",
+                })
+                conversation.append({
+                    "role": "user",
+                    "content": f"[Tool Result: {tool_name}]\n{step_result}",
+                })
+                continue
+
             # No tool call — this is the final answer
             if content and content.strip():
                 return content.strip()
 
         # Max turns exhausted
         return "Completed the available steps. Please check the results."
+
+    def _extract_json_tool_call(self, content: str) -> Optional[tuple[str, Dict]]:
+        """Parse Qwen-style JSON tool calls emitted as plain text."""
+        if not content or not content.strip():
+            return None
+
+        text = content.strip()
+        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+        candidates = [fence.group(1)] if fence else []
+        if text.startswith("{") and text.endswith("}"):
+            candidates.append(text)
+
+        for raw in candidates:
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            tool_name = payload.get("tool") or payload.get("name")
+            args = payload.get("args") or payload.get("arguments") or {}
+            if isinstance(args, str):
+                args = parse_arguments(args)
+            if tool_name in ALL_TOOLS and isinstance(args, dict):
+                return tool_name, args
+        return None
 
     def _execute_tool_step(
         self, task: Task, tool_name: str, raw_args: Dict
@@ -255,25 +324,8 @@ class TaskExecutor:
             tool_name, json.dumps(raw_args)[:300], task.task_id
         ))
 
-        # Permission check
-        if tool.permission == PermissionLevel.DANGEROUS:
-            step.status = EventStatus.BLOCKED.value
-            step.output = "BLOCKED: Dangerous operation denied."
-            if self.on_step:
-                self.on_step(task, step)
-            return "[BLOCKED] Dangerous operation denied."
-
-        if tool.permission == PermissionLevel.MODERATE:
-            if self.on_confirmation:
-                approved = self.on_confirmation(tool_name, raw_args)
-                if not approved:
-                    step.status = EventStatus.DENIED.value
-                    step.output = "User denied."
-                    if self.on_step:
-                        self.on_step(task, step)
-                    return "[DENIED] User declined this action."
-
-        # Validate arguments
+        # Validate arguments before permission checks so tools with dynamic risk
+        # classification, such as shell, can inspect cleaned arguments.
         valid, cleaned_args, error = validate_tool_args(
             tool_name, tool.parameters, raw_args
         )
@@ -283,9 +335,44 @@ class TaskExecutor:
             if self.on_step:
                 self.on_step(task, step)
             store.insert(AgentEvent.tool_finished(
-                tool_name, False, error, 0, task.task_id
+                tool_name, False, error, 0, task.task_id,
             ))
             return f"[VALIDATION ERROR] {error}"
+
+        if tool_name == "file_read" and Path(str(cleaned_args.get("path", ""))).is_dir():
+            tool_name = "folder_list"
+            tool = get_tool(tool_name)
+            cleaned_args = {"path": raw_args.get("path"), "max_depth": 2, "max_items": 100}
+            step.action = tool_name
+            step.description = "Calling folder_list"
+
+        permission = tool.permission
+        if tool_name == "shell" and hasattr(tool, "_classify_command"):
+            permission = tool._classify_command(cleaned_args.get("command", ""))
+
+        # Permission check
+        if permission == PermissionLevel.DANGEROUS:
+            step.status = EventStatus.BLOCKED.value
+            step.output = "BLOCKED: Dangerous operation denied."
+            if self.on_step:
+                self.on_step(task, step)
+            return "[BLOCKED] Dangerous operation denied."
+
+        if permission == PermissionLevel.MODERATE:
+            if self.on_confirmation is None:
+                step.status = EventStatus.DENIED.value
+                step.output = "Confirmation required but unavailable."
+                if self.on_step:
+                    self.on_step(task, step)
+                return "[DENIED] Confirmation required but no confirmation handler is available."
+
+            approved = self.on_confirmation(tool_name, raw_args)
+            if not approved:
+                step.status = EventStatus.DENIED.value
+                step.output = "User denied."
+                if self.on_step:
+                    self.on_step(task, step)
+                return "[DENIED] User declined this action."
 
         # Execute
         t0 = time.time()

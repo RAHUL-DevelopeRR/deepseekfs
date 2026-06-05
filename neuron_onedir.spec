@@ -15,7 +15,7 @@ Output:
 import os
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata
 
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("USE_FLAX", "0")
@@ -40,7 +40,17 @@ datas = [
     ('storage/models/onnx', 'storage/models/onnx'),
     # Docs
     ('docs', 'docs'),
+    # Headless command surface
+    ('neufs.py', '.'),
+    ('neufs.cmd', '.'),
 ]
+
+# Bundle any local GGUF model files so the desktop app can run offline.
+for gguf in Path('storage/models').glob('*.gguf'):
+    datas.append((str(gguf), 'storage/models'))
+
+# llama-cpp-python loads DLLs from llama_cpp/lib at runtime.
+binaries = collect_dynamic_libs('llama_cpp')
 
 # Explicitly copy metadata PyInstaller misses for runtime dependencies.
 datas += copy_metadata('tqdm')
@@ -50,37 +60,92 @@ datas += copy_metadata('regex')
 datas = [(src, dst) for src, dst in datas if os.path.exists(src)]
 
 # ── Hidden imports ────────────────────────────────────────────
-# PyInstaller can't always find these through static analysis
+# PyInstaller can't always find these through static analysis.
+# Every module under app/, core/, services/, ui/ that is imported
+# at runtime MUST be listed here — especially those loaded via
+# lazy imports (llama_cpp, plugins) or dynamic registry patterns
+# (services.tools submodules).
 hiddenimports = [
-    # Our packages
+    # ── app ──
     'app', 'app.config', 'app.logger',
+
+    # ── core.indexing ──
     'core', 'core.indexing', 'core.indexing.index_builder',
+    'core.indexing.rust_discovery',
+
+    # ── core.embeddings ──
     'core.embeddings', 'core.embeddings.embedder',
+
+    # ── core.search ──
     'core.search', 'core.search.semantic_search',
     'core.search.query_parser', 'core.search.query_corrector',
-    'core.search.llm_reranker',
+    'core.search.llm_reranker', 'core.search.nlp_parser',
+
+    # ── core misc ──
     'core.ingestion', 'core.ingestion.file_parser',
     'core.time', 'core.time.scoring',
     'core.watcher', 'core.watcher.file_watcher',
     'core.activity', 'core.activity.activity_logger',
+
+    # ── services (top-level modules) ──
+    'services',
     'services.desktop_service', 'services.startup_indexer',
-    'services.ollama_service',
-    'ui.spotlight_panel', 'ui.memory_lane_panel', 'ui.icons',
-    # faiss
+    'services.ollama_service', 'services.llm_engine',
+    'services.memory_os', 'services.speech_service',
+    'services.model_manager', 'services.coder_engine',
+    'services.internet_search', 'services.stability',
+    'services.jinja2_patches', 'services.agent_context',
+
+    # ── services.agent ──
+    'services.agent', 'services.agent.executor',
+    'services.agent.queue', 'services.agent.task',
+
+    # ── services.tools (split from monolith in v5.2) ──
+    'services.tools', 'services.tools.base', 'services.tools.common',
+    'services.tools.file_tools', 'services.tools.folder_tools',
+    'services.tools.execution_tools', 'services.tools.search_tools',
+    'services.tools.registry',
+
+    # ── services sub-packages ──
+    'services.cache',
+    'services.events', 'services.events.store', 'services.events.types',
+    'services.feedback', 'services.feedback.store', 'services.feedback.types',
+    'services.intent',
+    'services.plugins', 'services.plugins.loader', 'services.plugins.protocol',
+    'services.profiles', 'services.profiles.manager', 'services.profiles.models',
+    'services.validation', 'services.validation.schema',
+    'services.watch_rules', 'services.watch_rules.hooks', 'services.watch_rules.rules',
+
+    # ── ui ──
+    'ui', 'ui.spotlight_panel', 'ui.spotlight_components',
+    'ui.memory_lane_panel', 'ui.memoryos_panel',
+    'ui.activity_panel', 'ui.research_overlay',
+    'ui.main_window', 'ui.icons', 'ui.icon_helpers',
+    'ui.hotkeys',
+
+    # ── llama.cpp (lazy-loaded by CoderEngine + LLMEngine) ──
+    'llama_cpp',
+
+    # ── faiss ──
     'faiss',
-    # file parsers
+
+    # ── file parsers ──
     'fitz',            # PyMuPDF
     'docx',            # python-docx
     'pptx',            # python-pptx
     'openpyxl',
     'lxml', 'lxml.etree',
     'pdfminer', 'pdfminer.high_level',
-    # ONNX Runtime (replaces torch for neural embeddings)
+
+    # ── ONNX Runtime (neural embeddings) ──
     'onnxruntime',
     'tokenizers',
-    # other deps
+
+    # ── other deps ──
     'watchdog', 'watchdog.observers', 'watchdog.events',
     'dateparser',
+    'markdown_it',
+    'mdurl',
     'numpy',
     'tqdm',
     'regex',
@@ -99,15 +164,19 @@ excludes = [
     'tkinter', 'unittest', 'test', 'tests',
     'matplotlib', 'IPython', 'notebook', 'jupyter',
     'pytest', 'py', 'sphinx', 'docutils',
+    'django', 'asgiref', 'channels', 'daphne',
+    'websockets', 'uvicorn', 'starlette', 'fastapi',
+    'anyio', 'trio', 'sniffio', 'httpcore', 'h11',
+    'psutil', 'clr', 'pythonnet', 'clr_loader',
+    'cryptography', 'cffi', 'pycparser',
     'pandas', 'pyarrow', 'numba', 'llvmlite', 'sqlalchemy',
     'sklearn', 'scipy',
-    'onnxruntime',
     'qtpy', 'PyQt5', 'PySide6', 'PySide2',
     'tensorflow', 'tensorflow_hub', 'tf_keras', 'keras', 'jax', 'flax',
     'tensorboard', 'torch.cuda', 'torch.distributed',
     'torch.testing', 'torch.utils.tensorboard',
     'torch', 'torchvision', 'torchaudio',
-    'transformers', 'sentence_transformers', 'tokenizers',
+    'transformers', 'sentence_transformers',
     'huggingface_hub', 'safetensors',
     'torch._dynamo', 'torch._inductor', 'torch._export',
     'torch._functorch', 'torch._higher_order_ops', 'torch._subclasses',
@@ -129,7 +198,7 @@ excludes = [
 a = Analysis(
     ['run_desktop.py'],
     pathex=[PROJECT],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -139,7 +208,7 @@ a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=False,
+    noarchive=True,
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)

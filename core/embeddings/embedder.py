@@ -20,6 +20,10 @@ from app.logger import logger
 
 # Suppress unnecessary warnings on Windows.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("USE_FLAX", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
 
 
 def _find_onnx_model() -> Path | None:

@@ -29,3 +29,6 @@ Desktop.ini
 
 # Logs
 *.log
+
+# Rust
+**/target/

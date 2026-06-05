@@ -47,7 +47,7 @@ class FeedbackEntry:
     intent: Optional[str] = None
     confidence: Optional[float] = None
     correction: Optional[str] = None
-    model: str = "SmolLM3-3B"
+    model: str = "Qwen-2.5-Coder-3B"
 
     def to_dict(self) -> dict:
         """Serialize to dictionary for SQLite insertion."""

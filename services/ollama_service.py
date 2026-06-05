@@ -13,9 +13,6 @@ Migration:
 """
 from __future__ import annotations
 
-import os
-import hashlib
-import threading
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -123,25 +120,21 @@ class OllamaService:
 
     # ── Pre-warm (load model into RAM) ───────────────────────
     def pre_warm(self):
-        """Load model into RAM in a background thread.
+        """Compatibility hook for old callers.
         
         Old behavior: sent tiny prompt to Ollama to load model
-        New behavior: calls LLMEngine.load_model() directly
+        New behavior: the desktop entry point preloads the local GGUF before
+        PyQt starts. Loading llama.cpp later from a background UI-era thread is
+        intentionally disabled because it has produced native access violations.
         """
-        def _warm():
-            try:
-                engine = self._get_engine()
-                logger.info("Encyl: Loading AI model into RAM...")
-                t0 = __import__('time').time()
-                engine.load_model()
-                elapsed = __import__('time').time() - t0
-                if engine.is_loaded:
-                    logger.info(f"Encyl: Model loaded in {elapsed:.1f}s")
-                else:
-                    logger.info(f"Encyl: Model load failed: {engine.load_error}")
-            except Exception as e:
-                logger.info(f"Encyl: Pre-warm failed: {e}")
-        threading.Thread(target=_warm, daemon=True).start()
+        try:
+            engine = self._get_engine()
+            if engine.is_loaded:
+                logger.info("Encyl: model already loaded by startup preload")
+            else:
+                logger.info("Encyl: background pre-warm disabled; model loads via startup or first use")
+        except Exception as e:
+            logger.info(f"Encyl: Pre-warm status check failed: {e}")
 
     # ── Public API (unchanged signatures) ─────────────────────
 

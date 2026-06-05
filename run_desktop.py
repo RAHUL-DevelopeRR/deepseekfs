@@ -67,6 +67,9 @@ sys.path.insert(0, str(ROOT))
 # ── Core imports (must happen BEFORE PyQt6) ───────────────────
 import app.config as config
 from app.logger import logger
+from services.stability import UiHangWatchdog, install_crash_diagnostics
+
+install_crash_diagnostics()
 
 # ═══════════════════════════════════════════════════════════════
 # CRITICAL: Load llama.cpp BEFORE PyQt6
@@ -74,12 +77,16 @@ from app.logger import logger
 # "access violation reading 0x0000000000000000" if loaded after.
 # ═══════════════════════════════════════════════════════════════
 def _preload_llm():
-    """Pre-load LLM into RAM before PyQt6 poisons the DLL space."""
+    """Pre-load an existing local LLM before PyQt6, without downloading."""
     try:
+        from services.model_manager import get_llm_model_path
+        if get_llm_model_path() is None:
+            logger.info("Encyl: AI model not found locally; startup continues without download.")
+            return
         logger.info("Encyl: Pre-loading AI model (before PyQt6)...")
         from services.llm_engine import get_llm_engine
         engine = get_llm_engine()
-        ok = engine.load_model()
+        ok = engine.load_model(allow_download=False)
         if ok:
             logger.info(f"Encyl: AI model ready (ctx={engine._model.n_ctx()})")
         else:
@@ -104,78 +111,19 @@ from services.desktop_service import DesktopService
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap, QBitmap, QRegion
+from ui.hotkeys import GlobalHotkeyManager, OVERLAY_PRIMARY, PANEL_HOTKEYS
+from ui.icon_helpers import make_circular_splash, make_white_bg_icon
 
 
 # ── Hotkey constants ──────────────────────────────────────────
-HOTKEY_ID = 0xBFFF
-OVERLAY_HOTKEY_ID = 0xBFFE  # Ctrl+Shift+R for Research Overlay
-MOD_SHIFT = 0x0004
-MOD_CTRL  = 0x0002
-MOD_CTRL_SHIFT = MOD_CTRL | MOD_SHIFT
-VK_SPACE  = 0x20
-VK_R      = 0x52
-
-
-# ─────────────────────────────────────────────────────────────
-# Helpers used by ui/spotlight_panel.py
-# ─────────────────────────────────────────────────────────────
-def make_circular_splash(path: str, size: int = 280) -> QPixmap:
-    """Returns a perfectly circular QPixmap with transparent background (no white box)."""
-    # Create transparent canvas
-    result = QPixmap(size, size)
-    result.fill(Qt.GlobalColor.transparent)
-
-    overlay = QPixmap(path)
-    if overlay.isNull():
-        # Fallback: solid blue circle
-        p = QPainter(result)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor("#0078D4"))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(0, 0, size, size)
-        p.end()
-        return result
-
-    # Scale image to square
-    scaled = overlay.scaled(size, size,
-        Qt.AspectRatioMode.IgnoreAspectRatio,
-        Qt.TransformationMode.SmoothTransformation)
-
-    # Paint with circular clip
-    painter = QPainter(result)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    path = QPainterPath()
-    path.addEllipse(0, 0, size, size)
-    painter.setClipPath(path)
-    painter.drawPixmap(0, 0, scaled)
-    painter.end()
-    return result
-
-def make_white_bg_icon(path: str, size: int = 64) -> QPixmap:
-    """Returns a QPixmap with neuron_circular.png on a white circle background.
-    Used by the system tray to ensure visibility against dark taskbars."""
-    base = QPixmap(size, size)
-    base.fill(QColor("white"))
-    overlay = QPixmap(path)
-    if overlay.isNull():
-        return base
-    overlay = overlay.scaled(size, size,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation)
-    painter = QPainter(base)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    clip = QPainterPath()
-    clip.addEllipse(0, 0, size, size)
-    painter.setClipPath(clip)
-    painter.drawPixmap(0, 0, overlay)
-    painter.end()
-    return base
 
 
 # ─────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────
 def main():
+    smoke_mode = os.getenv("NEURON_DESKTOP_SMOKE", "0").lower() in {"1", "true", "yes"}
+
     # ── 0. Set AppUserModelID BEFORE QApplication ──
     # This makes Windows correctly identify the app in Startup Apps,
     # Default Apps, taskbar grouping, and notification settings.
@@ -192,6 +140,13 @@ def main():
     app.setApplicationVersion("5.2.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
+    app.aboutToQuit.connect(lambda: logger.info("Desktop: QApplication aboutToQuit emitted"))
+    app.lastWindowClosed.connect(lambda: logger.info("Desktop: QApplication lastWindowClosed emitted"))
+    hotkeys = GlobalHotkeyManager(app)
+    watchdog = UiHangWatchdog(
+        threshold_s=float(os.getenv("NEURON_UI_HANG_THRESHOLD", "8"))
+    )
+    watchdog.start()
 
     # ── 2. Splash screen ──
     _assets = Path(__file__).resolve().parent / "assets"
@@ -218,115 +173,91 @@ def main():
     splash.showMessage("Neuron is loading…",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
         QColor("#ffffff"))
-    splash.show()
-    app.processEvents()
+    if smoke_mode:
+        logger.info("Desktop: smoke mode enabled; splash and startup panel are hidden")
+    else:
+        splash.show()
+        app.processEvents()
 
     # ── 3. Cleanup handlers ──
     import atexit, signal
+    cleanup_done = False
+
     def _cleanup():
+        nonlocal cleanup_done
+        if cleanup_done:
+            return
+        cleanup_done = True
+        watchdog.stop()
+        hotkeys.unregister_all()
         try:
-            ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
-        except Exception as e:
-            logger.error(f"Hotkey cleanup failed: {e}")
+            from services.llm_engine import get_llm_engine
+            get_llm_engine().unload()
+        except Exception as exc:
+            logger.warning(f"Desktop: LLM unload skipped during cleanup: {exc}")
+
     atexit.register(_cleanup)
-    signal.signal(signal.SIGINT, lambda *_: (_cleanup(), sys.exit(0)))
-    signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
+
+    def _handle_signal(signum, _frame):
+        logger.info(f"Desktop: received signal {signum}; shutting down")
+        _cleanup()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
 
     # ── 4. Create service (loads embedder + index in background) ──
     service = DesktopService()
 
     # ── 5. Build the main panel (from ui/spotlight_panel.py) ──
-    from ui.spotlight_panel import SpotlightPanel, HotkeyFilter
+    from ui.spotlight_panel import SpotlightPanel
 
     panel = SpotlightPanel(service)
 
     # ── 6. Poll until service is ready, then close splash ──
     def _check_ready():
         if service._ready.is_set():
-            splash.finish(panel)
+            if smoke_mode:
+                logger.info("Desktop: smoke mode ready; quitting")
+                app.quit()
+            else:
+                splash.finish(panel)
         else:
             QTimer.singleShot(300, _check_ready)
     QTimer.singleShot(300, _check_ready)
 
     # ── 7. Register global hotkey ──
-    hotkey_ok = False
-    event_filter = None
-    if platform.system() == "Windows":
-        ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
-        time.sleep(0.05)
-
-        hotkey_ok = ctypes.windll.user32.RegisterHotKey(
-            None, HOTKEY_ID, MOD_SHIFT, VK_SPACE
-        )
-        if hotkey_ok:
-            logger.info("Global hotkey registered: Shift+Space")
-        else:
-            MOD_CTRL = 0x0002
-            hotkey_ok = ctypes.windll.user32.RegisterHotKey(
-                None, HOTKEY_ID, MOD_CTRL, VK_SPACE
-            )
-            if hotkey_ok:
-                logger.info("Fallback hotkey registered: Ctrl+Space")
-            else:
-                logger.warning("All hotkey registrations failed")
-
-        if hotkey_ok:
-            event_filter = HotkeyFilter(panel.toggle_panel)
-            app.installNativeEventFilter(event_filter)
-
-        # Retry once after 500ms
-        if not hotkey_ok:
-            def _retry_hotkey():
-                nonlocal hotkey_ok, event_filter
-                ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
-                ok = ctypes.windll.user32.RegisterHotKey(
-                    None, HOTKEY_ID, MOD_SHIFT, VK_SPACE
-                )
-                if ok:
-                    logger.info("Hotkey registered on retry")
-                    event_filter = HotkeyFilter(panel.toggle_panel)
-                    app.installNativeEventFilter(event_filter)
-                    hotkey_ok = True
-            QTimer.singleShot(500, _retry_hotkey)
+    panel_hotkey_ok = False
+    for spec in PANEL_HOTKEYS:
+        panel_hotkey_ok |= hotkeys.register(spec, panel.activate_from_hotkey)
+    if not panel_hotkey_ok:
+        logger.warning("Panel hotkeys unavailable; tray menu remains available.")
 
     # ── 8. Register Research Overlay hotkey (Ctrl+Shift+R) ──
     _overlay = None
-    overlay_hotkey_ok = False
-    if platform.system() == "Windows":
-        overlay_hotkey_ok = ctypes.windll.user32.RegisterHotKey(
-            None, OVERLAY_HOTKEY_ID, MOD_CTRL_SHIFT, VK_R
-        )
-        if overlay_hotkey_ok:
-            logger.info("Research Overlay hotkey registered: Ctrl+Shift+R")
+    def _toggle_overlay():
+        nonlocal _overlay
+        try:
+            if _overlay is None:
+                from ui.research_overlay import ResearchOverlay
+                _overlay = ResearchOverlay()
+            if _overlay.isVisible():
+                _overlay.hide()
+            else:
+                _overlay.show()
+                _overlay.raise_()
+        except Exception as e:
+            logger.error(f"Research Overlay error: {e}")
 
-            def _toggle_overlay():
-                nonlocal _overlay
-                try:
-                    if _overlay is None:
-                        from ui.research_overlay import ResearchOverlay
-                        _overlay = ResearchOverlay()
-                    if _overlay.isVisible():
-                        _overlay.hide()
-                    else:
-                        _overlay.show()
-                        _overlay.raise_()
-                except Exception as e:
-                    logger.error(f"Research Overlay error: {e}")
+    hotkeys.register(OVERLAY_PRIMARY, _toggle_overlay)
 
-            overlay_filter = HotkeyFilter(_toggle_overlay, hotkey_id=OVERLAY_HOTKEY_ID)
-            app.installNativeEventFilter(overlay_filter)
-        else:
-            logger.warning("Research Overlay hotkey (Ctrl+Shift+R) registration failed")
-
-    # Show panel on startup
-    panel.toggle_panel()
+    # Show panel on startup, unless a non-interactive smoke test is running.
+    if not smoke_mode:
+        panel.toggle_panel()
 
     ret = app.exec()
-
-    if hotkey_ok:
-        ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
-    if overlay_hotkey_ok:
-        ctypes.windll.user32.UnregisterHotKey(None, OVERLAY_HOTKEY_ID)
+    logger.info(f"Desktop: Qt event loop exited with code {ret}")
+    _cleanup()
 
     sys.exit(ret)
 

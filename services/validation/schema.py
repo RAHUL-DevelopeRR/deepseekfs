@@ -31,6 +31,28 @@ def _coerce_path(value: Any) -> str:
     return s
 
 
+def _is_placeholder_path(value: str) -> bool:
+    s = value.strip().strip("'\"")
+    low = s.replace("/", "\\").lower()
+    if not low:
+        return False
+    placeholders = (
+        "c:\\path",
+        "\\path\\to",
+        "/path/to",
+        "path\\to",
+        "path/to",
+        "<path",
+        "{path",
+    )
+    return (
+        any(low == marker or low.startswith(marker + "\\") for marker in placeholders)
+        or "\\path\\file" in low
+        or "your_file" in low
+        or "example_file" in low
+    )
+
+
 def _coerce_integer(value: Any) -> int:
     if isinstance(value, str):
         # Handle "30s" -> 30, "100KB" -> 100
@@ -105,6 +127,10 @@ def validate_tool_args(
             continue
 
         cleaned[p.name] = value
+        if p.type == "path" and _is_placeholder_path(value):
+            errors.append(
+                f"'{p.name}': placeholder path is not allowed; use a real path from the user"
+            )
 
     if errors:
         msg = f"{tool_name}: {'; '.join(errors)}"

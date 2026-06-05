@@ -56,6 +56,17 @@ def extract_time_target(query: str):
     Extracts explicit date from query using dateparser.
     Returns: (target_timestamp_float or None, cleaned_query_string)
     """
+    query_lower = query.lower()
+    time_hints = (
+        "today", "yesterday", "tomorrow", "week", "month", "year",
+        "modified", "created", "recent", "latest", "old", "archive",
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
+        "sep", "oct", "nov", "dec", "monday", "tuesday", "wednesday",
+        "thursday", "friday", "saturday", "sunday",
+    )
+    if not any(hint in query_lower for hint in time_hints):
+        return None, query
+
     try:
         from dateparser.search import search_dates
         dates = search_dates(query)

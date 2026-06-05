@@ -7,6 +7,7 @@ using direct Python calls — no HTTP, no sockets, no FastAPI.
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Callable, List
 
@@ -33,6 +34,7 @@ class DesktopService:
     def __init__(self):
         self._lock = threading.Lock()
         self._idx = None
+        self._search_engine = None
         self._init_error = None
         self._ready = threading.Event()
         self.watcher = None
@@ -47,18 +49,50 @@ class DesktopService:
             self._idx = get_index()
             logger.info("DesktopService: index singleton loaded (background)")
 
-            from services.startup_indexer import StartupIndexer
-            si = StartupIndexer()
-            si.run_in_background()
+            from core.search.semantic_search import SemanticSearch
+            self._search_engine = SemanticSearch(index=self._idx)
+            # Pre-warm query parsing, typo vocabulary, and embedding inference
+            # while the splash screen is still up. User searches after ready
+            # then use the hot singleton path.
+            try:
+                self._search_engine.search("readme", top_k=1, use_llm_rerank=False)
+            except Exception as exc:
+                logger.warning(f"DesktopService: search prewarm skipped: {exc}")
 
-            from core.watcher.file_watcher import FileWatcher
-            self.watcher = FileWatcher(self._idx)
-            self.watcher.start()
+            threading.Thread(
+                target=self._maintenance_init,
+                daemon=True,
+                name="svc-maintenance",
+            ).start()
         except Exception as e:
             logger.error(f"DesktopService background init failed: {e}")
             self._init_error = str(e)
         finally:
             self._ready.set()
+
+    def _maintenance_init(self):
+        """Run incremental indexing first, then start the watcher.
+
+        Starting the watcher while the startup scanner is walking the same
+        folders doubles indexing work and can make the UI appear to crash.
+        """
+        delay = float(os.getenv("NEURON_STARTUP_INDEX_DELAY", "8"))
+        if delay > 0:
+            logger.info(f"DesktopService: delaying maintenance scan by {delay:g}s")
+            time.sleep(delay)
+
+        try:
+            si = StartupIndexer()
+            si.run_synchronously()
+        except Exception as e:
+            logger.error(f"DesktopService startup indexing failed: {e}")
+
+        try:
+            from core.watcher.file_watcher import FileWatcher
+            self.watcher = FileWatcher(self._idx)
+            self.watcher.start()
+        except Exception as e:
+            logger.error(f"DesktopService watcher start failed: {e}")
 
     def _ensure_ready(self):
         """Wait for background init if not yet done."""
@@ -165,8 +199,10 @@ class DesktopService:
         """Direct call into core/search — no HTTP round-trip."""
         self._ensure_ready()
         from core.search.semantic_search import SemanticSearch
-        # BUG1-FIX: reuse the already-loaded index instead of creating a new SemanticSearch instance
-        engine = SemanticSearch(index=self._idx)
+        # BUG1-FIX: reuse the already-loaded index and warmed search engine.
+        if self._search_engine is None:
+            self._search_engine = SemanticSearch(index=self._idx)
+        engine = self._search_engine
         results = engine.search(query, top_k=top_k, use_time_ranking=True,
                                 use_llm_rerank=use_llm_rerank)
 

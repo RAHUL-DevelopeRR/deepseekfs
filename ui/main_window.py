@@ -31,6 +31,8 @@ from PyQt6.QtGui import (
     QCursor, QLinearGradient, QPixmap,
 )
 
+from ui.icons import icon_label, icon_pixmap
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Color Constants (Material Design 3 palette from the HTML)
@@ -142,8 +144,8 @@ class TopNavBar(QFrame):
         search_layout.setContentsMargins(16, 0, 12, 0)
         search_layout.setSpacing(8)
 
-        search_icon = QLabel("🔍")
-        search_icon.setStyleSheet("background: transparent; font-size: 12px;")
+        search_icon = icon_label("search", 14, C_OUTLINE)
+        search_icon.setStyleSheet("background: transparent;")
         search_icon.setFixedWidth(20)
         search_layout.addWidget(search_icon)
 
@@ -165,7 +167,7 @@ class TopNavBar(QFrame):
         search_layout.addWidget(self.search_input, 1)
 
         # Shortcut badges
-        for key in ("⌘", "K"):
+        for key in ("Ctrl", "K"):
             kbd = QLabel(key)
             kbd.setFont(_font(FONT_INTER, 8))
             kbd.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -186,8 +188,7 @@ class TopNavBar(QFrame):
         right = QHBoxLayout()
         right.setSpacing(16)
 
-        settings_btn = QLabel("⚙")
-        settings_btn.setFont(_font(FONT_INTER, 18))
+        settings_btn = icon_label("settings", 18, C_TEXT_MUTED)
         settings_btn.setStyleSheet(f"color: {C_TEXT_MUTED}; background: transparent;")
         settings_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         right.addWidget(settings_btn)
@@ -253,10 +254,10 @@ class SideNavBar(QFrame):
 
         # ── Nav items ──
         nav_items = [
-            ("📁", "ROOT",      True),
-            ("📄", "DOCUMENTS", False),
-            ("⑂",  "PROJECTS",  False),
-            ("📦", "ARCHIVES",  False),
+            ("folder", "ROOT",      True),
+            ("file-text", "DOCUMENTS", False),
+            ("folder-open",  "PROJECTS",  False),
+            ("package", "ARCHIVES",  False),
         ]
         for icon, label, active in nav_items:
             item = QFrame()
@@ -265,8 +266,7 @@ class SideNavBar(QFrame):
             item_layout.setContentsMargins(24, 0, 24, 0)
             item_layout.setSpacing(12)
 
-            icon_lbl = QLabel(icon)
-            icon_lbl.setFont(_font(FONT_INTER, 12))
+            icon_lbl = icon_label(icon, 14, C_PRIMARY if active else C_TEXT_MUTED)
             icon_lbl.setStyleSheet("background: transparent;")
             item_layout.addWidget(icon_lbl)
 
@@ -394,8 +394,7 @@ class BentoCard(QFrame):
 
         # Top row: icon + badge
         top = QHBoxLayout()
-        icon_lbl = QLabel(icon_text)
-        icon_lbl.setFont(_font(FONT_INTER, 24))
+        icon_lbl = icon_label(icon_text, 24, icon_color)
         icon_lbl.setStyleSheet(f"color: {icon_color}; background: transparent;")
         top.addWidget(icon_lbl)
         top.addStretch()
@@ -517,8 +516,7 @@ class FeaturedCard(QFrame):
         # Badge row
         badge_row = QHBoxLayout()
         badge_row.setSpacing(8)
-        check = QLabel("✓")
-        check.setFont(_font(FONT_INTER, 10))
+        check = icon_label("check-circle", 12, C_PRIMARY)
         check.setStyleSheet(f"color: {C_PRIMARY}; background: transparent;")
         badge_row.addWidget(check)
         badge_text = QLabel("OPTIMIZED MODULE")
@@ -547,11 +545,10 @@ class FeaturedCard(QFrame):
         stats = QHBoxLayout()
         stats.setSpacing(16)
 
-        for icon_txt, stat_txt in [("💾", "256MB RAM"), ("⚡", "12ms LATENCY")]:
+        for icon_txt, stat_txt in [("hard-drive", "256MB RAM"), ("zap", "12ms LATENCY")]:
             stat_item = QHBoxLayout()
             stat_item.setSpacing(4)
-            si = QLabel(icon_txt)
-            si.setFont(_font(FONT_INTER, 10))
+            si = icon_label(icon_txt, 12, C_OUTLINE)
             si.setStyleSheet("background: transparent;")
             stat_item.addWidget(si)
             sv = QLabel(stat_txt)
@@ -647,7 +644,8 @@ class MainContentPanel(QFrame):
         view_btns = QHBoxLayout()
         view_btns.setSpacing(4)
 
-        grid_btn = QPushButton("⊞")
+        grid_btn = QPushButton("")
+        grid_btn.setIcon(QIcon(icon_pixmap("grid", 16, C_OUTLINE)))
         grid_btn.setFixedSize(36, 36)
         grid_btn.setStyleSheet(f"""
             QPushButton {{
@@ -661,7 +659,8 @@ class MainContentPanel(QFrame):
         """)
         view_btns.addWidget(grid_btn)
 
-        list_btn = QPushButton("☰")
+        list_btn = QPushButton("")
+        list_btn.setIcon(QIcon(icon_pixmap("list", 16, C_OUTLINE)))
         list_btn.setFixedSize(36, 36)
         list_btn.setStyleSheet(f"""
             QPushButton {{
@@ -682,7 +681,7 @@ class MainContentPanel(QFrame):
         grid_row1.setSpacing(24)
 
         card1 = BentoCard(
-            icon_text="▶", icon_color=C_PRIMARY,
+            icon_text="code", icon_color=C_PRIMARY,
             badge_text="PYTHON", badge_color=C_PRIMARY,
             title="core_engine.py",
             description="Neural indexing logic for hybrid vector search optimization.",
@@ -692,7 +691,7 @@ class MainContentPanel(QFrame):
         grid_row1.addWidget(card1, 1)
 
         card2 = BentoCard(
-            icon_text="⟷", icon_color=C_SECONDARY,
+            icon_text="link", icon_color=C_SECONDARY,
             badge_text="JSON", badge_color=C_SECONDARY,
             title="schema.json",
             description="Metadata definitions for multi-tenant filesystem isolation.",
@@ -702,7 +701,7 @@ class MainContentPanel(QFrame):
         grid_row1.addWidget(card2, 1)
 
         card3 = BentoCard(
-            icon_text="🖼", icon_color=C_TERTIARY_DIM,
+            icon_text="image", icon_color=C_TERTIARY_DIM,
             badge_text="PNG", badge_color=C_TERTIARY_DIM,
             title="blueprint_v2.png",
             description="",

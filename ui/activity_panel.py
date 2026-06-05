@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from app.logger import logger
+from ui.icons import icon_pixmap, icon_label
 
 FN = "'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif"
 
@@ -34,19 +35,19 @@ FN = "'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif"
 # ── Event type display ────────────────────────────────────────
 
 _TYPE_ICONS = {
-    "tool_call":       "🔧",
-    "tool_result":     "📋",
-    "llm_inference":   "🧠",
-    "search":          "🔍",
-    "task_created":    "📝",
-    "task_step":       "▶️",
-    "task_completed":  "✅",
-    "task_failed":     "❌",
-    "plan_generated":  "📊",
-    "watcher_trigger": "👁️",
-    "plugin_loaded":   "🔌",
-    "user_input":      "💬",
-    "error":           "⚠️",
+    "tool_call":       "wrench",
+    "tool_result":     "clipboard",
+    "llm_inference":   "cpu",
+    "search":          "search",
+    "task_created":    "edit-3",
+    "task_step":       "play",
+    "task_completed":  "check-circle",
+    "task_failed":     "x-circle",
+    "plan_generated":  "bar-chart-2",
+    "watcher_trigger": "eye",
+    "plugin_loaded":   "plug",
+    "user_input":      "message-circle",
+    "error":           "alert-triangle",
 }
 
 _STATUS_COLORS = {
@@ -106,11 +107,11 @@ class ActivityPanel(QFrame):
 
         self._filter = QComboBox()
         self._filter.addItem("All Events", "all")
-        self._filter.addItem("🔧 Tool Calls", "tool_call")
-        self._filter.addItem("🧠 LLM Inference", "llm_inference")
-        self._filter.addItem("🔍 Searches", "search")
-        self._filter.addItem("📝 Tasks", "task_created")
-        self._filter.addItem("⚠️ Errors", "error")
+        self._filter.addItem("Tool Calls", "tool_call")
+        self._filter.addItem("LLM Inference", "llm_inference")
+        self._filter.addItem("Searches", "search")
+        self._filter.addItem("Tasks", "task_created")
+        self._filter.addItem("Errors", "error")
         self._filter.setFixedWidth(180)
         self._filter.setStyleSheet(f"""
             QComboBox {{
@@ -290,6 +291,7 @@ class ActivityPanel(QFrame):
         """Clear all events."""
         try:
             from services.events import get_event_store
+
             get_event_store().clear()
             self._force_refresh()
         except Exception as e:

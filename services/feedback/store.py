@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS feedback (
     intent      TEXT,
     confidence  REAL,
     correction  TEXT,
-    model       TEXT DEFAULT 'SmolLM3-3B'
+    model       TEXT DEFAULT 'Qwen-2.5-Coder-3B'
 );
 
 CREATE INDEX IF NOT EXISTS idx_feedback_rating
@@ -101,7 +101,7 @@ class FeedbackStore:
         intent: Optional[str] = None,
         confidence: Optional[float] = None,
         correction: Optional[str] = None,
-        model: str = "SmolLM3-3B",
+        model: str = "Qwen-2.5-Coder-3B",
     ) -> FeedbackEntry:
         """Record a user feedback entry.
         
