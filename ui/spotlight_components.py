@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu, QFileDialog,
     QSizePolicy, QGraphicsDropShadowEffect,
     QSlider, QPushButton, QGraphicsOpacityEffect,
-    QGridLayout, QProgressBar,
+    QGridLayout, QProgressBar, QCheckBox,
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QSize, QTimer,
@@ -67,8 +67,13 @@ W, H = 920, 720
 R = 8                          # corner radius (Win11 uses subtle rounding)
 
 HOTKEY_ID = 0xBFFF
+FALLBACK_HOTKEY_ID = 0xBFFD
 MOD_SHIFT = 0x0004
+MOD_CTRL  = 0x0002
 VK_SPACE  = 0x20
+VK_R      = 0x52
+VK_SHIFT  = 0x10
+VK_CTRL   = 0x11
 WM_HOTKEY = 0x0312
 
 # â”€â”€ colour tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -105,33 +110,33 @@ MN  = "'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace"
 
 # â”€â”€ file icon map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _I = {
-    ".py":("ðŸ","#3B82F6","PY"),   ".ipynb":("ðŸ““","#8B5CF6","NB"),
-    ".js":("âš¡","#EAB308","JS"),   ".ts":("ðŸ”·","#3B82F6","TS"),
-    ".jsx":("âš›ï¸","#22D3EE","JSX"), ".tsx":("âš›ï¸","#3B82F6","TSX"),
-    ".rs":("ðŸ¦€","#E57A44","RS"),   ".go":("ðŸ¹","#00ADD8","GO"),
-    ".java":("â˜•","#F59E0B","JV"),  ".cpp":("âš™ï¸","#60A5FA","C++"),
-    ".c":("âš™ï¸","#94A3B8","C"),     ".h":("âš™ï¸","#94A3B8","H"),
-    ".cs":("ðŸŸ£","#A78BFA","C#"),   ".rb":("ðŸ’Ž","#EF4444","RB"),
-    ".php":("ðŸ˜","#A78BFA","PHP"), ".swift":("ðŸ¦","#F97316","SW"),
-    ".kt":("ðŸŸ£","#A855F6","KT"),   ".html":("ðŸŒ","#EF4444","HTM"),
-    ".css":("ðŸŽ¨","#38BDF8","CSS"), ".md":("ðŸ“","#94A3B8","MD"),
-    ".txt":("ðŸ“„","#94A3B8","TXT"), ".log":("ðŸ“‹","#94A3B8","LOG"),
-    ".pdf":("ðŸ“•","#EF4444","PDF"), ".docx":("ðŸ“˜","#2563EB","DOC"),
-    ".doc":("ðŸ“˜","#2563EB","DOC"), ".xlsx":("ðŸ“—","#22C55E","XLS"),
-    ".xls":("ðŸ“—","#22C55E","XLS"), ".csv":("ðŸ“Š","#22C55E","CSV"),
-    ".pptx":("ðŸ“™","#F97316","PPT"),
-    ".json":("{ }","#F5B74A","JSON"), ".xml":("< >","#F5B74A","XML"),
-    ".yaml":("ðŸ”§","#A78BFA","YML"), ".yml":("ðŸ”§","#A78BFA","YML"),
-    ".toml":("ðŸ”§","#A78BFA","TML"), ".env":("ðŸ”","#A78BFA","ENV"),
-    ".ini":("ðŸ”§","#94A3B8","INI"), ".cfg":("ðŸ”§","#94A3B8","CFG"),
-    ".mp4":("ðŸŽ¬","#A855F6","MP4"), ".mkv":("ðŸŽ¬","#A855F6","MKV"),
-    ".avi":("ðŸŽ¬","#A855F6","AVI"), ".mov":("ðŸŽ¬","#A855F6","MOV"),
-    ".png":("ðŸ–¼ï¸","#EC4899","PNG"),  ".jpg":("ðŸ–¼ï¸","#EC4899","JPG"),
-    ".jpeg":("ðŸ–¼ï¸","#EC4899","JPG"), ".gif":("ðŸ–¼ï¸","#EC4899","GIF"),
-    ".webp":("ðŸ–¼ï¸","#EC4899","WBP"),
-    ".zip":("ðŸ“¦","#FBBF24","ZIP"), ".exe":("âš™ï¸","#A78BFA","EXE"),
+    ".py":("code","#3B82F6","PY"),   ".ipynb":("notebook","#8B5CF6","NB"),
+    ".js":("zap","#EAB308","JS"),   ".ts":("code","#3B82F6","TS"),
+    ".jsx":("atom","#22D3EE","JSX"), ".tsx":("atom","#3B82F6","TSX"),
+    ".rs":("code","#E57A44","RS"),   ".go":("code","#00ADD8","GO"),
+    ".java":("coffee","#F59E0B","JV"),  ".cpp":("settings","#60A5FA","C++"),
+    ".c":("settings","#94A3B8","C"),     ".h":("settings","#94A3B8","H"),
+    ".cs":("code","#A78BFA","C#"),   ".rb":("diamond","#EF4444","RB"),
+    ".php":("code","#A78BFA","PHP"), ".swift":("zap","#F97316","SW"),
+    ".kt":("code","#A855F6","KT"),   ".html":("globe","#EF4444","HTM"),
+    ".css":("palette","#38BDF8","CSS"), ".md":("file-text","#94A3B8","MD"),
+    ".txt":("file-text","#94A3B8","TXT"), ".log":("clipboard","#94A3B8","LOG"),
+    ".pdf":("file-text","#EF4444","PDF"), ".docx":("book-open","#2563EB","DOC"),
+    ".doc":("book-open","#2563EB","DOC"), ".xlsx":("bar-chart-2","#22C55E","XLS"),
+    ".xls":("bar-chart-2","#22C55E","XLS"), ".csv":("bar-chart-2","#22C55E","CSV"),
+    ".pptx":("bar-chart-2","#F97316","PPT"),
+    ".json":("hash","#F5B74A","JSON"), ".xml":("code","#F5B74A","XML"),
+    ".yaml":("wrench","#A78BFA","YML"), ".yml":("wrench","#A78BFA","YML"),
+    ".toml":("wrench","#A78BFA","TML"), ".env":("lock","#A78BFA","ENV"),
+    ".ini":("wrench","#94A3B8","INI"), ".cfg":("wrench","#94A3B8","CFG"),
+    ".mp4":("film","#A855F6","MP4"), ".mkv":("film","#A855F6","MKV"),
+    ".avi":("film","#A855F6","AVI"), ".mov":("film","#A855F6","MOV"),
+    ".png":("image","#EC4899","PNG"),  ".jpg":("image","#EC4899","JPG"),
+    ".jpeg":("image","#EC4899","JPG"), ".gif":("image","#EC4899","GIF"),
+    ".webp":("image","#EC4899","WBP"),
+    ".zip":("package","#FBBF24","ZIP"), ".exe":("terminal","#A78BFA","EXE"),
 }
-_D = ("ðŸ“„","#64748B","FILE")
+_D = ("file","#64748B","FILE")
 
 SCOPES = {
     "all": None, "files": None, "folders": "__dir__",
@@ -166,20 +171,63 @@ class _MSG(_ct.Structure):
     ]
 
 class HotkeyFilter(QAbstractNativeEventFilter):
-    def __init__(self, cb, hotkey_id=None):
+    def __init__(
+        self,
+        cb,
+        hotkey_id=None,
+        virtual_key=VK_SPACE,
+        modifier_keys=None,
+        debounce_ms=250,
+    ):
         super().__init__()
         self._cb = cb
         self._hotkey_id = hotkey_id if hotkey_id is not None else HOTKEY_ID
+        self._virtual_key = virtual_key
+        self._modifier_keys = list(modifier_keys or [VK_SHIFT])
+        self._debounce_s = max(0.05, debounce_ms / 1000.0)
+        self._last_fire = 0.0
+        self._armed = True
+        self._rearm_scheduled = False
+
     def nativeEventFilter(self, et, msg):
         if et in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             try:
                 m = _ct.cast(int(msg), _ct.POINTER(_MSG)).contents
                 if m.message == WM_HOTKEY and m.wParam == self._hotkey_id:
+                    if not self._armed or (time.monotonic() - self._last_fire) < self._debounce_s:
+                        self._schedule_rearm()
+                        return True, 0
+                    self._armed = False
+                    self._last_fire = time.monotonic()
                     self._cb()
+                    self._schedule_rearm()
                     return True, 0
             except Exception:
                 pass
         return False, 0
+
+    def _schedule_rearm(self):
+        if self._rearm_scheduled:
+            return
+        self._rearm_scheduled = True
+        QTimer.singleShot(80, self._maybe_rearm)
+
+    def _maybe_rearm(self):
+        self._rearm_scheduled = False
+        if self._keys_still_down():
+            self._schedule_rearm()
+            return
+        self._armed = True
+
+    def _keys_still_down(self) -> bool:
+        if platform.system() != "Windows":
+            return False
+        try:
+            user32 = _ct.windll.user32
+            keys = [self._virtual_key, *self._modifier_keys]
+            return any(user32.GetAsyncKeyState(key) & 0x8000 for key in keys)
+        except Exception:
+            return False
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -503,7 +551,7 @@ class ResultRow(QFrame):
         super().__init__(parent)
         self._path = hit.get("path", "")
         ext = hit.get("extension", Path(self._path).suffix).lower()
-        emoji, accent, badge = _icon(ext)
+        icon_name, accent, badge = _icon(ext)
         name = hit.get("name", Path(self._path).name)
         self._sel = False
 
@@ -527,6 +575,8 @@ class ResultRow(QFrame):
         pixmap = _get_shell_icon(self._path, 16)
         if not pixmap.isNull():
             ic.setPixmap(pixmap)
+        else:
+            ic.setPixmap(icon_pixmap(icon_name, 16, accent))
         root.addWidget(ic)
 
         # â”€â”€ Name column (320px) â”€â”€
@@ -926,7 +976,7 @@ class ResultRow(QFrame):
 class ActionCard(QFrame):
     action_clicked = pyqtSignal(str)
 
-    def __init__(self, emoji, label, shortcut, aid, parent=None):
+    def __init__(self, icon_name, label, shortcut, aid, parent=None):
         super().__init__(parent)
         self._aid = aid
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -948,8 +998,7 @@ class ActionCard(QFrame):
         vb.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # icon in a subtle circle
-        ic = QLabel(emoji)
-        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ic = icon_label(icon_name or "activity", 20, "#60CDFF")
         ic.setFixedSize(36, 36)
         ic.setStyleSheet("font-size: 20px; background: rgba(56,156,255,0.08); border-radius: 18px;")
         vb.addWidget(ic, 0, Qt.AlignmentFlag.AlignCenter)
@@ -1003,8 +1052,7 @@ class SuggestionChip(QFrame):
         if not pixmap.isNull():
             ic.setPixmap(pixmap)
         else:
-            ic.setText("ðŸ“„")
-            ic.setStyleSheet("font-size: 12px; background: transparent;")
+            ic.setPixmap(icon_pixmap("file", 16, "#94A3B8"))
         lay.addWidget(ic)
 
         # Name (truncated)
@@ -1044,10 +1092,11 @@ class SettingsOverlay(QFrame):
 
         # header
         hdr = QHBoxLayout()
-        t = QLabel("âš™ï¸  Settings")
+        t = QLabel("Settings")
         t.setStyleSheet(f"font-family: {FN}; font-size: 18px; font-weight: 700; color: rgba(255,255,255,0.92); background: transparent;")
+        hdr.addWidget(icon_label("settings", 20, "#E0E0E0"))
         hdr.addWidget(t); hdr.addStretch()
-        x = QLabel("âœ•"); x.setFixedSize(28,28)
+        x = icon_label("x", 16, "#C8C8C8"); x.setFixedSize(28,28)
         x.setAlignment(Qt.AlignmentFlag.AlignCenter)
         x.setCursor(Qt.CursorShape.PointingHandCursor)
         x.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.06); border-radius: 6px;")
@@ -1062,7 +1111,7 @@ class SettingsOverlay(QFrame):
         # stats
         cnt = svc.total_indexed()
         ps = svc.get_watch_paths()
-        st = QLabel(f"ðŸ“Š  {cnt:,} files indexed  Â·  {len(ps)} watch directories")
+        st = QLabel(f"{cnt:,} files indexed  ·  {len(ps)} watch directories")
         st.setStyleSheet(f"font-size: 12px; color: rgba(255,255,255,0.5); background: transparent;")
         root.addWidget(st)
 
@@ -1072,14 +1121,15 @@ class SettingsOverlay(QFrame):
         root.addWidget(wl)
         self._pc = QVBoxLayout(); self._pc.setSpacing(3)
         for p in ps:
-            l = QLabel(f"  ðŸ“‚  {p}")
+            l = QLabel(f"  {p}")
             l.setStyleSheet(f"font-size: 11px; color: rgba(255,255,255,0.35); background: transparent;")
             l.setMaximumWidth(550)
             self._pc.addWidget(l)
         root.addLayout(self._pc)
 
         # add folder
-        ab = QPushButton("ï¼‹  Add Folder")
+        ab = QPushButton("Add Folder")
+        ab.setIcon(QIcon(icon_pixmap("folder-plus", 16, "#B8C8FF")))
         ab.setCursor(Qt.CursorShape.PointingHandCursor)
         ab.setStyleSheet(f"""
             QPushButton {{ background: rgba(255,255,255,0.04); border: 1px dashed rgba(255,255,255,0.12);
@@ -1090,7 +1140,8 @@ class SettingsOverlay(QFrame):
         root.addWidget(ab)
 
         # reindex
-        rb = QPushButton("ðŸ”„  Re-index Now")
+        rb = QPushButton("Re-index Now")
+        rb.setIcon(QIcon(icon_pixmap("refresh-cw", 16, "#FFFFFF")))
         rb.setCursor(Qt.CursorShape.PointingHandCursor)
         rb.setStyleSheet(f"""
             QPushButton {{ background: rgba(56,156,255,0.45); border: none; border-radius: 10px;
@@ -1124,7 +1175,7 @@ class SettingsOverlay(QFrame):
     def _add(self):
         f = QFileDialog.getExistingDirectory(self, "Select Folder")
         if f and self._svc.add_watch_path(f):
-            l = QLabel(f"  ðŸ“‚  {f}")
+            l = QLabel(f"  {f}")
             l.setStyleSheet(f"font-size: 11px; color: rgba(255,255,255,0.35); background: transparent;")
             self._pc.addWidget(l)
             self.paths_changed.emit()

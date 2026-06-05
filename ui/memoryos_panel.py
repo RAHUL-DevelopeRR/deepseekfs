@@ -15,17 +15,61 @@ Architecture:
 """
 from __future__ import annotations
 
+import html
+import re
 import threading
 
+from markdown_it import MarkdownIt
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QWidget,
-    QTextEdit, QLineEdit, QPushButton, QLabel, QMessageBox,
+    QTextEdit, QLineEdit, QPushButton, QLabel, QMessageBox, QCheckBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QIcon, QTextCursor
 
 from app.logger import logger
+from app.config import UserConfig
+from ui.icons import icon_pixmap, icon_label
 
 FN = "'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif"
+
+_MARKDOWN = MarkdownIt("commonmark", {"html": False, "breaks": True})
+try:
+    _MARKDOWN.enable("table")
+except Exception:
+    pass
+
+
+def _markdown_to_html(markdown_text: str) -> str:
+    """Render model Markdown into the limited HTML subset QTextEdit supports."""
+    try:
+        rendered = _MARKDOWN.render(markdown_text or "")
+    except Exception:
+        rendered = f"<p>{html.escape(markdown_text or '').replace(chr(10), '<br>')}</p>"
+
+    code_style = (
+        "font-family: Consolas, 'Cascadia Code', monospace; "
+        "font-size: 12px; color: #d7e3ff;"
+    )
+    pre_style = (
+        "background-color: rgba(0,0,0,0.34); "
+        "border: 1px solid rgba(255,255,255,0.10); "
+        "padding: 8px; margin: 8px 0; white-space: pre-wrap;"
+    )
+    rendered = re.sub(
+        r"<pre><code([^>]*)>",
+        f'<pre style="{pre_style}"><code\\1 style="{code_style}">',
+        rendered,
+    )
+    rendered = re.sub(
+        r"<code(?![^>]*style=)([^>]*)>",
+        (
+            '<code\\1 style="font-family: Consolas, \'Cascadia Code\', monospace; '
+            'font-size: 12px; color: #d7e3ff; background-color: rgba(255,255,255,0.08);">'
+        ),
+        rendered,
+    )
+    return rendered
 
 # Mode colors (used for pills + response border)
 MODE_COLORS = {
@@ -50,7 +94,7 @@ MODE_PLACEHOLDERS = {
 class MemoryOSPanel(QFrame):
     """Three-mode MemoryOS chat interface with streaming."""
 
-    _sig_response = pyqtSignal(str, str)  # (html, mode)
+    _sig_response = pyqtSignal(str, str)  # (markdown, mode)
     _sig_error = pyqtSignal(str)
     _sig_token = pyqtSignal(str)          # streaming token
     _sig_stream_end = pyqtSignal()        # streaming complete
@@ -63,6 +107,8 @@ class MemoryOSPanel(QFrame):
         self._mode = "auto"  # Default mode (model decides)
         self._streaming = False  # True while tokens are arriving
         self._stream_mode = ""  # Mode during current stream
+        self._stream_buffer = ""
+        self._stream_content_start = -1
 
         # RLHF feedback state
         self._last_query = ""
@@ -84,6 +130,47 @@ class MemoryOSPanel(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
+
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(2, 0, 2, 0)
+        brand_row.setSpacing(8)
+        brand_row.addWidget(icon_label("message-circle", 16, "#a78bfa"))
+        brand = QLabel("MemoryOS")
+        brand.setStyleSheet(
+            f"font-family: {FN}; font-size: 13px; font-weight: 700; "
+            "color: rgba(255,255,255,0.82); background: transparent;"
+        )
+        brand_row.addWidget(brand)
+        brand_row.addStretch()
+        brand_row.addWidget(icon_label("globe", 14, "#8AA7FF"))
+        self._internet_toggle = QCheckBox("Internet")
+        self._internet_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._internet_toggle.setToolTip(
+            "Off by default. When enabled, live-data questions may send only "
+            "your typed query to a public web search provider. Local files, "
+            "paths, and RAG snippets stay offline."
+        )
+        self._internet_toggle.setChecked(bool(UserConfig.load().get("internet_enabled", False)))
+        self._internet_toggle.toggled.connect(self._set_internet_enabled)
+        self._internet_toggle.setStyleSheet(f"""
+            QCheckBox {{
+                color: rgba(255,255,255,0.50);
+                font-family: {FN}; font-size: 11px; font-weight: 600;
+                background: transparent;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 28px; height: 16px; border-radius: 8px;
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.12);
+            }}
+            QCheckBox::indicator:checked {{
+                background: rgba(56,156,255,0.45);
+                border: 1px solid rgba(56,156,255,0.70);
+            }}
+        """)
+        brand_row.addWidget(self._internet_toggle)
+        layout.addLayout(brand_row)
 
         # Mode selector pills
         mode_row = QHBoxLayout()
@@ -200,6 +287,14 @@ class MemoryOSPanel(QFrame):
         self._update_mode_styles()
         self._input.setFocus()
 
+    def _set_internet_enabled(self, enabled: bool):
+        cfg = UserConfig.load()
+        cfg["internet_enabled"] = bool(enabled)
+        UserConfig.save(cfg)
+        logger.info(f"MemoryOSPanel: internet mode {'enabled' if enabled else 'disabled'}")
+        self._set_status("Internet on" if enabled else "Internet off")
+        self._input.setFocus()
+
     def _update_mode_styles(self):
         for key, btn in self._mode_btns.items():
             color, bg = MODE_COLORS[key]
@@ -307,14 +402,7 @@ class MemoryOSPanel(QFrame):
             if self._streaming:
                 self._sig_stream_end.emit()
             else:
-                safe = (
-                    response
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                    .replace("\n", "<br>")
-                )
-                self._sig_response.emit(safe, mode)
+                self._sig_response.emit(response, mode)
 
         except Exception as e:
             logger.error(f"MemoryOS agent error: {e}", exc_info=True)
@@ -360,6 +448,8 @@ class MemoryOSPanel(QFrame):
         if not self._streaming:
             # First token — create the response block header
             self._streaming = True
+            self._stream_buffer = ""
+            self._stream_content_start = -1
             color, _ = MODE_COLORS.get(self._stream_mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
             label = MODE_LABELS.get(self._stream_mode, "MemoryOS")
             self._append_html(
@@ -368,11 +458,15 @@ class MemoryOSPanel(QFrame):
                 f'border-radius: 6px; border-left: 3px solid {color};">'
                 f'<b style="color: {color};">{label}:</b><br>'
             )
+            cursor = self._chat.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self._stream_content_start = cursor.position()
             self._set_status(f"Streaming...")
 
         # Append token — use insertText to preserve whitespace
         # (insertHtml strips leading/trailing spaces, causing the no-space bug)
         text = token.replace("\r", "")
+        self._stream_buffer += text
         cursor = self._chat.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self._chat.setTextCursor(cursor)
@@ -382,28 +476,41 @@ class MemoryOSPanel(QFrame):
 
     def _on_stream_end(self):
         """Streaming complete — close the response block."""
+        markdown_text = self._last_response or self._stream_buffer
+        if self._stream_content_start >= 0:
+            cursor = self._chat.textCursor()
+            cursor.setPosition(self._stream_content_start)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.End,
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+            cursor.removeSelectedText()
+            self._chat.setTextCursor(cursor)
+            self._chat.insertHtml(_markdown_to_html(markdown_text))
+            self._chat.insertHtml("</div>")
+        else:
+            self._append_html(_markdown_to_html(markdown_text))
+
         self._streaming = False
-        # Close the div tag
-        cursor = self._chat.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-        self._chat.setTextCursor(cursor)
-        cursor.insertHtml("</div>")
+        self._stream_buffer = ""
+        self._stream_content_start = -1
 
         self._input.setEnabled(True)
         self._input.setFocus()
         self._set_status("Ready")
         self._show_feedback_bar()  # Show / after stream ends
 
-    def _on_response(self, safe_html: str, mode: str):
+    def _on_response(self, markdown_text: str, mode: str):
         color, _ = MODE_COLORS.get(mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
         label = MODE_LABELS.get(mode, "MemoryOS")
+        rendered = _markdown_to_html(markdown_text)
 
-        logger.info(f"MemoryOSPanel: _on_response [{mode}] ({len(safe_html)} chars)")
+        logger.info(f"MemoryOSPanel: _on_response [{mode}] ({len(markdown_text)} chars)")
         self._append_html(
             f'<div style="color: rgba(255,255,255,0.85); margin: 6px 0; '
             f'padding: 8px; background: rgba(255,255,255,0.03); '
             f'border-radius: 6px; border-left: 3px solid {color};">'
-            f'<b style="color: {color};">{label}:</b><br>{safe_html}</div>'
+            f'<b style="color: {color};">{label}:</b><br>{rendered}</div>'
         )
         self._input.setEnabled(True)
         self._input.setFocus()
@@ -475,7 +582,8 @@ class MemoryOSPanel(QFrame):
         )
         bar_layout.addWidget(lbl)
 
-        self._btn_thumbs_up = QPushButton("+")
+        self._btn_thumbs_up = QPushButton("")
+        self._btn_thumbs_up.setIcon(QIcon(icon_pixmap("thumbs-up", 14, "#80D894")))
         self._btn_thumbs_up.setFixedSize(28, 24)
         self._btn_thumbs_up.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_thumbs_up.setStyleSheet(f"""
@@ -493,7 +601,8 @@ class MemoryOSPanel(QFrame):
         self._btn_thumbs_up.clicked.connect(lambda: self._record_feedback(positive=True))
         bar_layout.addWidget(self._btn_thumbs_up)
 
-        self._btn_thumbs_down = QPushButton("-")
+        self._btn_thumbs_down = QPushButton("")
+        self._btn_thumbs_down.setIcon(QIcon(icon_pixmap("thumbs-down", 14, "#FF8A80")))
         self._btn_thumbs_down.setFixedSize(28, 24)
         self._btn_thumbs_down.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_thumbs_down.setStyleSheet(f"""
@@ -553,8 +662,7 @@ class MemoryOSPanel(QFrame):
             )
 
             # Visual confirmation
-            emoji = "+" if positive else "-"
-            self._feedback_label.setText(f"  {emoji} Feedback recorded")
+            self._feedback_label.setText("Feedback recorded")
             self._btn_thumbs_up.setEnabled(False)
             self._btn_thumbs_down.setEnabled(False)
 
@@ -569,7 +677,7 @@ class MemoryOSPanel(QFrame):
     def _welcome_html() -> str:
         return (
             '<div style="color: rgba(255,255,255,0.35); font-style: italic; padding: 8px;">'
-            '<b style="font-size: 14px;">&#x1F9E0; Welcome to MemoryOS</b><br><br>'
+            '<b style="font-size: 14px;">Welcome to MemoryOS</b><br><br>'
             '<span style="font-style: normal;">Intelligent modes:</span><br>'
             '<b style="color: #a78bfa;">Auto</b> &#8212; Model decides how to handle your request (default)<br>'
             '<b style="color: #4dd0a0;">Query</b> &#8212; Force file search by meaning<br>'

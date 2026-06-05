@@ -40,6 +40,8 @@ from PyQt6.QtCore import QFileInfo
 from ui.activity_panel import ActivityPanel
 from ui.memory_lane_panel import MemoryLanePanel
 from ui.memoryos_panel import MemoryOSPanel
+from ui.icon_helpers import make_white_bg_icon
+from ui.icons import icon_pixmap, icon_label
 
 from ui.spotlight_components import (
     C, R, SCOPES, _ICON, HOTKEY_ID,
@@ -97,9 +99,9 @@ class SpotlightPanel(QWidget):
         self._fade.setDuration(220)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        self._kick_index()
+        self._refresh_idx_count()
 
-        # Live-refresh timer: poll idx count every 3s while background indexing runs
+        # Live-refresh timer: poll idx count while service-owned indexing runs
         self._live_refresh_timer = QTimer(self)
         self._live_refresh_timer.setInterval(3000)
         self._live_refresh_timer.timeout.connect(self._refresh_idx_count)
@@ -169,27 +171,31 @@ class SpotlightPanel(QWidget):
         self._history: list[str] = []
         self._hist_idx = -1
 
-        self._btn_back = QPushButton("â†")
+        self._btn_back = QPushButton("")
+        self._btn_back.setIcon(QIcon(icon_pixmap("chevron-left", 16, "#D0D0D0")))
         self._btn_back.setStyleSheet(nav_btn_css)
         self._btn_back.setToolTip("Back (previous search)")
         self._btn_back.setEnabled(False)
         self._btn_back.clicked.connect(self._nav_back)
         nav.addWidget(self._btn_back)
 
-        self._btn_fwd = QPushButton("→")
+        self._btn_fwd = QPushButton("")
+        self._btn_fwd.setIcon(QIcon(icon_pixmap("chevron-right", 16, "#D0D0D0")))
         self._btn_fwd.setStyleSheet(nav_btn_css)
         self._btn_fwd.setToolTip("Forward (next search)")
         self._btn_fwd.setEnabled(False)
         self._btn_fwd.clicked.connect(self._nav_forward)
         nav.addWidget(self._btn_fwd)
 
-        self._btn_up = QPushButton("↑")
+        self._btn_up = QPushButton("")
+        self._btn_up.setIcon(QIcon(icon_pixmap("chevron-up", 16, "#D0D0D0")))
         self._btn_up.setStyleSheet(nav_btn_css)
         self._btn_up.setToolTip("Up (clear search, show recent)")
         self._btn_up.clicked.connect(self._nav_up)
         nav.addWidget(self._btn_up)
 
-        self._btn_refresh = QPushButton("↻")
+        self._btn_refresh = QPushButton("")
+        self._btn_refresh.setIcon(QIcon(icon_pixmap("refresh-cw", 16, "#D0D0D0")))
         self._btn_refresh.setStyleSheet(nav_btn_css)
         self._btn_refresh.setToolTip("Refresh (re-run search / re-index)")
         self._btn_refresh.clicked.connect(self._nav_refresh)
@@ -224,7 +230,7 @@ class SpotlightPanel(QWidget):
         """)
         el_lay = QHBoxLayout(self._encyl_loading)
         el_lay.setContentsMargins(12, 0, 12, 0)
-        self._encyl_spinner = QLabel("⟳")
+        self._encyl_spinner = icon_label("refresh-cw", 16, "#0078D4")
         self._encyl_spinner.setStyleSheet(f"font-size: 14px; color: #0078D4; background: transparent;")
         el_lay.addWidget(self._encyl_spinner)
         self._encyl_status = QLabel(" Encyl is reading...")
@@ -258,8 +264,8 @@ class SpotlightPanel(QWidget):
         self._pills: list[ScopePill] = []
         for label, key in [("All","all"),("Files","files"),("Folders","folders"),
                            ("Code","code"),("Docs","docs"),("Media","media"),
-                           ("\U0001f9e0 MemoryOS","memoryos"),
-                           ("\U0001f4ca Activity","activity")]:
+                           ("MemoryOS","memoryos"),
+                           ("Activity","activity")]:
             pill = ScopePill(label, key, active=(key=="all"))
             pill.clicked.connect(self._set_scope)
             pr.addWidget(pill)
@@ -374,9 +380,9 @@ class SpotlightPanel(QWidget):
         al = QVBoxLayout(self._acw); al.setContentsMargins(0,0,0,0); al.setSpacing(6)
         al.addWidget(CatHeader("Quick Actions"))
         ag = QHBoxLayout(); ag.setSpacing(10)
-        for em, lb, sc, aid in [("","Re-index","Ctrl R","reindex"),
-                                 ("","Add Folder","Ctrl O","add_path"),
-                                 ("âš™ï¸","Settings","Ctrl ,","settings")]:
+        for em, lb, sc, aid in [("refresh-cw","Re-index","Ctrl R","reindex"),
+                                 ("folder-plus","Add Folder","Ctrl O","add_path"),
+                                 ("settings","Settings","Ctrl ,","settings")]:
             c = ActionCard(em, lb, sc, aid)
             c.action_clicked.connect(self._action)
             ag.addWidget(c)
@@ -388,15 +394,15 @@ class SpotlightPanel(QWidget):
         sl2 = QVBoxLayout(self._sgw); sl2.setContentsMargins(0,6,0,0); sl2.setSpacing(2)
         sl2.addWidget(CatHeader("Tips"))
         for em, nm, ds in [
-            ("", "Semantic search", "Use natural language — \"files about machine learning\""),
-            ("", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
-            ("â°", "Time filters", "Try \"modified last week\" or \"created today\""),
-            ("", "Activity search", "Type @yesterday to see your recent work sessions"),
+            ("search", "Semantic search", "Use natural language — \"files about machine learning\""),
+            ("activity", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
+            ("clock", "Time filters", "Try \"modified last week\" or \"created today\""),
+            ("bar-chart-2", "Activity search", "Type @yesterday to see your recent work sessions"),
         ]:
             sf = QFrame(); sf.setFixedHeight(42)
             sf.setStyleSheet("background: transparent; border-radius: 10px;")
             sfl = QHBoxLayout(sf); sfl.setContentsMargins(16,4,16,4); sfl.setSpacing(14)
-            si = QLabel(em); si.setFixedSize(28,28)
+            si = icon_label(em, 16, "#60CDFF"); si.setFixedSize(28,28)
             si.setAlignment(Qt.AlignmentFlag.AlignCenter)
             si.setStyleSheet("font-size: 15px; background: rgba(56,156,255,0.06); border-radius: 8px;")
             sfl.addWidget(si)
@@ -449,7 +455,7 @@ class SpotlightPanel(QWidget):
         bb.addSpacing(6)
 
         # green pulse dot
-        dot = QLabel("â—")
+        dot = icon_label("check-circle", 10, "#34C759")
         dot.setStyleSheet("font-size: 7px; color: #34C759; background: transparent;")
         bb.addWidget(dot)
         bb.addSpacing(4)
@@ -476,8 +482,12 @@ class SpotlightPanel(QWidget):
         # Ollama status
         ai = get_ollama()
         ai_ok = ai.is_available()
-        self.ai_lbl = QLabel(" Encyl" if ai_ok else " ")
-        self.ai_lbl.setStyleSheet(f"font-size: 9px; color: {'rgba(52,199,89,0.7)' if ai_ok else 'rgba(255,255,255,0.14)'}; background: transparent; margin-left: 8px;")
+        ai_color = "rgba(52,199,89,0.7)" if ai_ok else "rgba(255,255,255,0.14)"
+        self.ai_icon = icon_label("cpu", 10, "#34C759" if ai_ok else "#666666")
+        self.ai_icon.setToolTip("Encyl AI connected" if ai_ok else "Encyl offline")
+        bb.addWidget(self.ai_icon)
+        self.ai_lbl = QLabel("Encyl")
+        self.ai_lbl.setStyleSheet(f"font-size: 9px; color: {ai_color}; background: transparent; margin-left: 2px;")
         self.ai_lbl.setToolTip("Encyl AI connected — type ? to ask" if ai_ok else "Encyl offline — start Ollama with 'ollama serve'")
         bb.addWidget(self.ai_lbl)
 
@@ -796,8 +806,8 @@ class SpotlightPanel(QWidget):
                     continue
 
                 event_type = ev.get('event_type', 'access')
-                type_emoji = {"open": "", "search": "ðŸ”", "summarize": "",
-                              "index": "", "access": "ðŸ‘"}.get(event_type, "")
+                type_emoji = {"open": "folder-open", "search": "search", "summarize": "cpu",
+                              "index": "hard-drive", "access": "eye"}.get(event_type, "file")
 
                 hit = {
                     'path': fp,
@@ -967,8 +977,7 @@ class SpotlightPanel(QWidget):
         try:
             from services.startup_indexer import StartupIndexer
             si = StartupIndexer()
-            si._wipe_index("manual")
-            si.run_in_background()
+            si.reindex_in_background("manual")
         except Exception as e:
             from app.logger import logger
             logger.error(f"Re-index failed: {e}")
@@ -979,7 +988,6 @@ class SpotlightPanel(QWidget):
         # BUG3-FIX: use white-background circular icon for tray
         _circ = str(_ASSETS / "neuron_circular.png")
         if Path(_circ).exists():
-            from run_desktop import make_white_bg_icon
             tray_pix = make_white_bg_icon(_circ, 64)
             self._tray.setIcon(QIcon(tray_pix))
             QApplication.setWindowIcon(QIcon(tray_pix))
@@ -1263,13 +1271,13 @@ class SpotlightPanel(QWidget):
         ai = get_ollama()
         ai.reset_availability()  # force re-check
         if not ai.is_available():
-            self.status.setText(" Encyl offline — run 'ollama serve' in terminal")
-            self.ai_lbl.setText(" ")
-            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
+            self.status.setText(" Encyl offline — model unavailable")
+            self.ai_lbl.setText("Encyl")
+            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 2px;")
             return
         # Update status to show it's connected
-        self.ai_lbl.setText(" Encyl")
-        self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(52,199,89,0.7); background: transparent; margin-left: 8px;")
+        self.ai_lbl.setText("Encyl")
+        self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(52,199,89,0.7); background: transparent; margin-left: 2px;")
 
         path = self._rows[self._sel]._path
         name = Path(path).name
@@ -1376,11 +1384,11 @@ class SpotlightPanel(QWidget):
         """User-friendly error messages for Encyl failures."""
         self._stop_encyl_loading()
         if "timed out" in error_msg.lower():
-            self.status.setText("â³ Encyl is warming up — try again in a few seconds")
+            self.status.setText("Encyl is warming up — try again in a few seconds")
         elif "not running" in error_msg.lower() or "connection" in error_msg.lower():
-            self.status.setText(" Encyl offline — run 'ollama serve' in terminal")
-            self.ai_lbl.setText(" ")
-            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
+            self.status.setText(" Encyl offline — model unavailable")
+            self.ai_lbl.setText("Encyl")
+            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 2px;")
         else:
             self.status.setText(f" Encyl error: {error_msg[:60]}")
 
@@ -1490,7 +1498,6 @@ class SpotlightPanel(QWidget):
     def event(self, e):
         """Override event() to catch Tab key before Qt uses it for focus cycling."""
         from PyQt6.QtCore import QEvent
-from ui.icons import icon_pixmap, icon_label
         if e.type() == QEvent.Type.KeyPress:
             if e.key() == Qt.Key.Key_Tab:
                 self._summarize_selected()

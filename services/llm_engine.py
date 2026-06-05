@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -52,6 +53,7 @@ def _strip_thinking(text: str) -> str:
 # ── Configuration ─────────────────────────────────────────────
 DEFAULT_N_CTX = 4096        # Context window (tokens)
 DEFAULT_N_THREADS = 0       # 0 = auto-detect CPU cores
+DEFAULT_N_BATCH = 256       # Lower batch keeps preloaded memory pressure modest
 DEFAULT_TEMPERATURE = 0.3   # Low temp for consistent outputs
 DEFAULT_MAX_TOKENS = 512    # Default generation length
 
@@ -132,7 +134,7 @@ class LLMEngine:
         """Error message if model failed to load, else None."""
         return self._load_error
     
-    def load_model(self, progress_cb=None) -> bool:
+    def load_model(self, progress_cb=None, allow_download: bool = False) -> bool:
         """Load the GGUF model into RAM.
         
         Thread-safe — only one load at a time.
@@ -155,6 +157,14 @@ class LLMEngine:
                 
                 model_path = get_llm_model_path()
                 if model_path is None:
+                    if not allow_download:
+                        self._load_error = (
+                            "Qwen 2.5 Coder GGUF model not found. "
+                            "Place it in storage/models, %LOCALAPPDATA%/Neuron/models, "
+                            "or set NEURON_MODEL_DIRS."
+                        )
+                        logger.warning(f"LLMEngine: {self._load_error}")
+                        return False
                     logger.info("LLMEngine: Model not found, downloading...")
                     if progress_cb:
                         progress_cb(0.0, "Downloading AI model...")
@@ -171,17 +181,27 @@ class LLMEngine:
             
             from llama_cpp import Llama
             
-            # Auto-detect thread count
-            n_threads = DEFAULT_N_THREADS
+            # Auto-detect thread count; allow local power/RAM tuning.
+            n_threads = int(os.getenv("NEURON_LLM_THREADS", str(DEFAULT_N_THREADS)) or "0")
             if n_threads == 0:
                 n_threads = max(1, (os.cpu_count() or 4) // 2)
+            n_batch = max(32, int(os.getenv("NEURON_LLM_BATCH", str(DEFAULT_N_BATCH)) or str(DEFAULT_N_BATCH)))
+            use_mmap = os.getenv("NEURON_LLM_MMAP", "1").lower() not in {"0", "false", "no"}
+            default_verbose = "1" if getattr(sys, "frozen", False) else "0"
+            verbose = os.getenv("NEURON_LLM_VERBOSE", default_verbose).lower() in {"1", "true", "yes"}
             
             # Verify file isn't empty/corrupted
             file_size = os.path.getsize(self._model_path)
             if file_size < 1024 * 1024:  # Less than 1MB = corrupted
                 raise ValueError(f"Model file too small ({file_size} bytes), likely corrupted.")
             
-            logger.info(f"LLMEngine: File size={file_size/(1024*1024):.0f}MB, threads={n_threads}")
+            logger.info(
+                "LLMEngine: File size=%.0fMB, threads=%s, batch=%s, mmap=%s",
+                file_size / (1024 * 1024),
+                n_threads,
+                n_batch,
+                use_mmap,
+            )
             
             # Performance optimizations:
             #   flash_attn  = faster attention computation
@@ -190,11 +210,11 @@ class LLMEngine:
             #   chat_format = native function calling (like GPT/Claude)
             load_kwargs = dict(
                 model_path=self._model_path,
-                n_batch=512,
+                n_batch=n_batch,
                 n_threads=n_threads,
                 n_gpu_layers=0,
-                verbose=False,
-                use_mmap=False,
+                verbose=verbose,
+                use_mmap=use_mmap,
                 use_mlock=False,
                 flash_attn=True,
                 type_k=1,     # q8_0 KV cache (key)
@@ -241,10 +261,18 @@ class LLMEngine:
     def unload(self):
         """Release the model from memory."""
         with self._lock:
-            if self._model is not None:
-                del self._model
-                self._model = None
+            model = self._model
+            self._model = None
             self._loaded = False
+            if model is not None:
+                try:
+                    close = getattr(model, "close", None)
+                    if callable(close):
+                        close()
+                except Exception as exc:
+                    logger.warning(f"LLMEngine: model close failed: {exc}")
+                finally:
+                    del model
             logger.info("LLMEngine: Model unloaded")
     
     # ── Core Generation ───────────────────────────────────────

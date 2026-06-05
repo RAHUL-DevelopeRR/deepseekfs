@@ -1,10 +1,25 @@
 """Search and summarization tools."""
 from __future__ import annotations
 
+import fnmatch
+import os
 from pathlib import Path
+
+import app.config as config
 
 from .base import BaseTool, PermissionLevel, ToolParam, ToolResult
 from .common import format_size
+
+_MAX_FOLDER_SUMMARY_ITEMS = int(os.getenv("NEURON_FOLDER_SUMMARY_MAX_ITEMS", "5000"))
+
+
+def _skip_dir_name(name: str) -> bool:
+    low = name.lower()
+    for pattern in config.SKIP_DIRS:
+        pattern_low = pattern.lower()
+        if fnmatch.fnmatch(low, pattern_low):
+            return True
+    return False
 
 
 class SemanticSearchTool(BaseTool):
@@ -53,26 +68,52 @@ class SummarizeTool(BaseTool):
                 return ToolResult(True, f"Summary of {target.name}:\n{summary}")
 
             if target.is_dir():
-                files = list(target.rglob("*"))
-                file_count = sum(1 for item in files if item.is_file())
-                dir_count = sum(1 for item in files if item.is_dir())
-                total_size = sum(item.stat().st_size for item in files if item.is_file())
-
+                file_count = 0
+                dir_count = 0
+                total_size = 0
                 ext_counts: dict[str, int] = {}
-                for item in files:
-                    if item.is_file():
+                scanned_items = 0
+                truncated = False
+
+                for root, dirs, files in os.walk(target):
+                    dirs[:] = [d for d in dirs if not _skip_dir_name(d)]
+                    dir_count += len(dirs)
+
+                    for fname in files:
+                        scanned_items += 1
+                        if scanned_items > _MAX_FOLDER_SUMMARY_ITEMS:
+                            truncated = True
+                            break
+                        item = Path(root) / fname
+                        file_count += 1
+                        try:
+                            total_size += item.stat().st_size
+                        except OSError:
+                            pass
                         ext = item.suffix.lower() or "(no ext)"
                         ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
+                    if truncated:
+                        break
+
                 top_exts = sorted(ext_counts.items(), key=lambda pair: -pair[1])[:10]
+                top_text = ", ".join(f"{ext} ({count})" for ext, count in top_exts) or "none"
                 output = (
                     f"Folder summary: {path}\n"
                     f"  Files: {file_count}\n"
                     f"  Folders: {dir_count}\n"
                     f"  Total size: {format_size(total_size)}\n"
-                    f"  Top file types: {', '.join(f'{ext} ({count})' for ext, count in top_exts)}"
+                    f"  Top file types: {top_text}"
                 )
-                return ToolResult(True, output)
+                if truncated:
+                    output += f"\n  Note: stopped after {_MAX_FOLDER_SUMMARY_ITEMS:,} files"
+                return ToolResult(True, output, {
+                    "files": file_count,
+                    "folders": dir_count,
+                    "total_size": total_size,
+                    "top_extensions": dict(top_exts),
+                    "truncated": truncated,
+                })
 
             return ToolResult(False, f"Path not found: {path}")
         except Exception as exc:

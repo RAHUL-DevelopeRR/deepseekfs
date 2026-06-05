@@ -11,12 +11,29 @@ import sqlite3
 import threading
 import time
 import os
+import fnmatch
 from typing import List, Dict, Set
 from pathlib import Path
 import app.config as config
 from app.logger import logger
 from core.embeddings.embedder import get_embedder
 from core.ingestion.file_parser import FileParser
+
+
+def _is_skipped_dir(name: str) -> bool:
+    low = name.lower()
+    return any(fnmatch.fnmatch(low, pattern.lower()) for pattern in config.SKIP_DIRS)
+
+
+def _is_skipped_file(name: str) -> bool:
+    low = name.lower()
+    return (
+        low.startswith("~$")
+        or low.endswith(".tmp")
+        or low.endswith(".temp")
+        or low.endswith(".part")
+        or low.endswith(".crdownload")
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -291,11 +308,11 @@ class IndexBuilder:
                 except Exception:
                     pass
 
-                for skip in list(config.SKIP_DIRS):
-                    if skip in dirs:
-                        dirs.remove(skip)
+                dirs[:] = [d for d in dirs if not _is_skipped_dir(d)]
 
                 for fname in fnames:
+                    if _is_skipped_file(fname):
+                        continue
                     ext = Path(fname).suffix.lower()
                     if ext in config.SUPPORTED_EXTENSIONS:
                         fpath = os.path.join(root, fname)

@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget, QPushButton, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont, QColor, QIcon
 
 import app.config as config
 from app.logger import logger
@@ -80,7 +80,8 @@ class MemoryLanePanel(QFrame):
         header.addStretch()
 
         # Date navigation buttons
-        self._btn_prev = QPushButton("◀")
+        self._btn_prev = QPushButton("")
+        self._btn_prev.setIcon(QIcon(icon_pixmap("chevron-left", 16, "#D0D0D0")))
         self._btn_prev.setFixedSize(32, 28)
         self._btn_prev.setStyleSheet(self._btn_css())
         self._btn_prev.clicked.connect(self._prev_day)
@@ -94,7 +95,8 @@ class MemoryLanePanel(QFrame):
         """)
         header.addWidget(self._date_label)
 
-        self._btn_next = QPushButton("▶")
+        self._btn_next = QPushButton("")
+        self._btn_next.setIcon(QIcon(icon_pixmap("chevron-right", 16, "#D0D0D0")))
         self._btn_next.setFixedSize(32, 28)
         self._btn_next.setStyleSheet(self._btn_css())
         self._btn_next.clicked.connect(self._next_day)
@@ -107,7 +109,8 @@ class MemoryLanePanel(QFrame):
         header.addWidget(self._btn_today)
 
         # Close button
-        btn_close = QPushButton("X")
+        btn_close = QPushButton("")
+        btn_close.setIcon(QIcon(icon_pixmap("x", 16, "#D0D0D0")))
         btn_close.setFixedSize(28, 28)
         btn_close.setStyleSheet(f"""
             QPushButton {{
@@ -261,9 +264,8 @@ class MemoryLanePanel(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
 
-        icon_label = QLabel(icon)
-        icon_label.setStyleSheet("font-size: 22px; background: transparent;")
-        layout.addWidget(icon_label)
+        stat_icon = icon_label(icon, 20, "#60CDFF")
+        layout.addWidget(stat_icon)
 
         value_label = QLabel(value)
         value_label.setStyleSheet(f"""
@@ -311,9 +313,7 @@ class MemoryLanePanel(QFrame):
         layout.setSpacing(8)
 
         # Icon
-        icon = QLabel("search")
-        icon.setStyleSheet("font-size: 14px; background: transparent;")
-        layout.addWidget(icon)
+        layout.addWidget(icon_label("search", 14, "#60CDFF"))
 
         # Query text
         query_label = QLabel(query_text)
@@ -324,7 +324,7 @@ class MemoryLanePanel(QFrame):
         layout.addWidget(query_label, 1)
 
         # Count badge
-        count_label = QLabel(f"{count}×")
+        count_label = QLabel(f"{count}x")
         count_label.setStyleSheet(f"""
             font-family: {FN}; font-size: 10px; font-weight: 600;
             color: rgba(0,120,212,0.80); background: rgba(0,120,212,0.12);
@@ -373,7 +373,7 @@ class MemoryLanePanel(QFrame):
         layout.addWidget(name_label, 1)
 
         # Count badge
-        count_label = QLabel(f"{count}×")
+        count_label = QLabel(f"{count}x")
         count_label.setStyleSheet(f"""
             font-family: {FN}; font-size: 10px; font-weight: 600;
             color: rgba(52,199,89,0.80); background: rgba(52,199,89,0.12);

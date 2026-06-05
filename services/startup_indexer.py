@@ -25,6 +25,57 @@ class StartupIndexer:
     - SUBSEQUENT → incremental scan (only new/changed files)
     """
 
+    _state_lock = threading.Lock()
+    _active = False
+    _active_thread: threading.Thread | None = None
+
+    @classmethod
+    def is_running(cls) -> bool:
+        with cls._state_lock:
+            return cls._active
+
+    @classmethod
+    def _finish_run(cls):
+        with cls._state_lock:
+            cls._active = False
+            cls._active_thread = None
+
+    def _start_background(self, target, name: str):
+        with self._state_lock:
+            if self._active:
+                logger.info(
+                    f"StartupIndexer: indexing already running; ignored {name} request"
+                )
+                return self._active_thread
+
+            self.__class__._active = True
+
+            def guarded():
+                try:
+                    target()
+                finally:
+                    self.__class__._finish_run()
+
+            thread = threading.Thread(target=guarded, name=name, daemon=True)
+            self.__class__._active_thread = thread
+
+        thread.start()
+        return thread
+
+    def run_synchronously(self) -> bool:
+        with self._state_lock:
+            if self._active:
+                logger.info("StartupIndexer: indexing already running; skipped sync run")
+                return False
+            self.__class__._active = True
+            self.__class__._active_thread = threading.current_thread()
+
+        try:
+            self._run()
+            return True
+        finally:
+            self.__class__._finish_run()
+
     def is_first_run(self) -> bool:
         return not Path(config.FIRST_RUN_FLAG).exists()
 
@@ -102,11 +153,13 @@ class StartupIndexer:
 
     # ── Run ───────────────────────────────────────────────────
     def run_in_background(self):
-        thread = threading.Thread(
-            target=self._run, name="StartupIndexer", daemon=True,
+        return self._start_background(self._run, "StartupIndexer")
+
+    def reindex_in_background(self, reason: str = "manual"):
+        return self._start_background(
+            lambda: (self._wipe_index(reason), self._run()),
+            "StartupIndexer-Reindex",
         )
-        thread.start()
-        return thread
 
     def _run(self):
         # Lower thread priority on Windows so indexing doesn't freeze the UI

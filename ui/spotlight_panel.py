@@ -88,9 +88,9 @@ from ui.icons import icon_pixmap, icon_label
 from ui.icon_helpers import make_white_bg_icon
 from ui.spotlight_components import (
 
-    C, R, SCOPES, _ICON, HOTKEY_ID,
+    C, R, SCOPES, _ICON,
 
-    HotkeyFilter, IndexThread, SearchThread, AskAIThread, SummarizeThread,
+    IndexThread, SearchThread, AskAIThread, SummarizeThread,
 
     GlowSearchBar, ScopePill, ColumnHeader, CatHeader, ResultRow,
 
@@ -198,11 +198,11 @@ class SpotlightPanel(QWidget):
 
 
 
-        self._kick_index()
+        self._refresh_idx_count()
 
 
 
-        # Live-refresh timer: poll idx count every 3s while background indexing runs
+        # Live-refresh timer: poll idx count while service-owned indexing runs
 
         self._live_refresh_timer = QTimer(self)
 
@@ -342,7 +342,8 @@ class SpotlightPanel(QWidget):
 
 
 
-        self._btn_back = QPushButton("â†")
+        self._btn_back = QPushButton("")
+        self._btn_back.setIcon(QIcon(icon_pixmap("chevron-left", 16, "#D0D0D0")))
 
         self._btn_back.setStyleSheet(nav_btn_css)
 
@@ -356,7 +357,8 @@ class SpotlightPanel(QWidget):
 
 
 
-        self._btn_fwd = QPushButton("→")
+        self._btn_fwd = QPushButton("")
+        self._btn_fwd.setIcon(QIcon(icon_pixmap("chevron-right", 16, "#D0D0D0")))
 
         self._btn_fwd.setStyleSheet(nav_btn_css)
 
@@ -370,7 +372,8 @@ class SpotlightPanel(QWidget):
 
 
 
-        self._btn_up = QPushButton("↑")
+        self._btn_up = QPushButton("")
+        self._btn_up.setIcon(QIcon(icon_pixmap("chevron-up", 16, "#D0D0D0")))
 
         self._btn_up.setStyleSheet(nav_btn_css)
 
@@ -382,7 +385,8 @@ class SpotlightPanel(QWidget):
 
 
 
-        self._btn_refresh = QPushButton("↻")
+        self._btn_refresh = QPushButton("")
+        self._btn_refresh.setIcon(QIcon(icon_pixmap("refresh-cw", 16, "#D0D0D0")))
 
         self._btn_refresh.setStyleSheet(nav_btn_css)
 
@@ -452,7 +456,7 @@ class SpotlightPanel(QWidget):
 
         el_lay.setContentsMargins(12, 0, 12, 0)
 
-        self._encyl_spinner = QLabel("⟳")
+        self._encyl_spinner = icon_label("refresh-cw", 16, "#0078D4")
 
         self._encyl_spinner.setStyleSheet(f"font-size: 14px; color: #0078D4; background: transparent;")
 
@@ -520,9 +524,9 @@ class SpotlightPanel(QWidget):
 
                            ("Code","code"),("Docs","docs"),("Media","media"),
 
-                           ("\U0001f9e0 MemoryOS","memoryos"),
+                           ("MemoryOS","memoryos"),
 
-                           ("\U0001f4ca Activity","activity")]:
+                           ("Activity","activity")]:
 
             pill = ScopePill(label, key, active=(key=="all"))
 
@@ -752,11 +756,11 @@ class SpotlightPanel(QWidget):
 
         ag = QHBoxLayout(); ag.setSpacing(10)
 
-        for em, lb, sc, aid in [("","Re-index","Ctrl R","reindex"),
+        for em, lb, sc, aid in [("refresh-cw","Re-index","Ctrl R","reindex"),
 
-                                 ("","Add Folder","Ctrl O","add_path"),
+                                 ("folder-plus","Add Folder","Ctrl O","add_path"),
 
-                                 ("âš™ï¸","Settings","Ctrl ,","settings")]:
+                                 ("settings","Settings","Ctrl ,","settings")]:
 
             c = ActionCard(em, lb, sc, aid)
 
@@ -780,13 +784,13 @@ class SpotlightPanel(QWidget):
 
         for em, nm, ds in [
 
-            ("", "Semantic search", "Use natural language — \"files about machine learning\""),
+            ("search", "Semantic search", "Use natural language — \"files about machine learning\""),
 
-            ("", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
+            ("activity", "Hybrid scoring", "Combines vector similarity + keyword + time + depth"),
 
-            ("â°", "Time filters", "Try \"modified last week\" or \"created today\""),
+            ("clock", "Time filters", "Try \"modified last week\" or \"created today\""),
 
-            ("", "Activity search", "Type @yesterday to see your recent work sessions"),
+            ("bar-chart-2", "Activity search", "Type @yesterday to see your recent work sessions"),
 
         ]:
 
@@ -796,7 +800,7 @@ class SpotlightPanel(QWidget):
 
             sfl = QHBoxLayout(sf); sfl.setContentsMargins(16,4,16,4); sfl.setSpacing(14)
 
-            si = QLabel(em); si.setFixedSize(28,28)
+            si = icon_label(em, 16, "#60CDFF"); si.setFixedSize(28,28)
 
             si.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -902,7 +906,7 @@ class SpotlightPanel(QWidget):
 
         # green pulse dot
 
-        dot = QLabel("â—")
+        dot = icon_label("check-circle", 10, "#34C759")
 
         dot.setStyleSheet("font-size: 7px; color: #34C759; background: transparent;")
 
@@ -932,7 +936,7 @@ class SpotlightPanel(QWidget):
 
 
 
-        for txt in ["↑↓ nav", "↵ open", "Tab Encyl", "?query ask", "^C copy", "Esc close"]:
+        for txt in ["Up/Down nav", "Enter open", "Tab Encyl", "? ask", "Ctrl+C copy", "Esc close"]:
 
             h = QLabel(txt)
 
@@ -956,11 +960,16 @@ class SpotlightPanel(QWidget):
 
         ai_ok = ai.is_available()
 
-        self.ai_lbl = QLabel("Encyl" if ai_ok else "Encyl ")
+        ai_color = "rgba(52,199,89,0.7)" if ai_ok else "rgba(255,255,255,0.14)"
+        self.ai_icon = icon_label("cpu", 10, "#34C759" if ai_ok else "#666666")
+        self.ai_icon.setToolTip("Encyl AI connected — type ? to ask" if ai_ok else "Encyl offline — model unavailable")
+        bb.addWidget(self.ai_icon)
 
-        self.ai_lbl.setStyleSheet(f"font-size: 9px; color: {'rgba(52,199,89,0.7)' if ai_ok else 'rgba(255,255,255,0.14)'}; background: transparent; margin-left: 8px;")
+        self.ai_lbl = QLabel("Encyl")
 
-        self.ai_lbl.setToolTip("Encyl AI connected — type ? to ask" if ai_ok else "Encyl offline — start Ollama with 'ollama serve'")
+        self.ai_lbl.setStyleSheet(f"font-size: 9px; color: {ai_color}; background: transparent; margin-left: 2px;")
+
+        self.ai_lbl.setToolTip("Encyl AI connected — type ? to ask" if ai_ok else "Encyl offline — model unavailable")
 
         bb.addWidget(self.ai_lbl)
 
@@ -1596,9 +1605,9 @@ class SpotlightPanel(QWidget):
 
                 event_type = ev.get('event_type', 'access')
 
-                type_emoji = {"open": "", "search": "ðŸ”", "summarize": "cpu",
+                type_emoji = {"open": "folder-open", "search": "search", "summarize": "cpu",
 
-                              "index": "hard-drive", "access": "ðŸ‘"}.get(event_type, "")
+                              "index": "hard-drive", "access": "eye"}.get(event_type, "file")
 
 
 
@@ -1938,9 +1947,7 @@ class SpotlightPanel(QWidget):
 
             si = StartupIndexer()
 
-            si._wipe_index("manual")
-
-            si.run_in_background()
+            si.reindex_in_background("manual")
 
         except Exception as e:
 
@@ -1988,7 +1995,7 @@ class SpotlightPanel(QWidget):
 
         """)
 
-        m.addAction("Show  (Shift+Space)").triggered.connect(self.toggle_panel)
+        m.addAction("Show  (Shift+Space / Ctrl+Alt+N)").triggered.connect(self.toggle_panel)
 
         m.addAction("Memory Lane").triggered.connect(self._toggle_memory_lane)
 
@@ -2010,7 +2017,7 @@ class SpotlightPanel(QWidget):
 
                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
 
-        self._tray.setToolTip("Neuron — Shift+Space to search")
+        self._tray.setToolTip("Neuron — Shift+Space or Ctrl+Alt+N to search")
 
         self._tray.show()
 
@@ -2028,17 +2035,17 @@ class SpotlightPanel(QWidget):
 
             if streak > 0:
 
-                tooltip = f"Neuron — Shift+Space to search\n{streak} day{'s' if streak != 1 else ''} streak"
+                tooltip = f"Neuron — Shift+Space or Ctrl+Alt+N to search\n{streak} day{'s' if streak != 1 else ''} streak"
 
             else:
 
-                tooltip = "Neuron — Shift+Space to search"
+                tooltip = "Neuron — Shift+Space or Ctrl+Alt+N to search"
 
             self._tray.setToolTip(tooltip)
 
         except Exception:
 
-            self._tray.setToolTip("Neuron — Shift+Space to search")
+            self._tray.setToolTip("Neuron — Shift+Space or Ctrl+Alt+N to search")
 
 
 
@@ -2528,11 +2535,11 @@ class SpotlightPanel(QWidget):
 
         if not ai.is_available():
 
-            self.status.setText("Encyl offline — run 'ollama serve' in terminal")
+            self.status.setText("Encyl offline — model unavailable")
 
-            self.ai_lbl.setText("Encyl ")
+            self.ai_lbl.setText("Encyl")
 
-            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
+            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 2px;")
 
             return
 
@@ -2540,7 +2547,7 @@ class SpotlightPanel(QWidget):
 
         self.ai_lbl.setText("Encyl")
 
-        self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(52,199,89,0.7); background: transparent; margin-left: 8px;")
+        self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(52,199,89,0.7); background: transparent; margin-left: 2px;")
 
 
 
@@ -2606,7 +2613,7 @@ class SpotlightPanel(QWidget):
 
         hdr.addStretch()
 
-        x = QLabel("X"); x.setFixedSize(22, 22)
+        x = icon_label("x", 14, "#C8C8C8"); x.setFixedSize(22, 22)
 
         x.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -2700,7 +2707,7 @@ class SpotlightPanel(QWidget):
 
         hdr.addStretch()
 
-        x = QLabel("X"); x.setFixedSize(22, 22)
+        x = icon_label("x", 14, "#C8C8C8"); x.setFixedSize(22, 22)
 
         x.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -2754,15 +2761,15 @@ class SpotlightPanel(QWidget):
 
         if "timed out" in error_msg.lower():
 
-            self.status.setText("â³ Encyl is warming up — try again in a few seconds")
+            self.status.setText("Encyl is warming up — try again in a few seconds")
 
         elif "not running" in error_msg.lower() or "connection" in error_msg.lower():
 
-            self.status.setText("Encyl offline — run 'ollama serve' in terminal")
+            self.status.setText("Encyl offline — model unavailable")
 
-            self.ai_lbl.setText("Encyl ")
+            self.ai_lbl.setText("Encyl")
 
-            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 8px;")
+            self.ai_lbl.setStyleSheet("font-size: 9px; color: rgba(255,255,255,0.14); background: transparent; margin-left: 2px;")
 
         else:
 
@@ -2841,6 +2848,37 @@ class SpotlightPanel(QWidget):
         if self._vis: self._hide()
 
         else:         self._show()
+
+    def activate_from_hotkey(self):
+
+        """Show or refocus the panel from a global hotkey.
+
+        Global hotkeys can emit duplicate events while keys are held, depending
+        on keyboard layout, IME, and Windows focus state. Treating the hotkey as
+        show/focus keeps the panel from opening and immediately disappearing.
+        """
+
+        logger.info(f"Panel: hotkey activation received (visible={self._vis})")
+
+        if self._vis:
+
+            self._fade.stop()
+
+            if not self.isVisible():
+
+                self.show()
+
+            self.raise_()
+
+            self.activateWindow()
+
+            self.search.setFocus()
+
+            self.search.selectAll()
+
+            return
+
+        self._show()
 
 
 
@@ -3022,9 +3060,7 @@ class SpotlightPanel(QWidget):
 
     def _quit(self):
 
-        try: ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
-
-        except: pass
+        logger.info("Panel: tray quit requested")
 
         self._tray.hide(); QApplication.quit()
 

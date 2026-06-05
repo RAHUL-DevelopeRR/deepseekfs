@@ -31,6 +31,70 @@ from services.tools import ALL_TOOLS, get_tool_schemas
 from services.profiles import get_profile_manager
 
 
+def _live_context_for_prompt(user_message: str) -> tuple[str, int, bool]:
+    """Return opt-in public live context. Never passes local RAG data out."""
+    try:
+        from services.internet_search import (
+            format_results_for_prompt,
+            internet_enabled,
+            is_live_data_query,
+            search_public_web,
+        )
+        if not is_live_data_query(user_message) or not internet_enabled():
+            return "", 0, False
+        results = search_public_web(user_message)
+        return format_results_for_prompt(results), len(results), True
+    except Exception as exc:
+        logger.warning(f"MemoryOS: live internet context skipped: {exc}")
+        return "", 0, True
+
+
+def _verified_live_answer(live_context: str) -> tuple[str, str, str] | None:
+    """Extract a trusted live answer marker from the retrieved web context."""
+    for line in live_context.splitlines():
+        if "ANSWER_VALUE:" not in line:
+            continue
+        value_match = re.search(
+            r"ANSWER_VALUE:\s*(.+?)(?=\s+Public web source text|$)",
+            line,
+            flags=re.I,
+        )
+        if not value_match:
+            continue
+        source_match = re.match(r"\s*\d+\.\s+(.*?)\s+\((https?://[^)]+)\)", line)
+        answer = " ".join(value_match.group(1).split()).rstrip(".")
+        if not answer:
+            continue
+        title = source_match.group(1).strip() if source_match else "Live public web result"
+        url = source_match.group(2).strip() if source_match else ""
+        return answer, title, url
+    return None
+
+
+def _normalize_verified_live_response(response: str, live_context: str) -> str:
+    """Keep verified live answers concise when the small model leaks context text."""
+    verified = _verified_live_answer(live_context)
+    clean = (response or "").strip()
+    if not verified:
+        return clean
+
+    answer, title, url = verified
+    low = clean.lower()
+    needs_normalization = (
+        not clean
+        or answer.lower() not in low
+        or "**source:**" not in low
+        or (url and url not in clean)
+        or "answer_value:" in low
+        or "public web source text identifies" in low
+    )
+    if not needs_normalization:
+        return clean
+
+    source = f"{title} ({url})" if url else title
+    return f"**Answer:** {answer}\n\n**Source:** {source}"
+
+
 # ── Intent Detection (embedding-based, no hardcodes) ─────────
 
 def _detect_intent(text: str) -> str:
@@ -121,8 +185,19 @@ class MemoryOSAgent:
             input_summary=user_message[:300],
         ))
 
-        # Determine mode
-        effective = mode if mode != "auto" else _detect_intent(user_message)
+        # Determine mode. Action mode is a request for tools, not a license for
+        # the model to answer current facts through the tool-calling path.
+        detected = _detect_intent(user_message) if mode in ("auto", "action") else mode
+        if mode == "action" and detected != "action":
+            logger.info(
+                f"MemoryOS: forced action ignored for non-action intent "
+                f"'{detected}'"
+            )
+            effective = detected
+        elif mode == "auto":
+            effective = detected
+        else:
+            effective = mode
 
         if effective == "query":
             return self._query_mode(user_message)
@@ -184,9 +259,17 @@ class MemoryOSAgent:
         from services.llm_engine import _strip_thinking
 
         low = user_message.lower().strip().rstrip("!?.")
+        live_context, live_count, live_attempted = _live_context_for_prompt(user_message)
+        if live_attempted and not live_context:
+            logger.warning("MemoryOS [CHAT]: live data requested but no internet results returned")
+            return (
+                "I could not retrieve live internet results for that question, "
+                "so I will not answer it from stale model memory. Please check "
+                "your connection or try again."
+            )
 
         # ── Tier 1: Instant greeting (0ms) ────────────────────
-        if low in self._GREETINGS:
+        if low in self._GREETINGS and not live_context:
             response = self._GREETINGS[low]
             self._conversation.append({"role": "user", "content": user_message})
             self._conversation.append({"role": "assistant", "content": response})
@@ -196,7 +279,7 @@ class MemoryOSAgent:
         # ── Tier 2: Persistent cache hit (<5ms) ───────────────
         cache_key = low[:120]
         cache = get_response_cache()
-        cached = cache.get(cache_key)
+        cached = None if live_context else cache.get(cache_key)
         if cached is not None:
             self._conversation.append({"role": "user", "content": user_message})
             self._conversation.append({"role": "assistant", "content": cached})
@@ -211,8 +294,35 @@ class MemoryOSAgent:
         self._compact()
 
         from services.agent_context import build_chat_context
-        messages = [{"role": "system", "content": build_chat_context()}]
-        messages.extend(self._conversation[-8:])
+        if live_context:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Neuron's live-data synthesis step. "
+                        "Use only the provided public web context. "
+                        "Do not answer from model memory. "
+                        "For office-holder questions, extract the named person "
+                        "from the source text, for example from phrases like "
+                        "'Hon'ble Chief Minister Thiru X'. "
+                        "Return concise Markdown using exactly this shape: "
+                        "**Answer:** ... then **Source:** ..."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"{live_context}\n\n"
+                        f"Question: {user_message}\n\n"
+                        "Answer the question directly. If the context does not "
+                        "contain the answer, say that live results did not verify it. "
+                        "Include the source URL from the context."
+                    ),
+                },
+            ]
+        else:
+            messages = [{"role": "system", "content": build_chat_context()}]
+            messages.extend(self._conversation[-8:])
 
         # Dynamic token budget
         if len(low.split()) <= 3 and not any(w in low for w in ("code", "write", "create", "explain")):
@@ -311,13 +421,18 @@ class MemoryOSAgent:
         response = re.sub(r'functions\.\w+:.*', '', response).strip()
         if not response:
             response = "Hello! I'm Neuron. How can I help you?"
+        if live_context:
+            response = _normalize_verified_live_response(response, live_context)
 
         # Persist to cache (short answers only, not code blocks)
-        if len(response) < 500 and len(low.split()) <= 8:
+        if not live_context and len(response) < 500 and len(low.split()) <= 8:
             cache.put(cache_key, response)
 
         self._conversation.append({"role": "assistant", "content": response})
-        logger.info(f"MemoryOS [CHAT]: {elapsed}ms, {len(response)} chars, budget={max_tokens}")
+        logger.info(
+            f"MemoryOS [CHAT]: {elapsed}ms, {len(response)} chars, "
+            f"budget={max_tokens}, live={live_count}"
+        )
         return response
 
     # ── Query Mode (search + summarize) ───────────────────────
@@ -330,11 +445,19 @@ class MemoryOSAgent:
 
         # Search (fast, no LLM)
         results = self._run_search(user_message)
+        live_context, live_count, live_attempted = _live_context_for_prompt(user_message)
+        if live_attempted and not live_context and not results:
+            logger.warning("MemoryOS [QUERY]: live data requested but no internet results returned")
+            return (
+                "I could not retrieve live internet results for that query, "
+                "and no local files matched. I will not answer it from stale "
+                "model memory."
+            )
 
         store.insert(AgentEvent(
             event_type=EventType.SEARCH.value,
             input_summary=user_message[:300],
-            output_summary=f"{len(results)} results",
+            output_summary=f"{len(results)} local results, {live_count} live results",
         ))
 
         if results:
@@ -349,13 +472,16 @@ class MemoryOSAgent:
         from services.agent_context import build_query_context
         messages = [{"role": "system", "content": build_query_context()}]
 
-        if results:
+        if results or live_context:
+            local_part = f"Local file results:\n{raw_list}\n\n" if results else "No local files found.\n\n"
+            live_part = f"{live_context}\n\n" if live_context else ""
             messages.append({
                 "role": "user",
                 "content": (
                     f"The user searched for: '{user_message}'\n"
-                    f"Results:\n{raw_list}\n\n"
-                    f"List these files concisely. No explanation needed."
+                    f"{local_part}{live_part}"
+                    "Answer concisely. Keep local file results and live public web "
+                    "results clearly separate when both are present."
                 ),
             })
         else:
@@ -376,8 +502,13 @@ class MemoryOSAgent:
                 response = f"Found {len(results)} matching files:\n{raw_list}"
             else:
                 response = "No matching files found. Try a different query."
+        if live_context:
+            response = _normalize_verified_live_response(response, live_context)
 
-        logger.info(f"MemoryOS [QUERY]: {elapsed}ms, {len(results)} results")
+        logger.info(
+            f"MemoryOS [QUERY]: {elapsed}ms, {len(results)} local results, "
+            f"{live_count} live results"
+        )
         return response
 
     def _run_search(self, query: str) -> List[Dict]:

@@ -17,6 +17,7 @@ This is the same technique used by Rasa, Dialogflow, and Amazon Lex.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -116,6 +117,19 @@ class IntentClassifier:
             
         If the classifier isn't ready, returns ('chat', 0.0).
         """
+        if self._route_code_conversation(text):
+            logger.info(f"IntentClassifier: code conversation -> chat for '{text[:50]}'")
+            return ("chat", 1.0)
+
+        if self._route_vague_file_reference(text):
+            logger.info(f"IntentClassifier: vague file reference -> chat for '{text[:50]}'")
+            return ("chat", 1.0)
+
+        routed = self._route_explicit_file_action(text)
+        if routed:
+            logger.info(f"IntentClassifier: explicit file action -> action for '{text[:50]}'")
+            return ("action", 1.0)
+
         if not self._ready:
             return ("chat", 0.0)
 
@@ -164,6 +178,68 @@ class IntentClassifier:
         except Exception as e:
             logger.error(f"IntentClassifier: classification failed: {e}")
             return ("chat", 0.0)
+
+    @staticmethod
+    def _has_concrete_file_target(low: str) -> bool:
+        return bool(
+            re.search(
+                r"([\\/]|"
+                r"\b\w+\.[a-z0-9]{1,8}\b|"
+                r"\bpytest\b|"
+                r"\bgit\s+status\b|"
+                r"\b(called|named)\b)",
+                low,
+            )
+        )
+
+    @classmethod
+    def _route_code_conversation(cls, text: str) -> bool:
+        """Keep code generation and code revision in chat unless a file is named."""
+        low = text.lower().strip()
+        if cls._has_concrete_file_target(low):
+            return False
+
+        has_code_subject = re.search(
+            r"\b(code|program|script|function|class|algorithm|java|python|"
+            r"database|db|sql|jdbc)\b",
+            low,
+        )
+        has_generation_or_revision = re.search(
+            r"\b(create|write|generate|give|show|provide|make|need|want|"
+            r"alter|change|modify|update|edit|add|insert|inserting|include|fix)\b",
+            low,
+        )
+        return bool(has_code_subject and has_generation_or_revision)
+
+    @staticmethod
+    def _route_explicit_file_action(text: str) -> bool:
+        """Route concrete file/project operations to action mode.
+
+        Pure code-generation prompts should remain chat, but operations that
+        name files, paths, tests, or git commands need tools.
+        """
+        low = text.lower().strip()
+        if re.search(r"\b(write|create)\b.*\b(code|program|function|algorithm)\b", low):
+            if not re.search(r"\b(file|save|as|called|named|to\s+[\w.-]+\.[a-z0-9]+)\b", low):
+                return False
+
+        has_action_verb = re.search(
+            r"\b(create|save|write|edit|modify|update|read|open|run|execute)\b", low
+        )
+        return bool(has_action_verb and IntentClassifier._has_concrete_file_target(low))
+
+    @staticmethod
+    def _route_vague_file_reference(text: str) -> bool:
+        """Avoid tool calls when the user says "the file" without a path/name."""
+        low = text.lower().strip()
+        if IntentClassifier._has_concrete_file_target(low):
+            return False
+        has_file_reference = re.search(r"\b(the|this|that|current)\s+file\b", low)
+        has_toolish_verb = re.search(
+            r"\b(save|run|execute|open|read|edit|modify|update|delete|move|copy)\b",
+            low,
+        )
+        return bool(has_file_reference and has_toolish_verb)
 
     @property
     def is_ready(self) -> bool:

@@ -13,7 +13,7 @@ import os
 import hashlib
 import shutil
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Iterable
 
 from app.logger import logger
 
@@ -26,6 +26,7 @@ from app.logger import logger
 LLM_MODEL_REPO = "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
 LLM_MODEL_FILE = "qwen2.5-coder-3b-instruct-q5_k_m.gguf"
 LLM_MODEL_SIZE_MB = 2100  # approximate
+_MIN_GGUF_SIZE_BYTES = 50 * 1024 * 1024
 
 VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.22.zip"
 VOSK_MODEL_NAME = "vosk-model-small-en-us-0.22"
@@ -92,28 +93,96 @@ def get_models_dir() -> Path:
     return models_dir
 
 
+def _existing_dirs(paths: Iterable[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            resolved = path.expanduser().resolve()
+        except Exception:
+            resolved = path.expanduser()
+        key = str(resolved).lower()
+        if key in seen or not resolved.is_dir():
+            continue
+        seen.add(key)
+        out.append(resolved)
+    return out
+
+
+def get_model_search_dirs() -> list[Path]:
+    """Return GGUF search roots, including app, user, and HF cache locations."""
+    base = Path(__file__).resolve().parent.parent
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    env_dirs = [
+        Path(item)
+        for item in os.environ.get("NEURON_MODEL_DIRS", "").split(os.pathsep)
+        if item.strip()
+    ]
+    if os.environ.get("NEURON_MODEL_DIRS_ONLY") == "1":
+        return _existing_dirs(env_dirs)
+    return _existing_dirs(
+        [
+            *env_dirs,
+            base / "storage" / "models",
+            local_app_data / "Neuron" / "models",
+            local_app_data / "Local" / "Neuron" / "models",
+            Path.home() / ".neuron" / "models",
+            Path.home() / ".cache" / "huggingface" / "hub",
+            local_app_data / "huggingface" / "hub",
+            base / "storage" / "models" / ".cache" / "huggingface",
+        ]
+    )
+
+
+def _is_usable_gguf(path: Path) -> bool:
+    try:
+        return (
+            path.is_file()
+            and path.suffix.lower() == ".gguf"
+            and path.stat().st_size >= _MIN_GGUF_SIZE_BYTES
+        )
+    except Exception:
+        return False
+
+
+def _iter_gguf_candidates() -> Iterable[Path]:
+    for root in get_model_search_dirs():
+        direct = root / LLM_MODEL_FILE
+        if _is_usable_gguf(direct):
+            yield direct
+        try:
+            for candidate in root.rglob("*.gguf"):
+                if _is_usable_gguf(candidate):
+                    yield candidate
+        except Exception as exc:
+            logger.warning(f"ModelManager: skipped model cache scan {root}: {exc}")
+
+
 def get_llm_model_path() -> Optional[Path]:
     """Find the LLM GGUF model file.
     
     Returns None if model is not downloaded yet.
     """
-    # Check app-local storage
-    app_local = Path(__file__).resolve().parent.parent / "storage" / "models" / LLM_MODEL_FILE
-    if app_local.is_file():
-        return app_local
-    
-    # Check LOCALAPPDATA
-    models_dir = get_models_dir()
-    model_path = models_dir / LLM_MODEL_FILE
-    if model_path.is_file():
-        return model_path
-    
-    # Also check for any .gguf file (user may have renamed or used a different model)
-    for f in models_dir.glob("*.gguf"):
-        logger.info(f"ModelManager: Found alternative GGUF model: {f.name}")
-        return f
-    
-    return None
+    candidates = list(_iter_gguf_candidates())
+    if not candidates:
+        return None
+
+    exact = [p for p in candidates if p.name.lower() == LLM_MODEL_FILE.lower()]
+    if exact:
+        return exact[0]
+
+    qwen = [
+        p for p in candidates
+        if "qwen2.5-coder" in p.name.lower() or "qwen2.5-coder" in str(p).lower()
+    ]
+    if qwen:
+        chosen = sorted(qwen, key=lambda p: p.stat().st_size, reverse=True)[0]
+        logger.info(f"ModelManager: Found cached Qwen GGUF model: {chosen}")
+        return chosen
+
+    chosen = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)[0]
+    logger.info(f"ModelManager: Found alternative GGUF model: {chosen}")
+    return chosen
 
 
 # Backward compatibility alias — the separate coder model no longer exists;
@@ -151,7 +220,7 @@ def is_vosk_model_available() -> bool:
 
 
 def download_llm_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
-    """Download the SmolLM3-3B GGUF model from HuggingFace.
+    """Download the Qwen 2.5 Coder GGUF model from HuggingFace.
     
     Uses huggingface_hub for reliable, resumable downloads.
     Returns the path to the downloaded model file.
@@ -162,12 +231,12 @@ def download_llm_model(progress_cb: Optional[ProgressCallback] = None) -> Path:
     # ── Disk space pre-check ──
     _check_disk_space(models_dir, LLM_MODEL_SIZE_MB)
 
-
-    if model_path.is_file():
-        logger.info(f"ModelManager: LLM model already exists at {model_path}")
+    existing = get_llm_model_path()
+    if existing is not None:
+        logger.info(f"ModelManager: LLM model already exists at {existing}")
         if progress_cb:
             progress_cb(1.0, "Model ready")
-        return model_path
+        return existing
     
     logger.info(f"ModelManager: Downloading {LLM_MODEL_FILE} from {LLM_MODEL_REPO}...")
     if progress_cb:

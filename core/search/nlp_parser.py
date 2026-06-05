@@ -19,6 +19,8 @@ Performance:
 from __future__ import annotations
 
 import re
+import importlib.util
+import os
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Set
 from dataclasses import dataclass, field
@@ -34,6 +36,14 @@ def _get_nlp():
     global _nlp
     if _nlp is None:
         try:
+            if os.environ.get("NEURON_ENABLE_SPACY_NLP") != "1":
+                logger.info("NLP parser: using built-in fast parser")
+                _nlp = False
+                return None
+            if importlib.util.find_spec("spacy") is None:
+                logger.info("NLP parser: spaCy package not installed, using fallback")
+                _nlp = False
+                return None
             import spacy
             _nlp = spacy.load("en_core_web_sm", disable=["ner"])
             logger.info("NLP parser: spaCy en_core_web_sm loaded")

@@ -35,6 +35,9 @@ class TestIntentClassifier:
                 "create a new folder", "copy project to drive",
                 "run pip install", "execute git status",
                 "list all folders", "clean up my desktop",
+                "create a python file called hello.py",
+                "edit services/llm_engine.py",
+                "run pytest tests/test_validator.py",
             ],
         }
         self.examples_path = tmp_path / "intent_examples.json"
@@ -116,3 +119,55 @@ class TestIntentClassifier:
         clf = self._make_classifier()
         intent, _ = clf.classify("create a python code for bubble sort")
         assert intent == "chat"
+
+    def test_code_revision_without_file_target_is_chat(self):
+        clf = self._make_classifier()
+
+        intent, _ = clf.classify("alter the code for inserting any data")
+
+        assert intent == "chat"
+
+    def test_program_revision_without_file_target_is_chat(self):
+        clf = self._make_classifier()
+
+        intent, _ = clf.classify("alter the program for inserting any data to db")
+
+        assert intent == "chat"
+
+    def test_java_program_request_is_chat(self):
+        clf = self._make_classifier()
+
+        intent, _ = clf.classify(
+            "Give me a java program for the Hashmap for the storage and retrieval"
+        )
+
+        assert intent == "chat"
+
+    def test_create_python_file_is_action(self):
+        clf = self._make_classifier()
+        intent, _ = clf.classify("create a python file called hello.py that prints hello")
+        assert intent == "action"
+
+    def test_edit_code_file_is_action(self):
+        clf = self._make_classifier()
+        intent, _ = clf.classify("edit services/llm_engine.py to add logging")
+        assert intent == "action"
+
+    def test_run_pytest_is_action(self):
+        clf = self._make_classifier()
+        intent, _ = clf.classify("run pytest tests/test_validator.py")
+        assert intent == "action"
+
+    def test_vague_file_reference_is_chat(self):
+        clf = self._make_classifier()
+
+        intent, _ = clf.classify("save the file and run the file")
+
+        assert intent == "chat"
+
+    def test_named_file_save_is_action(self):
+        clf = self._make_classifier()
+
+        intent, _ = clf.classify("save the file as hello.py and run it")
+
+        assert intent == "action"

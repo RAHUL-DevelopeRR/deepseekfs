@@ -314,6 +314,12 @@ _SVG_PATHS: dict[str, str] = {
         "<line x1='3' y1='12' x2='3.01' y2='12'/>"
         "<line x1='3' y1='18' x2='3.01' y2='18'/>"
     ),
+    "grid": (
+        "<rect x='3' y='3' width='7' height='7'/>"
+        "<rect x='14' y='3' width='7' height='7'/>"
+        "<rect x='14' y='14' width='7' height='7'/>"
+        "<rect x='3' y='14' width='7' height='7'/>"
+    ),
     "more-horizontal": (
         "<circle cx='12' cy='12' r='1'/>"
         "<circle cx='19' cy='12' r='1'/>"

@@ -21,13 +21,14 @@ import threading
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient
+from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QIcon
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QSlider, QFrame, QSizeGrip,
 )
 
 from app.logger import logger
+from ui.icons import icon_pixmap
 
 # Windows constants
 WDA_NONE = 0x00000000
@@ -137,7 +138,8 @@ class ResearchOverlay(QWidget):
         title_bar.addWidget(self._stealth_btn)
         
         # Listen toggle
-        self._listen_btn = QPushButton("▶ Listen")
+        self._listen_btn = QPushButton("Listen")
+        self._listen_btn.setIcon(QIcon(icon_pixmap("play", 12, "#D8FFE0")))
         self._listen_btn.setFixedSize(70, 24)
         self._listen_btn.setStyleSheet("""
             QPushButton {
@@ -157,7 +159,8 @@ class ResearchOverlay(QWidget):
         title_bar.addWidget(self._listen_btn)
         
         # Close button
-        close_btn = QPushButton("×")
+        close_btn = QPushButton("")
+        close_btn.setIcon(QIcon(icon_pixmap("x", 14, "#AAAAAA")))
         close_btn.setFixedSize(24, 24)
         close_btn.setStyleSheet("""
             QPushButton {
@@ -349,7 +352,8 @@ class ResearchOverlay(QWidget):
             
             if self._speech_service.start():
                 self._listening = True
-                self._listen_btn.setText("⏹ Stop")
+                self._listen_btn.setText("Stop")
+                self._listen_btn.setIcon(QIcon(icon_pixmap("x-circle", 12, "#FFFFFF")))
                 self._listen_btn.setStyleSheet("""
                     QPushButton {
                         background-color: rgba(180, 40, 40, 180);
@@ -374,7 +378,8 @@ class ResearchOverlay(QWidget):
             self._speech_service.stop()
         self._listening = False
         self._status_label.setText("Neuron Research")
-        self._listen_btn.setText("▶ Listen")
+        self._listen_btn.setText("Listen")
+        self._listen_btn.setIcon(QIcon(icon_pixmap("play", 12, "#D8FFE0")))
         self._listen_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(40, 120, 60, 180);

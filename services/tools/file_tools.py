@@ -143,7 +143,7 @@ class FileEditTool(BaseTool):
 
 class FileDeleteTool(BaseTool):
     name = "file_delete"
-    description = "Delete a file. DANGEROUS - requires explicit user confirmation."
+    description = "Delete a file. DANGEROUS - blocked by the agent safety policy."
     permission = PermissionLevel.DANGEROUS
     parameters = [
         ToolParam("path", "path", "Absolute path to the file to delete"),

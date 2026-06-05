@@ -74,6 +74,14 @@ class TestValidation:
         assert ok
         assert "\\" in cleaned["path"]
 
+    def test_placeholder_path_rejected(self):
+        params = [ToolParam("path", "path", "Path")]
+
+        ok, _, err = validate_tool_args("test", params, {"path": "C:/path/file.txt"})
+
+        assert not ok
+        assert "placeholder path" in err
+
     def test_optional_skipped(self):
         params = [
             ToolParam("required", "string", "R", required=True),

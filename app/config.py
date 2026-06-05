@@ -2,6 +2,7 @@
 import json
 import os
 import platform
+import sys
 from pathlib import Path
 
 # dotenv is optional — not required in frozen/installed builds
@@ -12,18 +13,25 @@ except ImportError:
     pass
 
 # ── Paths ──────────────────────────────────────────────────────
-BASE_DIR = Path(__file__).parent.parent
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    RUNTIME_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).parent.parent
+    RUNTIME_DIR = BASE_DIR
 
-# Prefer app-local storage, but fall back to %LOCALAPPDATA%/Neuron
-# if the app directory is not writable (e.g. installed to Program Files)
-_app_storage = BASE_DIR / "storage"
+_storage_override = os.environ.get("NEURON_STORAGE_DIR")
+if _storage_override:
+    STORAGE_DIR = Path(_storage_override)
+elif getattr(sys, "frozen", False) and os.environ.get("NEURON_PORTABLE") != "1":
+    STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Neuron" / "storage"
+else:
+    # Source checkouts and explicit portable builds keep app-local storage.
+    STORAGE_DIR = RUNTIME_DIR / "storage"
+
 try:
-    _app_storage.mkdir(parents=True, exist_ok=True)
-    _test = _app_storage / ".write_test"
-    _test.touch()
-    _test.unlink()
-    STORAGE_DIR = _app_storage
-except (PermissionError, OSError):
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
     STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Neuron" / "storage"
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -63,6 +71,9 @@ SKIP_DIRS = {
     ".cache", ".tox", ".nox", ".mypy_cache",
     ".pytest_cache", "build", "dist",
     "__pypackages__",
+    "webcache", "webcache_*",
+    "Intermediate", "Saved", "DerivedDataCache", "Binaries",
+    "target", ".gradle", ".idea", ".nuget",
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -143,6 +154,8 @@ class UserConfig:
         "top_k": 20,
         "theme": "auto",
         "hotkey": "shift+space",
+        "internet_enabled": False,
+        "internet_max_results": 3,
     }
 
     @classmethod

@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 
@@ -51,3 +52,37 @@ def test_watch_path_change_does_not_wipe_existing_index(monkeypatch, tmp_path):
         str(old_root),
         str(new_root),
     }
+
+
+def test_reindex_requests_are_single_flight(monkeypatch):
+    from services.startup_indexer import StartupIndexer
+
+    StartupIndexer._active = False
+    StartupIndexer._active_thread = None
+
+    entered = threading.Event()
+    release = threading.Event()
+    wipes = []
+
+    def fake_wipe(self, reason):
+        wipes.append(reason)
+
+    def fake_run(self):
+        entered.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr(StartupIndexer, "_wipe_index", fake_wipe)
+    monkeypatch.setattr(StartupIndexer, "_run", fake_run)
+
+    si = StartupIndexer()
+    first = si.reindex_in_background("manual")
+    assert entered.wait(timeout=1)
+
+    second = si.reindex_in_background("manual")
+    assert second is first
+
+    release.set()
+    first.join(timeout=2)
+
+    assert wipes == ["manual"]
+    assert not StartupIndexer.is_running()

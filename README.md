@@ -1,292 +1,235 @@
-<p align="center">
-  <img src="assets/neuron_icon.png" alt="Neuron circular logo" width="120"/>
-</p>
-
-<h1 align="center">Neuron v5.0</h1>
-<p align="center">
-  <b>AI-Powered Semantic File Intelligence for Windows</b><br/>
-  <i>Search smarter. Understand your files. Summarize anything.</i>
-</p>
+# Neuron
 
 <p align="center">
-  <a href="https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest"><img src="https://img.shields.io/badge/Download-NeuronSetup_v5.0.exe-6366f1?style=for-the-badge&logo=windows" /></a>
-  <a href="https://zero-x.live"><img src="https://img.shields.io/badge/🌐_Website-zero--x.live-00d4aa?style=for-the-badge" /></a>
+  <img src="assets/neuron_icon.png" alt="Neuron logo" width="112"/>
+</p>
+
+<h3 align="center">Local file intelligence for the edge.</h3>
+
+<p align="center">
+  <a href="https://zero-x.live"><img src="https://img.shields.io/badge/zero--x.live-edge%20AI-050509?style=for-the-badge" alt="zero-x.live"/></a>
+  <img src="https://img.shields.io/badge/offline-first-ffffff?style=for-the-badge&labelColor=050509&color=ffffff" alt="offline first"/>
+  <img src="https://img.shields.io/badge/Qwen-bundled-ff4d00?style=for-the-badge&labelColor=050509" alt="bundled qwen"/>
+  <img src="https://img.shields.io/badge/PyQt6-desktop-00d4ff?style=for-the-badge&labelColor=050509" alt="PyQt6 desktop"/>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.0-6366f1?style=flat-square" />
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-blue?style=flat-square" />
-  <img src="https://img.shields.io/badge/python-3.11-green?style=flat-square" />
-  <img src="https://img.shields.io/badge/AI-Ollama%20%2B%20Llama%203.2-orange?style=flat-square" />
-  <img src="https://img.shields.io/badge/UI-PyQt6%20Fluent-purple?style=flat-square" />
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" />
+  <img src="assets/readme/lucide-search.svg" width="22" alt="Search"/>
+  &nbsp;&nbsp;
+  <img src="assets/readme/lucide-cpu.svg" width="22" alt="Local AI"/>
+  &nbsp;&nbsp;
+  <img src="assets/readme/lucide-shield-check.svg" width="22" alt="Private"/>
+  &nbsp;&nbsp;
+  <img src="assets/readme/lucide-terminal.svg" width="22" alt="CLI"/>
+  &nbsp;&nbsp;
+  <img src="assets/readme/lucide-keyboard.svg" width="22" alt="Hotkeys"/>
 </p>
 
----
+Neuron is a Windows desktop application for private, local file intelligence. It indexes your files, performs offline semantic search, summarizes documents, and answers questions with a bundled Qwen GGUF model. Internet mode is optional and off by default.
 
-## 🧠 What is Neuron?
+The brand direction is intentionally stark: near-black canvas, white product voice, sharp orange for action, cyan for live/edge signals, and muted grey for secondary text.
 
-**Neuron** is a desktop file intelligence engine that brings **semantic search** and **AI-powered file summarization** to Windows. Unlike traditional file search (which matches exact filenames), Neuron understands the *meaning* behind your query.
+## Positioning
 
-> Search for *"quarterly revenue report"* and find `Q3_2024_financial_summary.xlsx` — even though the words don't match.
+Data centers are power hungry. Neuron shifts useful AI work to the local machine when privacy, latency, and cost matter more than cloud scale.
 
-### Key Features
+Use it when you want:
 
-| Feature | Description |
-|---|---|
-| 🔍 **Semantic Search** | Search by meaning, not just keywords. Powered by `all-MiniLM-L6-v2` embeddings + FAISS vector index |
-| 🧠 **Encyl AI Summarizer** | Press `Tab` on any file → instant AI summary via local `llama3.2:1b` (Ollama) |
-| 📁 **Windows 11 UI** | Fluent Design with Segoe Fluent Icons, native context menus, glassmorphism |
-| ⚡ **Real-time Indexing** | Watchdog monitors file changes → auto-reindex in background |
-| 🔒 **100% Local** | No cloud. No telemetry. Everything runs on your machine |
-| 📄 **40+ File Types** | PDF, DOCX, PPTX, TXT, MD, source code, images (metadata) |
+- Fast local search across documents, code, notes, PDFs, spreadsheets, and presentations.
+- Offline semantic search using ONNX MiniLM embeddings and a FAISS/HNSW index.
+- Local Qwen output generation without downloading a model on every launch.
+- A headless command surface through `neufs.py` / `neufs.cmd`.
+- Optional internet-assisted answers through an explicit toggle, routed as Internet -> Model -> User.
 
----
+## Core Capabilities
 
-## 🚀 Quick Start
+| Icon | Capability | What it means |
+|---:|---|---|
+| <img src="assets/readme/lucide-search.svg" width="18" alt="Search"/> | Semantic search | Find files by meaning, not only by exact names. |
+| <img src="assets/readme/lucide-cpu.svg" width="18" alt="CPU"/> | Local Qwen output | Generate answers with the bundled GGUF model. |
+| <img src="assets/readme/lucide-shield-check.svg" width="18" alt="Shield"/> | Private by default | Local index, local model, optional internet mode off by default. |
+| <img src="assets/readme/lucide-terminal.svg" width="18" alt="Terminal"/> | Headless mode | Run `neufs` commands without opening the desktop UI. |
+| <img src="assets/readme/lucide-keyboard.svg" width="18" alt="Keyboard"/> | Hotkey launcher | Global shortcuts show or focus the panel without hold-to-hide flicker. |
+| <img src="assets/readme/lucide-package.svg" width="18" alt="Package"/> | Bundled app | PyInstaller one-dir package includes runtime assets and local models. |
 
-### Option 1: Installer (Recommended)
+## Current Product Surface
 
-1. Download **[NeuronSetup_v5.0.exe](https://github.com/RAHUL-DevelopeRR/deepseekfs/releases/latest)** from Releases
-2. Run the installer → check **"Install Ollama"** if you want AI summarization
-3. Launch Neuron from Desktop/Start Menu
-4. Press `Shift+Space` to open the search panel
+| Surface | Status | Notes |
+|---|---:|---|
+| <img src="assets/readme/lucide-keyboard.svg" width="16" alt="Keyboard"/> Desktop UI | Active | PyQt6 Spotlight-style panel with tray activation |
+| <img src="assets/readme/lucide-database.svg" width="16" alt="Memory"/> MemoryOS chat | Active | Auto/query/action modes with local model responses |
+| <img src="assets/readme/lucide-search.svg" width="16" alt="Search"/> Offline semantic search | Active | ONNX embeddings plus vector index |
+| <img src="assets/readme/lucide-cpu.svg" width="16" alt="CPU"/> Qwen GGUF generation | Active | Bundled from `storage/models/*.gguf` when present |
+| <img src="assets/readme/lucide-wifi-off.svg" width="16" alt="Internet"/> Internet mode | Optional | Off by default, explicit user-controlled toggle |
+| <img src="assets/readme/lucide-terminal.svg" width="16" alt="Terminal"/> Headless CLI | Active | `neufs status`, `search`, `chat`, `action`, `index`, `summarize` |
+| <img src="assets/readme/lucide-package.svg" width="16" alt="Package"/> Rust/Tauri port | Drafted | See `docs/rust_react_desktop_port_draft.md` |
 
-### Option 2: From Source
+## Brand Palette
 
-```bash
-# Clone
+| Token | Hex | Use |
+|---|---|---|
+| `carbon` | `#050509` | Background, app frame, README badges |
+| `white` | `#FFFFFF` | Primary typography and product mark |
+| `muted` | `#9B9BA8` | Supporting copy and secondary labels |
+| `action` | `#FF4D00` | Action mode, warnings, decisive CTAs |
+| `edge` | `#00D4FF` | Internet/live state and edge-compute signal |
+| `violet` | `#7C3AED` | MemoryOS/AI accent when needed |
+
+## Quick Start From Source
+
+```powershell
 git clone https://github.com/RAHUL-DevelopeRR/deepseekfs.git
 cd deepseekfs
-
-# Create venv
 python -m venv venv
-venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements-desktop.txt
-
-# Run
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 python run_desktop.py
 ```
 
-### Option 3: Using the Launcher
+The desktop app preloads an existing local Qwen GGUF model before PyQt starts. It does not download the model during desktop launch.
 
-```bash
-# Place Neuron.exe in the project root (same folder as run_desktop.py)
-# Double-click Neuron.exe
+## Headless Commands
+
+```powershell
+python neufs.py status
+python neufs.py search "quarterly revenue report"
+python neufs.py chat "Summarize this project"
+python neufs.py chat --internet "Who is the current chief minister of Tamil Nadu?"
+python neufs.py summarize "C:\path\to\file.pdf"
+python neufs.py index
 ```
 
----
+On Windows, `neufs.cmd` is provided as a convenience wrapper.
 
-## ⌨️ Keyboard Shortcuts
+## Hotkeys
 
-| Shortcut | Action |
+| Shortcut | Behavior |
 |---|---|
-| `Shift + Space` | Toggle Neuron search panel |
-| `↑` `↓` | Navigate search results |
-| `Enter` | Open selected file |
-| `Tab` | Summarize selected file with Encyl AI |
-| `Ctrl + C` | Copy file path |
-| `Ctrl + Shift + C` | Copy as path (Windows style) |
-| `Right-click` | Full Windows 11 context menu |
-| `Escape` | Close panel |
+| `Shift + Space` | Show or focus Neuron |
+| `Ctrl + Space` | Fallback show/focus shortcut |
+| `Ctrl + Alt + Space` | Safer fallback show/focus shortcut |
+| `Ctrl + Alt + N` | OS-safe fallback show/focus shortcut |
+| `Esc` | Hide the panel |
+| `Ctrl + Shift + R` | Research overlay |
 
----
+The global hotkey intentionally shows/focuses instead of toggling closed. This avoids the Windows repeat behavior where a held key opens and immediately hides the panel.
 
-## 🏗️ Architecture
+## Local Model And Cache Strategy
 
-```
-┌──────────────────────────────────────────────────┐
-│                   Neuron Desktop                  │
-│              (PyQt6 Fluent Design UI)             │
-├──────────────┬───────────────┬────────────────────┤
-│  Search Bar  │  File List    │  Properties Panel  │
-│  (Semantic)  │  (Shell Icons)│  (Win11 Native)    │
-├──────────────┴───────────────┴────────────────────┤
-│                  Service Layer                     │
-│  ┌─────────────┐ ┌──────────────┐ ┌────────────┐ │
-│  │ Desktop     │ │ Ollama       │ │ Startup    │ │
-│  │ Service     │ │ Service      │ │ Indexer    │ │
-│  └──────┬──────┘ └──────┬───────┘ └─────┬──────┘ │
-├─────────┼───────────────┼────────────────┼────────┤
-│         │        Core Engine             │        │
-│  ┌──────▼──────┐ ┌──────▼───────┐ ┌─────▼──────┐ │
-│  │ Semantic    │ │ Encyl AI     │ │ File       │ │
-│  │ Search     │ │ (Ollama LLM) │ │ Watcher    │ │
-│  │ (FAISS)    │ │              │ │ (Watchdog) │ │
-│  └──────┬──────┘ └──────────────┘ └────────────┘ │
-│  ┌──────▼──────┐                                  │
-│  │ Embedder    │ ← all-MiniLM-L6-v2 (80MB)       │
-│  │ (Sentence   │                                  │
-│  │ Transformers)│                                  │
-│  └──────┬──────┘                                  │
-│  ┌──────▼──────┐                                  │
-│  │ SQLite +    │ ← Metadata + SHA256 cache        │
-│  │ FAISS Index │ ← Vector similarity search       │
-│  └─────────────┘                                  │
-└──────────────────────────────────────────────────┘
+Model lookup order:
+
+1. Bundled app model under `storage/models`.
+2. `%LOCALAPPDATA%\Neuron\models`.
+3. Paths listed in `NEURON_MODEL_DIRS`.
+4. Existing Hugging Face cache entries.
+
+Downloads use partial files and verified final files. Desktop preload uses `allow_download=False`, so a missing model is reported instead of triggering a surprise launch-time download.
+
+Recommended runtime defaults:
+
+```powershell
+$env:NEURON_LLM_MMAP = "1"
+$env:NEURON_LLM_BATCH = "256"
+$env:NEURON_BACKGROUND_PREWARM = "0"
 ```
 
-### Search Pipeline
+## Build
 
-```
-User Query → MiniLM Embedding → FAISS Cosine Similarity → Top-K Results
-                (384-dim)         (< 5ms for 100K files)
-```
+The current deliverable is a PyInstaller one-dir bundle:
 
-### Encyl AI Pipeline
-
-```
-File → Content Extraction → Ollama API → llama3.2:1b → Summary
-       (PDF/DOCX/TXT)        (local)      (~1GB RAM)    → SHA256 Cache
+```powershell
+python -m PyInstaller neuron_onedir.spec --noconfirm --clean
 ```
 
----
+Output:
 
-## 📦 Building the Installer
-
-### Prerequisites
-- Python 3.11 with venv
-- [Inno Setup 6](https://jrsoftware.org/isdl.php) (for installer)
-
-### Build Steps
-
-```bash
-# 1. Build the launcher exe (30 seconds)
-venv\Scripts\pyinstaller.exe launcher.spec --clean --noconfirm
-
-# 2. Copy launcher to project root
-copy dist\Neuron.exe .
-
-# 3. Build the installer (5-15 minutes)
-"C:\Users\rahul\AppData\Local\Programs\Inno Setup 6\ISCC.exe" neuron_installer.iss
-
-# Output: installer_output\NeuronSetup.exe
+```text
+dist\Neuron\Neuron.exe
 ```
 
----
+To hand off a single archive:
 
-## 🔧 System Requirements
-
-| Component | Minimum | Recommended |
-|---|---|---|
-| **OS** | Windows 10 (64-bit) | Windows 11 |
-| **RAM** | 4 GB | 8 GB |
-| **Disk** | 2 GB | 4 GB |
-| **CPU** | Any x64 | Intel i5+ / Ryzen 5+ |
-| **GPU** | Not required | NVIDIA CUDA (faster AI) |
-| **Ollama** | Required for Encyl AI | Pre-installed |
-
-### RAM Breakdown
-| Component | RAM Usage |
-|---|---|
-| Sentence-transformers (MiniLM) | ~200 MB |
-| PyQt6 UI + Python runtime | ~100 MB |
-| FAISS vector index | ~50 MB |
-| Ollama llama3.2:1b (when active) | ~1 GB |
-| **Total (with Encyl)** | **~1.3 GB** |
-
----
-
-## 🧪 Running Tests
-
-```bash
-# Unit tests
-python -m pytest tests/ -v
-
-# Lint
-python -m flake8 core/ services/ ui/ --max-line-length 120
-
-# Type check
-python -m mypy core/ services/ --ignore-missing-imports
+```powershell
+Compress-Archive -Path dist\Neuron -DestinationPath dist\Neuron-windows-x64.zip -Force
 ```
 
----
+## Test Matrix
 
-## 📁 Project Structure
+Run the complete local suite:
 
-```
-deepseekfs/
-├── run_desktop.py          # ← Main entry point (desktop)
-├── launcher.py             # PyInstaller launcher stub (produces Neuron.exe)
-├── warmup_encyl.py         # Ollama model pre-loader
-├── neuron_installer.iss    # Inno Setup installer script
-├── neuron.spec             # PyInstaller spec (canonical build)
-├── launcher.spec           # PyInstaller spec for launcher stub
-├── build_exe.bat           # One-click build helper
-├── app/
-│   ├── config.py           # Configuration, paths, user preferences
-│   └── logger.py           # Logging setup
-├── core/
-│   ├── embeddings/         # Sentence-transformer embedder (all-MiniLM-L6-v2)
-│   ├── indexing/           # FAISS index builder + SQLite metadata
-│   ├── ingestion/          # File content extraction (40+ types)
-│   ├── search/             # Semantic + keyword search engine
-│   ├── time/               # Time-decay recency scoring
-│   └── watcher/            # File system monitor (watchdog)
-├── services/
-│   ├── desktop_service.py  # Main service orchestrator for PyQt6 UI
-│   ├── ollama_service.py   # Encyl AI (Ollama / llama3.2:1b integration)
-│   └── startup_indexer.py  # Background indexing on startup
-├── ui/
-│   └── spotlight_panel.py  # PyQt6 Fluent Design search panel
-├── docs/
-│   ├── refactor_to_9_10.md # Refactor checklist
-│   └── pre_install_info.txt
-├── assets/
-│   └── neuron_icon.ico      # Circular Neuron app icon
-├── storage/                # Runtime data (FAISS index, SQLite, user config)
-│   └── user_config.json
-│
-│   ── Legacy web-mode files (kept for reference, not used by desktop app) ──
-├── run.py                  # [DEPRECATED] FastAPI + pywebview entry point
-├── app/main.py             # [DEPRECATED] FastAPI application
-├── api/                    # [DEPRECATED] REST API routes and schemas
-├── Dockerfile              # [DEPRECATED] Web/server deployment
-└── docker-compose.yml      # [DEPRECATED] Web/server deployment
+```powershell
+python -m py_compile run_desktop.py neufs.py services\llm_engine.py services\memory_os.py services\model_manager.py services\ollama_service.py services\internet_search.py services\stability.py ui\hotkeys.py ui\memoryos_panel.py ui\spotlight_panel.py
+python -m pytest -q
+python neufs.py status
+python neufs.py search "readme" --limit 3
+python neufs.py chat --offline "Say OK in one word."
 ```
 
----
+Extra desktop verification:
 
-## 🤝 Contributing
+- Launch `python -X faulthandler run_desktop.py`.
+- Confirm Qwen is found locally and preloaded before PyQt.
+- Confirm hotkey registrations are logged.
+- Confirm `storage/logs/native_crash_dump.log` has no new access violation.
+- Confirm `storage/logs/ui_hang_dump.log` is not generated during idle use.
 
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push (`git push origin feature/amazing`)
-5. Open a Pull Request
+## Architecture
 
----
-
-## 🛠️ Building v5.0 (.exe)
-
-> Run these commands on your local Windows machine with Python venv active.
-
-```bash
-# 1. Activate venv
-venv\Scripts\activate
-
-# 2. Build the installer BMP (requires ImageMagick)
-magick assets\neuron_circular.png -background white -flatten -resize 55x58 assets\neuron_circular_white.bmp
-
-# 3. Freeze with PyInstaller
-pyinstaller neuron.spec --noconfirm --clean
-
-# 4. Package with Inno Setup (requires Inno Setup 6+)
-iscc neuron_installer.iss
-
-# 5. The installer will be at: installer_output/NeuronSetup_v5.0.exe
+```text
+User
+  |
+  +-- PyQt6 Desktop UI
+  |     |
+  |     +-- MemoryOS panel
+  |     +-- Spotlight search panel
+  |     +-- Global hotkey manager
+  |
+  +-- neufs CLI
+        |
+        v
+Desktop services
+  |
+  +-- Intent routing
+  +-- Search / indexing
+  +-- Optional internet retrieval
+  +-- Tool validation and permissions
+        |
+        v
+Local engines
+  |
+  +-- ONNX MiniLM embeddings
+  +-- FAISS/HNSW index
+  +-- llama.cpp Qwen GGUF
 ```
 
----
+The next architecture step is process isolation: React/Tauri UI, Rust core daemon, separate LLM worker, and separate indexer worker. That keeps the UI alive even when model inference, indexing, or parsing fails.
 
-## 📄 License
+## Runtime Logs
 
-MIT License — see [LICENSE](LICENSE) for details.
+Important logs live under:
 
----
+```text
+storage\logs\
+storage\crash.log
+```
 
-<p align="center">
-  Built with 🧬 by <a href="https://github.com/RAHUL-DevelopeRR">Rahul</a>
-</p>
+The desktop enables Python faulthandler for native crashes and a UI hang watchdog for event-loop stalls.
+
+## Repository Layout
+
+```text
+app/                  configuration and logging
+core/                 embeddings, indexing, search, ingestion, watcher
+services/             MemoryOS, model management, tools, validation, internet mode
+ui/                   PyQt6 desktop UI
+tests/                unit and regression tests
+docs/                 verification notes and Rust/Tauri port draft
+storage/models/       local/bundled model assets
+run_desktop.py        desktop entrypoint
+neufs.py              headless CLI
+neuron_onedir.spec    PyInstaller bundle definition
+```
+
+## License
+
+MIT.
