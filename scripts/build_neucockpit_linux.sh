@@ -6,10 +6,36 @@ cd "$ROOT"
 
 export NEURON_SKIP_QWEN_GGUF="${NEURON_SKIP_QWEN_GGUF:-0}"
 
+echo "=== NeuCockpit Linux Build ==="
+echo "Platform: $(uname -m)"
+
 python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt pyinstaller
-python3 -c "from services.model_manager import download_llm_model; download_llm_model()"
+
+# Filter out Windows-only packages from requirements.txt
+grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes)' requirements.txt > /tmp/requirements-linux.txt
+
+# Also filter torch+cpu Windows wheel URL if present
+sed -i 's/torch==.*+cpu/torch/g' /tmp/requirements-linux.txt
+
+python3 -m pip install -r /tmp/requirements-linux.txt pyinstaller || {
+    echo "Some packages failed, trying with --ignore-installed..."
+    python3 -m pip install -r /tmp/requirements-linux.txt pyinstaller --ignore-installed 2>&1 || true
+}
+
+# Download models if not skipping
+if [ "${NEURON_SKIP_QWEN_GGUF}" != "1" ]; then
+    python3 -c "from services.model_manager import download_llm_model; download_llm_model()" || echo "Model download skipped"
+fi
+
 python3 -m PyInstaller neuron_onedir.spec --noconfirm
 
 mkdir -p dist/release
-tar -C dist -czf dist/release/NeuCockpit-v1.0-linux-x64.tar.gz Neuron
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    tar -C dist -czf "dist/release/NeuCockpit-v1.0-linux-arm64.tar.gz" Neuron
+else
+    tar -C dist -czf "dist/release/NeuCockpit-v1.0-linux-x64.tar.gz" Neuron
+fi
+
+echo "=== Build complete ==="
+ls -lh dist/release/
