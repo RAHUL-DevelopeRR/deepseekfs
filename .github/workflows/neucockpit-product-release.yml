@@ -44,10 +44,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libglib2.0-0 libxcb-cursor0 libxkbcommon-x11-0
       - name: Build NeuCockpit Linux ARM64 package
-        run: |
-          bash scripts/build_neucockpit_linux.sh
-          # Rename to distinguish ARM64
-          mv dist/release/NeuCockpit-v1.0-linux-x64.tar.gz dist/release/NeuCockpit-v1.0-linux-arm64.tar.gz
+        run: bash scripts/build_neucockpit_linux.sh
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-linux-arm64
@@ -67,7 +64,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-macos-arm64
-          path: dist/release/NeuCockpit-v1.0-macos.dmg
+          path: dist/release/NeuCockpit-v1.0-macos-arm64.dmg
 
   # ─────────────────────── macOS x64 (Intel) ───────────────────────
   macos-x64:
@@ -79,10 +76,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build NeuCockpit macOS Intel package
-        run: |
-          bash scripts/build_neucockpit_macos.sh
-          # Rename to distinguish Intel
-          mv dist/release/NeuCockpit-v1.0-macos.dmg dist/release/NeuCockpit-v1.0-macos-intel.dmg
+        run: bash scripts/build_neucockpit_macos.sh
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-macos-x64
@@ -129,8 +123,8 @@ jobs:
           fi
 
           # Upload macOS ARM64
-          if [ -f "artifacts/NeuCockpit-v1.0-macos-arm64/NeuCockpit-v1.0-macos.dmg" ]; then
-            aws s3 cp "artifacts/NeuCockpit-v1.0-macos-arm64/NeuCockpit-v1.0-macos.dmg" \
+          if [ -f "artifacts/NeuCockpit-v1.0-macos-arm64/NeuCockpit-v1.0-macos-arm64.dmg" ]; then
+            aws s3 cp "artifacts/NeuCockpit-v1.0-macos-arm64/NeuCockpit-v1.0-macos-arm64.dmg" \
               "s3://zerox-downloads/NeuCockpit-v1.0-macos-arm64.dmg" \
               --endpoint-url "$R2_ENDPOINT" --content-type "application/octet-stream"
             echo "Uploaded macOS ARM64"
