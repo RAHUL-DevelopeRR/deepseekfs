@@ -9,18 +9,61 @@ $PSNativeCommandUseErrorActionPreference = $true
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $Root
 try {
-    python -m pip install --upgrade pip
+    python -m pip install --upgrade pip setuptools wheel
 
     $req = Join-Path $env:TEMP "requirements-windows-$Arch.txt"
-    Get-Content requirements.txt |
+    $lines = Get-Content requirements.txt |
         Where-Object {
             $_ -notmatch '^\s*pyaudiowpatch' -and
             $_ -notmatch '^\s*vosk' -and
             $_ -notmatch '^\s*pywin32\b'
-        } |
-        Set-Content -Encoding ascii $req
+        }
+
+    if ($Arch -eq "arm64") {
+        $lines = $lines | Where-Object {
+            $_ -notmatch '^\s*--extra-index-url' -and
+            $_ -notmatch '^\s*numpy==' -and
+            $_ -notmatch '^\s*PyMuPDF==' -and
+            $_ -notmatch '^\s*watchdog==' -and
+            $_ -notmatch '^\s*PyYAML==' -and
+            $_ -notmatch '^\s*cryptography==' -and
+            $_ -notmatch '^\s*torch==' -and
+            $_ -notmatch '^\s*transformers==' -and
+            $_ -notmatch '^\s*sentence-transformers==' -and
+            $_ -notmatch '^\s*safetensors==' -and
+            $_ -notmatch '^\s*spacy' -and
+            $_ -notmatch '^\s*tokenizers==' -and
+            $_ -notmatch '^\s*llama-cpp-python'
+        }
+    }
+
+    $lines | Set-Content -Encoding ascii $req
+
+    if ($Arch -eq "arm64") {
+        python -m pip install --prefer-binary `
+            numpy `
+            PyQt6==6.10.2 `
+            PyQt6-Qt6==6.10.2 `
+            PyQt6_sip==13.11.1 `
+            onnxruntime `
+            tokenizers `
+            faiss-cpu==1.13.2 `
+            scipy==1.17.1 `
+            scikit-learn==1.8.0 `
+            cryptography `
+            huggingface_hub==0.36.2 `
+            pyinstaller `
+            cmake `
+            ninja
+    }
 
     python -m pip install -r $req pyinstaller
+
+    if ($Arch -eq "arm64") {
+        $env:CMAKE_ARGS = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF"
+        $env:FORCE_CMAKE = "1"
+        python -m pip install --no-cache-dir llama-cpp-python
+    }
 
     if ($env:NEURON_SKIP_QWEN_GGUF -ne "1") {
         python -c "from services.model_manager import download_llm_model; download_llm_model()"
