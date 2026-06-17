@@ -1,6 +1,7 @@
 """Logging Configuration"""
 import io
 import logging
+import os
 import sys
 
 def setup_logger(name: str = "neuron") -> logging.Logger:
@@ -15,7 +16,10 @@ def setup_logger(name: str = "neuron") -> logging.Logger:
     )
 
     console_handler = None
-    stream = getattr(sys, "stdout", None) or getattr(sys, "stderr", None)
+    if "NEURON_LOG_STDERR" in os.environ:
+        stream = getattr(sys, "stderr", None)
+    else:
+        stream = getattr(sys, "stdout", None) or getattr(sys, "stderr", None)
     stream_buffer = getattr(stream, "buffer", None)
     if stream_buffer is not None:
         # Windowed PyInstaller apps may have no stdout/stderr. Source runs and

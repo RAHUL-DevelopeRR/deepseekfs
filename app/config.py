@@ -2,6 +2,7 @@
 import json
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 
@@ -35,7 +36,13 @@ except Exception:
     STORAGE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Neuron" / "storage"
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-FAISS_INDEX_DIR = STORAGE_DIR / "faiss_index"
+# Embedding configuration. BGE Small keeps the existing 384-dimensional FAISS
+# footprint while improving retrieval quality over the legacy MiniLM baseline.
+MODEL_NAME = os.getenv("NEURON_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+EMBEDDING_DIM = int(os.getenv("NEURON_EMBEDDING_DIM", "384"))
+EMBEDDING_INDEX_SLUG = re.sub(r"[^a-z0-9]+", "_", MODEL_NAME.lower()).strip("_")
+
+FAISS_INDEX_DIR = STORAGE_DIR / f"faiss_index_{EMBEDDING_INDEX_SLUG}"
 CACHE_DIR = STORAGE_DIR / "cache"
 FIRST_RUN_FLAG = STORAGE_DIR / ".first_run_complete"
 CUSTOM_PATHS_FILE = STORAGE_DIR / "custom_watch_paths.json"
@@ -63,10 +70,14 @@ SKIP_DIRS = {
     "node_modules", "bower_components",
     # VCS & IDE
     ".git", ".hg", ".svn",
-    ".idea", ".vscode", ".vs",
+    ".idea", ".vscode", ".vs", ".codex", ".agents",
     # OS / system
     "Windows", "$Recycle.Bin", "ProgramData",
     "AppData", "System Volume Information",
+    "Program Files", "Program Files (x86)", "PerfLogs",
+    "Recovery", "Config.Msi",
+    # Large app/database installs that are hostile to broad-drive scans
+    "dbhome*", "oradata", "Oracle", "oracle",
     # Caches & build artefacts
     ".cache", ".tox", ".nox", ".mypy_cache",
     ".pytest_cache", "build", "dist",
@@ -75,6 +86,27 @@ SKIP_DIRS = {
     "Intermediate", "Saved", "DerivedDataCache", "Binaries",
     "target", ".gradle", ".idea", ".nuget",
 }
+
+
+def is_drive_root(path: str | Path) -> bool:
+    """True for broad roots like C:/ or / that should not be live-watched."""
+    try:
+        p = Path(path).resolve()
+        if platform.system().lower().startswith("win"):
+            return bool(p.anchor) and str(p).rstrip("\\/").lower() == p.anchor.rstrip("\\/").lower()
+        return p.parent == p
+    except Exception:
+        return False
+
+
+def filter_live_watch_paths(paths: list) -> list:
+    """Remove paths that are too broad or unsafe for recursive live watching."""
+    safe = []
+    for path in paths:
+        if is_drive_root(path):
+            continue
+        safe.append(path)
+    return safe
 
 # ─────────────────────────────────────────────────────────────
 # AUTO-DETECT real user folders (cross-platform)
@@ -156,6 +188,7 @@ class UserConfig:
         "hotkey": "shift+space",
         "internet_enabled": False,
         "internet_max_results": 3,
+        "auto_index_on_launch": True,
     }
 
     @classmethod
@@ -212,6 +245,8 @@ class UserConfig:
         config = cls.load()
         extras = config.get("extra_watch_paths", [])
         norm = str(Path(path).resolve())
+        if is_drive_root(norm):
+            return False
         existing = {str(Path(p).resolve()) for p in extras}
         if norm in existing or not Path(path).exists():
             return False
@@ -254,16 +289,22 @@ SUPPORTED_EXTENSIONS = {
     ".ipynb",
     # Logs
     ".log",
+    # Local executables and shell scripts are indexed by metadata/name only.
+    # This lets exact filename searches like "ptytest3.exe" work without
+    # trying to read binary contents.
+    ".exe", ".msi", ".dll", ".lnk", ".bat", ".cmd", ".ps1",
     # Media (metadata only)
     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
 }
 
+METADATA_ONLY_EXTENSIONS = {
+    ".exe", ".msi", ".dll", ".lnk",
+}
+
 # Model configuration
-MODEL_NAME = "all-MiniLM-L6-v2"
-EMBEDDING_DIM = 384
 METADATA_PATH = str(CACHE_DIR / "metadata.pkl")      # deprecated — use SQLITE_DB_PATH
 INDEXED_PATHS_DB = str(CACHE_DIR / "indexed_paths.pkl")  # deprecated — use SQLITE_DB_PATH
-SQLITE_DB_PATH = str(CACHE_DIR / "metadata.db")
+SQLITE_DB_PATH = str(CACHE_DIR / f"metadata_{EMBEDDING_INDEX_SLUG}.db")
 
 # Search configuration
 TOP_K = UserConfig.load().get("top_k", 20)
@@ -277,7 +318,7 @@ API_PORT = int(os.getenv("API_PORT", 8000))
 API_RELOAD = False
 
 # UI configuration
-UI_TITLE = "Neuron — AI File Intelligence"
+UI_TITLE = "NeuCockpit v1.0"
 UI_WIDTH = 1000
 UI_HEIGHT = 700
 

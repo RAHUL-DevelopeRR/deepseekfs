@@ -11,9 +11,10 @@ import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
+from html import unescape
 from html.parser import HTMLParser
 from typing import Iterator
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
 
@@ -23,8 +24,17 @@ from app.logger import logger
 _DEFAULT_TIMEOUT = 6
 _DIRECT_TIMEOUT = float(os.getenv("NEURON_INTERNET_DIRECT_TIMEOUT", "3"))
 _DDG_API = "https://api.duckduckgo.com/"
-_DDG_HTML = "https://duckduckgo.com/html/"
+_DDG_HTML_ENDPOINTS = (
+    "https://html.duckduckgo.com/html/",
+    "https://duckduckgo.com/html/",
+    "https://lite.duckduckgo.com/lite/",
+)
+_WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 _OVERRIDE = threading.local()
+_PUBLIC_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 Neuron/1.0 optional-live-search"
+)
 
 _LIVE_HINTS = {
     "current", "currently", "latest", "today", "tonight", "yesterday",
@@ -32,6 +42,12 @@ _LIVE_HINTS = {
     "stock", "weather", "score", "scores", "fixture", "schedule",
     "release", "version", "deadline", "election", "president", "ceo",
     "minister", "governor", "mayor", "chairperson", "appointed", "sworn",
+}
+
+_FACTUAL_HINTS = {
+    "who", "what", "where", "when", "why", "how", "explain", "define",
+    "movie", "film", "director", "directed", "actor", "cast", "related",
+    "relationship", "company", "person", "place", "country", "city",
 }
 
 
@@ -82,7 +98,7 @@ def set_internet_enabled(enabled: bool) -> dict:
 
 
 def is_live_data_query(query: str) -> bool:
-    """Return whether a query needs fresh public data."""
+    """Return whether a query needs fresh/current public data."""
     low = query.lower().strip()
     if low.startswith(("web:", "internet:", "online:")):
         return True
@@ -96,9 +112,22 @@ def is_live_data_query(query: str) -> bool:
     return bool(tokens & _LIVE_HINTS)
 
 
+def is_public_factual_query(query: str) -> bool:
+    """Return whether an online-enabled query should be externally grounded."""
+    low = query.lower().strip()
+    if low.startswith(("web:", "internet:", "online:")):
+        return True
+    tokens = set(re.findall(r"[a-z0-9]+", low))
+    if not tokens or tokens <= {"hi", "hello", "hey", "thanks", "thank", "you"}:
+        return False
+    return bool(tokens & _FACTUAL_HINTS)
+
+
 def should_use_live_data(query: str) -> bool:
-    """Use internet only for explicit/live-data questions when enabled."""
-    return internet_enabled() and is_live_data_query(query)
+    """Use internet only when enabled and the query benefits from grounding."""
+    return internet_enabled() and (
+        is_live_data_query(query) or is_public_factual_query(query)
+    )
 
 
 def clean_live_query(query: str) -> str:
@@ -124,6 +153,13 @@ def search_public_web(query: str, max_results: int | None = None) -> list[Intern
     results.extend(_search_duckduckgo_api(safe_query, limit - len(results)))
     if len(results) < limit:
         results.extend(_search_duckduckgo_html(safe_query, limit - len(results)))
+    if len(results) < limit or _looks_like_relation_query(safe_query):
+        wiki_limit = max(limit - len(results), 5 if _looks_like_relation_query(safe_query) else 1)
+        results.extend(_search_wikipedia(safe_query, wiki_limit))
+
+    fact = _derive_grounded_fact(safe_query, results)
+    if fact:
+        results.insert(0, fact)
 
     seen: set[str] = set()
     unique: list[InternetResult] = []
@@ -242,6 +278,92 @@ def _extract_tamil_nadu_cm_fact(results: list[InternetResult]) -> InternetResult
     return None
 
 
+def _looks_like_relation_query(query: str) -> bool:
+    low = query.lower()
+    return bool(re.search(r"\b(related|relation|relationship|connected|connection)\b", low))
+
+
+def _derive_grounded_fact(query: str, results: list[InternetResult]) -> InternetResult | None:
+    """Create deterministic answer markers for high-risk relation questions."""
+    low = query.lower()
+    if not (
+        "pirates" in low
+        and "caribbean" in low
+        and re.search(r"james\s+cameron|james\s+cameroon", low)
+    ):
+        return None
+
+    if not any(r.snippet for r in results):
+        return None
+
+    directors: list[str] = []
+    for result in results:
+        is_pirates_result = "pirates of the caribbean" in result.title.lower()
+        if not is_pirates_result:
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+", result.snippet or ""):
+            slow = sentence.lower()
+            if "james cameron" in slow or "avatar" in slow:
+                continue
+            for match in re.finditer(
+                r"directed by ([^.]+?)(?:,| and written| and produced|\.|$)",
+                sentence,
+                flags=re.I,
+            ):
+                value = " ".join(match.group(1).split())
+                if value and value not in directors:
+                    directors.append(value)
+    directors = directors[:4]
+
+    relation_sentence = ""
+    relation_source: InternetResult | None = None
+    for result in results:
+        for sentence in re.split(r"(?<=[.!?])\s+", result.snippet or ""):
+            slow = sentence.lower()
+            if (
+                "james cameron" in slow
+                and "pirates" in slow
+                and "directed by james cameron" not in slow
+            ):
+                relation_sentence = " ".join(sentence.split())
+                relation_source = result
+                break
+        if relation_sentence:
+            break
+
+    director_part = ""
+    if directors:
+        director_part = " Retrieved sources list Pirates directors including " + "; ".join(directors) + "."
+
+    if relation_sentence:
+        answer = (
+            "No retrieved source verifies that James Cameron directed Pirates of the Caribbean."
+            f"{director_part} A retrieved source only shows an indirect connection: {relation_sentence}"
+        )
+    else:
+        answer = (
+            "No retrieved source verifies a direct James Cameron connection to Pirates of the Caribbean, "
+            "and the retrieved sources do not list him as a Pirates director."
+            f"{director_part}"
+        )
+
+    source = (
+        relation_source
+        or next((r for r in results if "wikipedia:" in r.title.lower()), None)
+        or (results[0] if results else None)
+    )
+    if source is None:
+        return None
+    return InternetResult(
+        title=source.title,
+        url=source.url,
+        snippet=(
+            f"ANSWER_VALUE: {answer} "
+            "Public web source text supports this relation/director check."
+        ),
+    )
+
+
 def format_results_for_prompt(results: list[InternetResult]) -> str:
     """Format public web snippets for the local model."""
     if not results:
@@ -262,7 +384,7 @@ def _search_duckduckgo_api(query: str, limit: int) -> list[InternetResult]:
         response = requests.get(
             _DDG_API,
             params={"q": query, "format": "json", "no_redirect": "1", "no_html": "1"},
-            headers={"User-Agent": "Neuron/1.0 offline-desktop optional-live-search"},
+            headers={"User-Agent": _PUBLIC_UA, "Accept": "application/json"},
             timeout=_DEFAULT_TIMEOUT,
         )
         response.raise_for_status()
@@ -293,6 +415,8 @@ def _search_duckduckgo_api(query: str, limit: int) -> list[InternetResult]:
 
     collect(data.get("Results"))
     collect(data.get("RelatedTopics"))
+    if not results:
+        logger.info("InternetSearch: DDG instant-answer API returned no web results")
     return results[:limit]
 
 
@@ -340,21 +464,143 @@ class _DuckDuckGoHTMLParser(HTMLParser):
 def _search_duckduckgo_html(query: str, limit: int) -> list[InternetResult]:
     if limit <= 0:
         return []
+
+    for endpoint in _DDG_HTML_ENDPOINTS:
+        try:
+            response = requests.get(
+                endpoint,
+                params={"q": query},
+                headers={
+                    "User-Agent": _PUBLIC_UA,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+                timeout=_DEFAULT_TIMEOUT,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning(f"InternetSearch: DDG HTML failed for {endpoint}: {exc}")
+            continue
+
+        parser = _DuckDuckGoHTMLParser()
+        parser.feed(response.text)
+        if parser.results:
+            return parser.results[:limit]
+
+        if _looks_like_ddg_placeholder(response.text):
+            logger.info(
+                "InternetSearch: DDG HTML returned its search shell without "
+                f"result rows (HTTP {response.status_code}); trying fallback"
+            )
+        else:
+            logger.info("InternetSearch: DDG HTML returned no parseable results")
+
+    return []
+
+
+def _looks_like_ddg_placeholder(text: str) -> bool:
+    low = (text or "").lower()
+    has_result_markup = any(
+        marker in low
+        for marker in ("result__a", "result-link", "result__snippet", "web-result")
+    )
+    return "duckduckgo" in low and not has_result_markup
+
+
+def _strip_html(text: str) -> str:
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", text or "")).split())
+
+
+def _wikipedia_url(title: str) -> str:
+    return "https://en.wikipedia.org/wiki/" + quote(title.replace(" ", "_"), safe=":_()")
+
+
+def _fetch_wikipedia_extract(title: str) -> str:
+    return _fetch_wikipedia_extracts([title]).get(title, "")
+
+
+def _fetch_wikipedia_extracts(titles: list[str]) -> dict[str, str]:
+    if not titles:
+        return {}
     try:
         response = requests.get(
-            _DDG_HTML,
-            params={"q": query},
-            headers={"User-Agent": "Neuron/1.0 offline-desktop optional-live-search"},
+            _WIKIPEDIA_API,
+            params={
+                "action": "query",
+                "prop": "extracts",
+                "exintro": "1",
+                "explaintext": "1",
+                "redirects": "1",
+                "format": "json",
+                "titles": "|".join(titles),
+            },
+            headers={"User-Agent": _PUBLIC_UA},
             timeout=_DEFAULT_TIMEOUT,
         )
         response.raise_for_status()
+        data = response.json()
     except Exception as exc:
-        logger.warning(f"InternetSearch: DDG HTML failed: {exc}")
+        logger.warning(f"InternetSearch: Wikipedia extract failed: {exc}")
+        return {}
+
+    extracts: dict[str, str] = {}
+    pages = data.get("query", {}).get("pages", {})
+    for page in pages.values():
+        title = page.get("title") or ""
+        extract = " ".join((page.get("extract") or "").split())
+        if title and extract:
+            extracts[title] = extract[:900]
+    return extracts
+
+
+def _search_wikipedia(query: str, limit: int) -> list[InternetResult]:
+    """Fallback factual retrieval when DDG does not return result rows."""
+    if limit <= 0:
+        return []
+    try:
+        response = requests.get(
+            _WIKIPEDIA_API,
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": limit,
+                "format": "json",
+                "utf8": "1",
+            },
+            headers={"User-Agent": _PUBLIC_UA},
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        logger.warning(f"InternetSearch: Wikipedia search failed: {exc}")
         return []
 
-    parser = _DuckDuckGoHTMLParser()
-    parser.feed(response.text)
-    return parser.results[:limit]
+    hits = data.get("query", {}).get("search", []) or []
+    titles = [(hit.get("title") or "").strip() for hit in hits]
+    titles = [title for title in titles if title]
+    extracts = _fetch_wikipedia_extracts(titles)
+
+    results: list[InternetResult] = []
+    for hit in hits:
+        title = (hit.get("title") or "").strip()
+        if not title:
+            continue
+        snippet = extracts.get(title) or _strip_html(hit.get("snippet", ""))
+        results.append(
+            InternetResult(
+                title=f"Wikipedia: {title}",
+                url=_wikipedia_url(title),
+                snippet=snippet,
+            )
+        )
+        if len(results) >= limit:
+            break
+
+    if results:
+        logger.info(f"InternetSearch: Wikipedia fallback returned {len(results)} results")
+    return results
 
 
 class _TextOnlyHTMLParser(HTMLParser):

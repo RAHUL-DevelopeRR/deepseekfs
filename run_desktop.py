@@ -64,6 +64,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+if "--llm-worker" in sys.argv:
+    from services.llm_worker import main as _llm_worker_main
+    raise SystemExit(_llm_worker_main())
+
+# Keep llama.cpp native faults and CPU-instruction failures outside Qt.
+os.environ.setdefault("NEURON_LLM_BACKEND", "worker")
+os.environ.setdefault("NEURON_LLM_PROFILE", "performance")
+os.environ.setdefault("NEURON_LLM_BATCH", "512")
+os.environ.setdefault("NEURON_UI_STREAMING", "1")
+
 # ── Core imports (must happen BEFORE PyQt6) ───────────────────
 import app.config as config
 from app.logger import logger
@@ -78,6 +88,9 @@ install_crash_diagnostics()
 # ═══════════════════════════════════════════════════════════════
 def _preload_llm():
     """Pre-load an existing local LLM before PyQt6, without downloading."""
+    if os.getenv("NEURON_LLM_BACKEND", "worker").lower() == "worker":
+        logger.info("Encyl: LLM preload skipped; worker backend loads Qwen on demand.")
+        return
     try:
         from services.model_manager import get_llm_model_path
         if get_llm_model_path() is None:
@@ -88,7 +101,9 @@ def _preload_llm():
         engine = get_llm_engine()
         ok = engine.load_model(allow_download=False)
         if ok:
-            logger.info(f"Encyl: AI model ready (ctx={engine._model.n_ctx()})")
+            model = getattr(engine, "_model", None)
+            ctx = model.n_ctx() if model is not None and hasattr(model, "n_ctx") else "worker"
+            logger.info(f"Encyl: AI model ready (ctx={ctx})")
         else:
             logger.info(f"Encyl: Model load deferred: {engine.load_error}")
     except Exception as e:
@@ -129,15 +144,15 @@ def main():
     # Default Apps, taskbar grouping, and notification settings.
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "Rahul.Neuron.Desktop.5.2"
+            "Rahul.NeuCockpit.Desktop.1.0"
         )
     except Exception:
         pass  # Non-critical on non-Windows
 
     # ── 1. App object FIRST ──
     app = QApplication(sys.argv)
-    app.setApplicationName("Neuron")
-    app.setApplicationVersion("5.2.0")
+    app.setApplicationName("NeuCockpit")
+    app.setApplicationVersion("1.0.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
     app.aboutToQuit.connect(lambda: logger.info("Desktop: QApplication aboutToQuit emitted"))
@@ -170,7 +185,7 @@ def main():
         | Qt.WindowType.FramelessWindowHint)
     splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     splash.setMask(QRegion(mask_bmp))
-    splash.showMessage("Neuron is loading…",
+    splash.showMessage("NeuCockpit is loading...",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
         QColor("#ffffff"))
     if smoke_mode:
@@ -229,7 +244,7 @@ def main():
     # ── 7. Register global hotkey ──
     panel_hotkey_ok = False
     for spec in PANEL_HOTKEYS:
-        panel_hotkey_ok |= hotkeys.register(spec, panel.activate_from_hotkey)
+        panel_hotkey_ok |= hotkeys.register(spec, panel.toggle_from_hotkey)
     if not panel_hotkey_ok:
         logger.warning("Panel hotkeys unavailable; tray menu remains available.")
 
@@ -280,8 +295,8 @@ if __name__ == "__main__":
         try:
             ctypes.windll.user32.MessageBoxW(
                 0,
-                f"Neuron failed to start:\n\n{str(exc)[:300]}\n\nCheck storage/crash.log for details.",
-                "Neuron — Startup Error",
+                f"NeuCockpit failed to start:\n\n{str(exc)[:300]}\n\nCheck storage/crash.log for details.",
+                "NeuCockpit Startup Error",
                 0x10,
             )
         except Exception:

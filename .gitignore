@@ -32,3 +32,11 @@ Desktop.ini
 
 # Rust
 **/target/
+
+# Node / frontend
+node_modules/
+apps/*/node_modules/
+apps/*/dist/
+apps/*/output/
+apps/*/.playwright-cli/
+apps/*/src-tauri/gen/

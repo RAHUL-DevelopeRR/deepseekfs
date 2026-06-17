@@ -52,3 +52,46 @@ def test_global_hotkey_manager_fails_closed_on_unsupported_os(monkeypatch):
     assert manager.supported is False
     assert manager.register(hotkeys.PANEL_PRIMARY, lambda: None) is False
     assert manager.registered_labels == []
+
+
+def test_hotkey_config_defaults_to_shift_space_with_safe_fallback():
+    from ui.hotkeys import (
+        PANEL_OS_SAFE_FALLBACK,
+        PANEL_PRIMARY,
+        get_hotkey_label,
+        get_panel_hotkey_specs,
+        normalize_hotkey,
+    )
+
+    assert normalize_hotkey("") == "shift+space"
+    assert normalize_hotkey("Shift Space") == "shift+space"
+    assert normalize_hotkey("control+alt+n") == "ctrl+alt+n"
+    assert get_hotkey_label("shift+space") == "Shift+Space"
+    assert get_panel_hotkey_specs("shift+space") == (
+        PANEL_PRIMARY,
+        PANEL_OS_SAFE_FALLBACK,
+    )
+
+
+def test_hotkey_config_uses_selected_shortcut_first():
+    from ui.hotkeys import PANEL_FALLBACK, PANEL_OS_SAFE_FALLBACK, get_panel_hotkey_specs
+
+    assert get_panel_hotkey_specs("ctrl+space") == (
+        PANEL_FALLBACK,
+        PANEL_OS_SAFE_FALLBACK,
+    )
+    assert get_panel_hotkey_specs("ctrl+alt+n") == (PANEL_OS_SAFE_FALLBACK,)
+
+
+def test_local_shift_space_is_reserved_for_panel_toggle():
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QKeyEvent
+    from ui.spotlight_panel import SpotlightPanel
+
+    event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_Space,
+        Qt.KeyboardModifier.ShiftModifier,
+    )
+
+    assert SpotlightPanel._is_shift_space_event(event)

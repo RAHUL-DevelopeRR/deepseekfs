@@ -5,6 +5,7 @@ Upgraded hybrid scoring:
 Plus keyword bonuses and path/size/negation pre-filters.
 """
 import os
+import re
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -41,6 +42,14 @@ class SemanticSearch:
         use_llm_rerank: bool = False,
     ) -> List[Dict]:
         index_builder = self._preloaded_index if self._preloaded_index is not None else get_index()
+
+        if self._looks_like_specific_file_query(query):
+            direct_results = self._direct_metadata_search(index_builder, query, top_k)
+            if direct_results:
+                logger.info(f"Direct filename query: '{query}' -> {len(direct_results)} results")
+                return direct_results
+            logger.info(f"Direct filename query: '{query}' -> no exact indexed file")
+            return []
 
         if index_builder.index is None or index_builder.index.ntotal == 0:
             logger.warning("Index is empty. Indexing may still be running.")
@@ -310,6 +319,72 @@ class SemanticSearch:
             return []
 
     # ── Enumeration fast-path ─────────────────────────────────
+    @staticmethod
+    def _looks_like_specific_file_query(query: str) -> bool:
+        text = (query or "").strip().strip('"').strip("'")
+        if "\\" in text or "/" in text:
+            return True
+        return bool(re.search(r"\b[\w .()@+-]+\.[A-Za-z0-9]{1,8}\b", text))
+
+    def _direct_metadata_search(self, index_builder, query: str, top_k: int) -> list:
+        """Exact filename/path lookup before semantic search."""
+        text = (query or "").strip().strip('"').strip("'")
+        if not text:
+            return []
+        needle = text.lower()
+        basename = Path(text).name.lower()
+
+        try:
+            conn = index_builder._db._conn()
+            rows = []
+            queries = [
+                (
+                    "SELECT * FROM files WHERE LOWER(name)=? OR LOWER(path)=? LIMIT ?",
+                    (basename, needle, top_k),
+                ),
+                (
+                    "SELECT * FROM files WHERE LOWER(name) LIKE ? OR LOWER(path) LIKE ? LIMIT ?",
+                    (f"%{basename}%", f"%{needle}%", top_k),
+                ),
+            ]
+            for sql, params in queries:
+                for row in conn.execute(sql, params).fetchall():
+                    row_dict = dict(row)
+                    if any(existing["path"] == row_dict["path"] for existing in rows):
+                        continue
+                    if Path(row_dict["path"]).exists():
+                        rows.append(row_dict)
+                    if len(rows) >= top_k:
+                        break
+                if len(rows) >= top_k:
+                    break
+
+            results = []
+            for row in rows[:top_k]:
+                name_l = str(row.get("name", "")).lower()
+                path_l = str(row.get("path", "")).lower()
+                if name_l == basename or path_l == needle:
+                    score = 1.0
+                elif basename and basename in name_l:
+                    score = 0.92
+                else:
+                    score = 0.82
+                results.append({
+                    "path": row.get("path", ""),
+                    "name": row.get("name", ""),
+                    "extension": row.get("extension", ""),
+                    "size": row.get("size", 0),
+                    "modified_time": row.get("modified_time", 0),
+                    "semantic_score": round(score, 4),
+                    "time_score": 0.0,
+                    "combined_score": round(score, 4),
+                    "open_count": row.get("open_count", 0),
+                })
+            return sorted(results, key=lambda item: item["combined_score"], reverse=True)
+        except Exception as exc:
+            logger.warning(f"Direct filename search failed: {exc}")
+            return []
+
     def _enumeration_search(
         self,
         index_builder,

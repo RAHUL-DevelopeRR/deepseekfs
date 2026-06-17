@@ -30,6 +30,7 @@ from typing import Optional, Dict, Iterator, List
 import services.jinja2_patches  # noqa: F401
 
 from app.logger import logger
+from services.model_health import format_ai_unavailable, normalize_model_error
 
 
 def _strip_thinking(text: str) -> str:
@@ -50,12 +51,40 @@ def _strip_thinking(text: str) -> str:
     # 3) If everything was thinking, return a polite fallback
     return cleaned if cleaned else "I'm here to help. What would you like to do?"
 
+
+def _approx_tokens(text: str) -> int:
+    """Cheap throughput estimate when llama.cpp usage metadata is absent."""
+    return max(1, int(len(text or "") / 4))
+
+
+def _completion_tokens(response: dict, content: str) -> int:
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if isinstance(usage, dict):
+        value = usage.get("completion_tokens") or usage.get("output_tokens")
+        if isinstance(value, int) and value > 0:
+            return value
+    return _approx_tokens(content)
+
+
+def _log_generation_stats(kind: str, started: float, response: dict, content: str) -> None:
+    elapsed = max(0.001, time.time() - started)
+    tokens = _completion_tokens(response, content)
+    logger.info(
+        "LLMEngine: %s completed in %.2fs, output_tokens~%d, %.2f tok/s, chars=%d",
+        kind,
+        elapsed,
+        tokens,
+        tokens / elapsed,
+        len(content or ""),
+    )
+
 # ── Configuration ─────────────────────────────────────────────
 DEFAULT_N_CTX = 4096        # Context window (tokens)
 DEFAULT_N_THREADS = 0       # 0 = auto-detect CPU cores
 DEFAULT_N_BATCH = 256       # Lower batch keeps preloaded memory pressure modest
 DEFAULT_TEMPERATURE = 0.3   # Low temp for consistent outputs
 DEFAULT_MAX_TOKENS = 512    # Default generation length
+SUMMARY_CACHE_VERSION = "summary-v2"
 
 # ── System Prompts ────────────────────────────────────────────
 SYSTEM_SUMMARIZE = (
@@ -159,9 +188,10 @@ class LLMEngine:
                 if model_path is None:
                     if not allow_download:
                         self._load_error = (
-                            "Qwen 2.5 Coder GGUF model not found. "
+                            "Qwen 2.5 Coder 3B GGUF model not found. "
                             "Place it in storage/models, %LOCALAPPDATA%/Neuron/models, "
-                            "or set NEURON_MODEL_DIRS."
+                            "or set NEURON_MODEL_DIRS. Set NEURON_ALLOW_SMALL_MODEL_FALLBACK=1 "
+                            "only for diagnostics on the older 0.5B beta model."
                         )
                         logger.warning(f"LLMEngine: {self._load_error}")
                         return False
@@ -181,11 +211,29 @@ class LLMEngine:
             
             from llama_cpp import Llama
             
-            # Auto-detect thread count; allow local power/RAM tuning.
-            n_threads = int(os.getenv("NEURON_LLM_THREADS", str(DEFAULT_N_THREADS)) or "0")
-            if n_threads == 0:
-                n_threads = max(1, (os.cpu_count() or 4) // 2)
-            n_batch = max(32, int(os.getenv("NEURON_LLM_BATCH", str(DEFAULT_N_BATCH)) or str(DEFAULT_N_BATCH)))
+            # Auto-detect thread count; allow local speed/power tuning.
+            cores = os.cpu_count() or 4
+            profile = os.getenv("NEURON_LLM_PROFILE", "balanced").strip().lower()
+            raw_threads = os.getenv("NEURON_LLM_THREADS")
+            if raw_threads is None or raw_threads.strip() == "":
+                if profile == "eco":
+                    n_threads = max(1, cores // 3)
+                elif profile == "performance":
+                    n_threads = max(2, min(8, cores))
+                else:
+                    n_threads = max(1, cores // 2)
+            else:
+                n_threads = int(raw_threads or str(DEFAULT_N_THREADS))
+                if n_threads == 0:
+                    n_threads = max(1, cores // 2)
+
+            raw_batch = os.getenv("NEURON_LLM_BATCH")
+            if raw_batch is None or raw_batch.strip() == "":
+                n_batch = 128 if profile == "eco" else 512 if profile == "performance" else DEFAULT_N_BATCH
+            else:
+                n_batch = int(raw_batch or str(DEFAULT_N_BATCH))
+            n_batch = max(32, n_batch)
+            n_gpu_layers = max(0, int(os.getenv("NEURON_LLM_GPU_LAYERS", "0") or "0"))
             use_mmap = os.getenv("NEURON_LLM_MMAP", "1").lower() not in {"0", "false", "no"}
             default_verbose = "1" if getattr(sys, "frozen", False) else "0"
             verbose = os.getenv("NEURON_LLM_VERBOSE", default_verbose).lower() in {"1", "true", "yes"}
@@ -196,10 +244,13 @@ class LLMEngine:
                 raise ValueError(f"Model file too small ({file_size} bytes), likely corrupted.")
             
             logger.info(
-                "LLMEngine: File size=%.0fMB, threads=%s, batch=%s, mmap=%s",
+                "LLMEngine: File size=%.0fMB, profile=%s, threads=%s/%s, batch=%s, gpu_layers=%s, mmap=%s",
                 file_size / (1024 * 1024),
+                profile,
                 n_threads,
+                cores,
                 n_batch,
+                n_gpu_layers,
                 use_mmap,
             )
             
@@ -212,7 +263,7 @@ class LLMEngine:
                 model_path=self._model_path,
                 n_batch=n_batch,
                 n_threads=n_threads,
-                n_gpu_layers=0,
+                n_gpu_layers=n_gpu_layers,
                 verbose=verbose,
                 use_mmap=use_mmap,
                 use_mlock=False,
@@ -251,7 +302,7 @@ class LLMEngine:
             return False
             
         except Exception as e:
-            self._load_error = str(e)
+            self._load_error = normalize_model_error(e)
             logger.error(f"LLMEngine: Failed to load model: {e}")
             return False
             
@@ -292,7 +343,7 @@ class LLMEngine:
         """
         if not self._loaded:
             if not self.load_model():
-                return f"[AI unavailable: {self._load_error or 'model not loaded'}]"
+                return format_ai_unavailable(self._load_error or "model not loaded")
         
         with self._lock:
             try:
@@ -301,6 +352,7 @@ class LLMEngine:
                     messages.append({"role": "system", "content": system})
                 messages.append({"role": "user", "content": prompt})
                 
+                started = time.time()
                 response = self._model.create_chat_completion(
                     messages=messages,
                     max_tokens=max_tokens,
@@ -309,7 +361,9 @@ class LLMEngine:
                 )
                 
                 content = response["choices"][0]["message"]["content"]
-                return _strip_thinking(content.strip()) if content else ""
+                cleaned = _strip_thinking(content.strip()) if content else ""
+                _log_generation_stats("generate", started, response, cleaned)
+                return cleaned
                 
             except Exception as e:
                 logger.error(f"LLMEngine: Generation error: {e}")
@@ -329,7 +383,7 @@ class LLMEngine:
         """
         if not self._loaded:
             if not self.load_model():
-                yield f"[AI unavailable: {self._load_error or 'model not loaded'}]"
+                yield format_ai_unavailable(self._load_error or "model not loaded")
                 return
         
         with self._lock:
@@ -339,6 +393,9 @@ class LLMEngine:
                     messages.append({"role": "system", "content": system})
                 messages.append({"role": "user", "content": prompt})
                 
+                started = time.time()
+                emitted: list[str] = []
+                first_token_s: float | None = None
                 stream = self._model.create_chat_completion(
                     messages=messages,
                     max_tokens=max_tokens,
@@ -350,7 +407,22 @@ class LLMEngine:
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
                     token = delta.get("content", "")
                     if token:
+                        if first_token_s is None:
+                            first_token_s = time.time() - started
+                        emitted.append(token)
                         yield token
+
+                elapsed = max(0.001, time.time() - started)
+                text = "".join(emitted)
+                tokens = _approx_tokens(text)
+                logger.info(
+                    "LLMEngine: generate_stream completed in %.2fs, ttft=%.2fs, output_tokens~%d, %.2f tok/s, chars=%d",
+                    elapsed,
+                    first_token_s if first_token_s is not None else -1.0,
+                    tokens,
+                    tokens / elapsed,
+                    len(text),
+                )
                         
             except Exception as e:
                 logger.error(f"LLMEngine: Stream error: {e}")
@@ -369,11 +441,12 @@ class LLMEngine:
         """
         if not self._loaded:
             if not self.load_model():
-                return f"[AI unavailable: {self._load_error or 'model not loaded'}]"
+                return format_ai_unavailable(self._load_error or "model not loaded")
         
         with self._lock:
             try:
                 # Pass messages through as-is — caller manages context
+                started = time.time()
                 response = self._model.create_chat_completion(
                     messages=messages,
                     max_tokens=max_tokens,
@@ -381,7 +454,9 @@ class LLMEngine:
                 )
                 
                 content = response["choices"][0]["message"]["content"]
-                return _strip_thinking(content.strip()) if content else ""
+                cleaned = _strip_thinking(content.strip()) if content else ""
+                _log_generation_stats("chat", started, response, cleaned)
+                return cleaned
                 
             except Exception as e:
                 logger.error(f"LLMEngine: Chat error: {e}")
@@ -405,11 +480,14 @@ class LLMEngine:
         """
         if not self._loaded:
             if not self.load_model():
-                yield f"[AI unavailable: {self._load_error or 'model not loaded'}]"
+                yield format_ai_unavailable(self._load_error or "model not loaded")
                 return
 
         with self._lock:
             try:
+                started = time.time()
+                emitted: list[str] = []
+                first_token_s: float | None = None
                 stream = self._model.create_chat_completion(
                     messages=messages,
                     max_tokens=max_tokens,
@@ -421,7 +499,22 @@ class LLMEngine:
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
                     token = delta.get("content", "")
                     if token:
+                        if first_token_s is None:
+                            first_token_s = time.time() - started
+                        emitted.append(token)
                         yield token
+
+                elapsed = max(0.001, time.time() - started)
+                text = "".join(emitted)
+                tokens = _approx_tokens(text)
+                logger.info(
+                    "LLMEngine: chat_stream completed in %.2fs, ttft=%.2fs, output_tokens~%d, %.2f tok/s, chars=%d",
+                    elapsed,
+                    first_token_s if first_token_s is not None else -1.0,
+                    tokens,
+                    tokens / elapsed,
+                    len(text),
+                )
 
             except Exception as e:
                 logger.error(f"LLMEngine: Stream error: {e}")
@@ -445,10 +538,11 @@ class LLMEngine:
         """
         if not self._loaded:
             if not self.load_model():
-                return {"content": f"[AI unavailable: {self._load_error}]"}
+                return {"content": format_ai_unavailable(self._load_error)}
         
         with self._lock:
             try:
+                started = time.time()
                 response = self._model.create_chat_completion(
                     messages=messages,
                     tools=tools,
@@ -463,6 +557,7 @@ class LLMEngine:
                 if msg.get("content"):
                     msg["content"] = _strip_thinking(msg["content"].strip())
                 
+                _log_generation_stats("chat_with_tools", started, response, msg.get("content") or "")
                 return msg
                 
             except Exception as e:
@@ -476,7 +571,7 @@ class LLMEngine:
         """Hash path + modification time for cache lookup."""
         try:
             mtime = os.path.getmtime(path)
-            raw = f"{path}|{mtime}"
+            raw = f"{SUMMARY_CACHE_VERSION}|{path}|{mtime}"
             return hashlib.sha256(raw.encode()).hexdigest()[:16]
         except Exception:
             return ""
@@ -490,18 +585,38 @@ class LLMEngine:
             logger.info(f"LLMEngine: Cache hit for {Path(path).name}")
             return self._summary_cache[key]
         
-        # Reuse the file reader from ollama_service
-        from services.ollama_service import _read_file_content
-        content = _read_file_content(path, max_chars=3000)
-        if not content:
+        from services.document_reader import extract_document_sample
+        from services.summary_presenter import build_extractive_summary, format_summary_markdown
+
+        extracted = extract_document_sample(path, max_chars=12000)
+        if not extracted.text:
             return "Could not read file content."
+        if extracted.is_weak_text:
+            summary = format_summary_markdown(
+                build_extractive_summary(path, ai_error="PDF text layer requires OCR before model summarization.")
+            )
+            if key:
+                self._summary_cache[key] = summary
+                logger.info(f"LLMEngine: Cached OCR-needed summary for {Path(path).name} (key={key})")
+            return summary
         
         name = Path(path).name
         ext = Path(path).suffix.lower()
-        prompt = f"Summarize this file in 2-3 concise sentences.\n\nFile: {name}\nType: {ext}\n\nContent:\n{content}"
+        prompt = (
+            "Summarize this file using ONLY the extracted evidence below. "
+            "If the extraction notes say the PDF has a weak text layer, say "
+            "that clearly and do not invent missing content. Return 2-4 concise "
+            "sentences with concrete details and any limitation.\n\n"
+            f"{extracted.as_prompt_block(path)}"
+        )
         
-        result = self.generate(prompt, SYSTEM_SUMMARIZE, max_tokens=150)
-        summary = result if result and not result.startswith("[AI") else "AI summary unavailable."
+        result = self.generate(prompt, SYSTEM_SUMMARIZE, max_tokens=240)
+        if result and not result.startswith("[AI"):
+            summary = result
+        else:
+            summary = format_summary_markdown(
+                build_extractive_summary(path, ai_error=result or "AI summary unavailable.")
+            )
         
         if key and not result.startswith("[AI"):
             self._summary_cache[key] = summary
@@ -560,14 +675,35 @@ class LLMEngine:
 
 
 # ── Singleton ────────────────────────────────────────────────
-_engine: Optional[LLMEngine] = None
+_engine = None
 _engine_lock = threading.Lock()
 
-def get_llm_engine() -> LLMEngine:
-    """Get the global LLM engine singleton."""
+def _should_use_worker() -> bool:
+    """Return True when callers should use the isolated worker facade."""
+    if os.environ.get("NEURON_LLM_WORKER_PROCESS") == "1":
+        return False
+    backend = os.getenv("NEURON_LLM_BACKEND", "").strip().lower()
+    if backend in {"inprocess", "direct", "local"}:
+        return False
+    if backend == "worker":
+        return True
+    return bool(getattr(sys, "frozen", False))
+
+
+def get_llm_engine():
+    """Get the global LLM engine singleton.
+
+    In frozen desktop builds this returns an LLMWorkerClient by default so a
+    llama.cpp native failure cannot crash the Qt process. Set
+    ``NEURON_LLM_BACKEND=inprocess`` for diagnostics.
+    """
     global _engine
     if _engine is None:
         with _engine_lock:
             if _engine is None:
-                _engine = LLMEngine()
+                if _should_use_worker():
+                    from services.llm_client import LLMWorkerClient
+                    _engine = LLMWorkerClient()
+                else:
+                    _engine = LLMEngine()
     return _engine

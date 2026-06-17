@@ -5,6 +5,7 @@ current roots without deleting the existing index. Saves indexed roots to
 storage/indexed_roots.json for comparison on next startup.
 """
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Set
@@ -157,9 +158,37 @@ class StartupIndexer:
 
     def reindex_in_background(self, reason: str = "manual"):
         return self._start_background(
-            lambda: (self._wipe_index(reason), self._run()),
+            lambda: self._reindex(reason),
             "StartupIndexer-Reindex",
         )
+
+    def _allow_drive_root_index(self) -> bool:
+        return os.getenv("NEURON_ALLOW_DRIVE_ROOT_INDEX", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+    def _safe_index_paths(self, paths: list) -> list:
+        safe = []
+        allow_drive_root = self._allow_drive_root_index()
+        for path in paths:
+            if config.is_drive_root(path) and not allow_drive_root:
+                logger.warning(
+                    "Skipping broad drive-root indexing for stability: "
+                    f"{path}. Add specific folders or set "
+                    "NEURON_ALLOW_DRIVE_ROOT_INDEX=1 for an explicit full-drive CLI run."
+                )
+                continue
+            safe.append(path)
+        return safe
+
+    def _reindex(self, reason: str):
+        if not self._safe_index_paths(config.WATCH_PATHS):
+            logger.warning("Re-index skipped: no safe watch paths; keeping existing index")
+            return
+        self._wipe_index(reason)
+        self._run()
 
     def _run(self):
         # Lower thread priority on Windows so indexing doesn't freeze the UI
@@ -173,10 +202,10 @@ class StartupIndexer:
         except Exception:
             pass
 
-        paths = config.WATCH_PATHS
+        paths = self._safe_index_paths(config.WATCH_PATHS)
 
         if not paths:
-            logger.warning("No user folders found on this machine.")
+            logger.warning("No safe user folders found on this machine.")
             return
 
         logger.info(f"Detected user folders: {paths}")

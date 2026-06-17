@@ -2,18 +2,28 @@ name: NeuCockpit Product Release
 
 on:
   workflow_dispatch:
+    inputs:
+      bundle_qwen:
+        description: "Bundle Qwen 2.5 Coder GGUF into app packages"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
   push:
     tags:
       - "neucockpit-v*"
 
 env:
-  NEURON_SKIP_QWEN_GGUF: "1"   # Users download the 3 GB GGUF on first run
+  NEUCOCKPIT_RELEASE_CHUNK_BYTES: "1900000000"
 
 jobs:
-  # ─────────────────────── Linux x64 ───────────────────────
   linux-x64:
-    name: Linux x64 tarball
+    name: Linux x64 installer
     runs-on: ubuntu-22.04
+    env:
+      NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,37 +33,46 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libglib2.0-0 libxcb-cursor0 libxkbcommon-x11-0
-      - name: Build NeuCockpit Linux package
+      - name: Build NeuCockpit Linux x64 package
         run: bash scripts/build_neucockpit_linux.sh
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-linux-x64
-          path: dist/release/NeuCockpit-v1.0-linux-x64.tar.gz
+          path: dist/release/upload/*
+          if-no-files-found: error
 
-  # ─────────────────────── Linux ARM64 ───────────────────────
   linux-arm64:
-    name: Linux ARM64 tarball
-    runs-on: ubuntu-22.04-arm
+    name: Linux ARM64 installer
+    runs-on: ubuntu-24.04-arm
+    env:
+      NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Install Linux runtime libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libglib2.0-0 libxcb-cursor0 libxkbcommon-x11-0
+          sudo apt-get install -y \
+            python3-pip \
+            python3-venv \
+            python3-pyqt6 \
+            libegl1 \
+            libgl1 \
+            libglib2.0-0 \
+            libxcb-cursor0 \
+            libxkbcommon-x11-0
       - name: Build NeuCockpit Linux ARM64 package
         run: bash scripts/build_neucockpit_linux.sh
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-linux-arm64
-          path: dist/release/NeuCockpit-v1.0-linux-arm64.tar.gz
+          path: dist/release/upload/*
+          if-no-files-found: error
 
-  # ─────────────────────── macOS ARM64 (Apple Silicon) ───────────────────────
   macos-arm64:
-    name: macOS ARM64 DMG (Apple Silicon)
+    name: macOS ARM64 DMG
     runs-on: macos-14
+    env:
+      NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,12 +83,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-macos-arm64
-          path: dist/release/NeuCockpit-v1.0-macos-arm64.dmg
+          path: dist/release/upload/*
+          if-no-files-found: error
 
-  # ─────────────────────── macOS x64 (Intel) ───────────────────────
-  macos-x64:
-    name: macOS x64 DMG (Intel)
-    runs-on: macos-13
+  macos-intel:
+    name: macOS Intel DMG
+    runs-on: macos-15-intel
+    env:
+      NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -79,15 +100,59 @@ jobs:
         run: bash scripts/build_neucockpit_macos.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: NeuCockpit-v1.0-macos-x64
-          path: dist/release/NeuCockpit-v1.0-macos-intel.dmg
+          name: NeuCockpit-v1.0-macos-intel
+          path: dist/release/upload/*
+          if-no-files-found: error
 
-  # ─────────────────────── Create GitHub Release ───────────────────────
+  windows-arm64:
+    name: Windows ARM64 installer
+    runs-on: windows-11-arm
+    env:
+      NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build NeuCockpit Windows ARM64 package
+        shell: pwsh
+        run: scripts/build_neucockpit_windows.ps1 -Arch arm64 -Package installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeuCockpit-v1.0-windows-arm64-installer
+          path: dist/release/upload/*
+          if-no-files-found: error
+
+  windows-x64:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    env:
+      NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build NeuCockpit Windows x64 installer
+        shell: pwsh
+        run: scripts/build_neucockpit_windows.ps1 -Arch x64 -Package installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeuCockpit-v1.0-windows-x64-installer
+          path: dist/release/upload/*
+          if-no-files-found: error
+
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [linux-x64, linux-arm64, macos-arm64, macos-x64]
-    if: always() && (needs.linux-x64.result == 'success' || needs.linux-arm64.result == 'success' || needs.macos-arm64.result == 'success' || needs.macos-x64.result == 'success')
+    needs: [linux-x64, linux-arm64, macos-arm64, macos-intel, windows-arm64, windows-x64]
+    if: always() && (needs.linux-x64.result == 'success' || needs.linux-arm64.result == 'success' || needs.macos-arm64.result == 'success' || needs.macos-intel.result == 'success' || needs.windows-arm64.result == 'success' || needs.windows-x64.result == 'success')
     permissions:
       contents: write
     steps:
@@ -97,48 +162,47 @@ jobs:
           path: artifacts/
 
       - name: List artifacts
-        run: find artifacts/ -type f
+        run: find artifacts/ -type f -printf '%P %s bytes\n' | sort
 
       - name: Create Release and Upload Assets
         env:
           GH_TOKEN: ${{ github.token }}
+          BUNDLE_QWEN: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen || 'true' }}
         run: |
+          set -euo pipefail
           TAG="v1.0.0-build-$(date +%Y%m%d%H%M)"
           TITLE="NeuCockpit v1.0 - Multi-Platform Release"
+          if [ "$BUNDLE_QWEN" = "true" ]; then
+            MODEL_NOTE="These are full offline packages with Qwen 2.5 Coder GGUF bundled. Assets larger than 2GB are split into .part-* files for GitHub Release compatibility."
+          else
+            MODEL_NOTE="These packages bundle BGE embeddings but do not bundle Qwen; the app can download Qwen 2.5 Coder during setup/first model load."
+          fi
           BODY="## Downloads
 
-          | Platform | Architecture | File |
-          |----------|-------------|------|
-          | Linux | x64 | NeuCockpit-v1.0-linux-x64.tar.gz |
-          | Linux | ARM64 | NeuCockpit-v1.0-linux-arm64.tar.gz |
-          | macOS | Apple Silicon | NeuCockpit-v1.0-macos-arm64.dmg |
-          | macOS | Intel | NeuCockpit-v1.0-macos-intel.dmg |
-          | Windows | x64 | [Download from zero-x.live](https://downloads.zero-x.live/NeuCockpitSetup_v1.0_windows_x64.exe) |
+          $MODEL_NOTE
 
-          Built automatically via GitHub Actions."
+          Platforms included when their native runner succeeds:
+          - Linux x64: NeuCockpit-v1.0-linux-x64.run
+          - Linux ARM64: NeuCockpit-v1.0-linux-arm64.run
+          - macOS ARM64: NeuCockpit-v1.0-macos-arm64.dmg
+          - macOS Intel: NeuCockpit-v1.0-macos-intel.dmg
+          - Windows x64: NeuCockpitSetup_v1.0_windows_x64.exe
+          - Windows ARM64: NeuCockpitSetup_v1.0_windows_arm64.exe
 
-          # Create the release
+          Runtime fix in this build: the bundled llama.cpp backend is compiled with portable CPU flags to avoid illegal-instruction crashes on older Windows/Linux/macOS machines.
+
+          If an asset has .part-* files, download every part plus the .sha256 and .REASSEMBLE.txt files."
+
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
             --notes "$BODY" \
             --latest
 
-          # Upload each successful artifact
-          for f in artifacts/NeuCockpit-v1.0-linux-x64/*.tar.gz; do
-            [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "${{ github.repository }}" && echo "✅ Uploaded $(basename $f)"
+          find artifacts -type f | sort | while read -r f; do
+            gh release upload "$TAG" "$f" --repo "${{ github.repository }}"
+            echo "Uploaded $(basename "$f")"
           done
 
-          for f in artifacts/NeuCockpit-v1.0-linux-arm64/*.tar.gz; do
-            [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "${{ github.repository }}" && echo "✅ Uploaded $(basename $f)"
-          done
-
-          for f in artifacts/NeuCockpit-v1.0-macos-arm64/*.dmg; do
-            [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "${{ github.repository }}" && echo "✅ Uploaded $(basename $f)"
-          done
-
-          for f in artifacts/NeuCockpit-v1.0-macos-x64/*.dmg; do
-            [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "${{ github.repository }}" && echo "✅ Uploaded $(basename $f)"
-          done
-
-          echo "=== Release created: $TAG ==="
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release created: $TAG"
