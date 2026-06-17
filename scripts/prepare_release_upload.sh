@@ -49,4 +49,6 @@ else
   cp "$ASSET" "$UPLOAD_DIR/$BASENAME"
 fi
 
-find "$UPLOAD_DIR" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+find "$UPLOAD_DIR" -maxdepth 1 -type f | sort | while IFS= read -r f; do
+  printf '%s %s bytes\n' "$(basename "$f")" "$(wc -c < "$f" | tr -d ' ')"
+done
