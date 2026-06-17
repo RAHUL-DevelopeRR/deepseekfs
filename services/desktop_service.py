@@ -76,6 +76,23 @@ class DesktopService:
         Starting the watcher while the startup scanner is walking the same
         folders doubles indexing work and can make the UI appear to crash.
         """
+        user_config = UserConfig.load()
+        env_enabled = os.getenv("NEURON_STARTUP_INDEX_ON_LAUNCH", "").lower()
+        auto_index = user_config.get("auto_index_on_launch", False) or env_enabled in {
+            "1",
+            "true",
+            "yes",
+        }
+        if not auto_index:
+            logger.info("DesktopService: startup indexing disabled; watcher starts from existing index")
+            try:
+                from core.watcher.file_watcher import FileWatcher
+                self.watcher = FileWatcher(self._idx)
+                self.watcher.start()
+            except Exception as e:
+                logger.error(f"DesktopService watcher start failed: {e}")
+            return
+
         delay = float(os.getenv("NEURON_STARTUP_INDEX_DELAY", "8"))
         if delay > 0:
             logger.info(f"DesktopService: delaying maintenance scan by {delay:g}s")
@@ -112,10 +129,22 @@ class DesktopService:
     ) -> int:
         """Run indexing with live progress callbacks. Returns new file count."""
         self._ensure_ready()
-        paths = config.WATCH_PATHS
+        paths = []
+        for path in config.WATCH_PATHS:
+            if config.is_drive_root(path):
+                logger.warning(
+                    "DesktopService: skipping broad drive-root reindex for stability: "
+                    f"{path}"
+                )
+                if on_status:
+                    on_status(
+                        f"Skipped broad drive root {path}. Add a specific folder for live indexing."
+                    )
+                continue
+            paths.append(path)
         if not paths:
             if on_status:
-                on_status("No watch folders found on this machine.")
+                on_status("No safe watch folders found on this machine.")
             return 0
 
         if on_status:
@@ -139,6 +168,7 @@ class DesktopService:
                 continue
 
             all_files = []
+            all_folders = []
             for root, dirs, files in os.walk(folder_path):
                 try:
                     target_dir = Path(root).resolve()
@@ -153,6 +183,8 @@ class DesktopService:
                     if skip in dirs:
                         dirs.remove(skip)
 
+                all_folders.append(Path(root))
+
                 for fname in files:
                     ext = Path(fname).suffix.lower()
                     if ext in config.SUPPORTED_EXTENSIONS:
@@ -163,11 +195,22 @@ class DesktopService:
                         except Exception:
                             pass
 
-            n_total = len(all_files)
+            n_total = len(all_folders) + len(all_files)
             if on_status:
-                on_status(f"Scanning: {folder}  ({n_total} files)")
+                on_status(f"Scanning: {folder}  ({len(all_folders)} folders, {len(all_files)} files)")
 
             n_done = 0
+            for folder_node in all_folders:
+                try:
+                    with self._lock:
+                        added = 1 if idx.add_folder(str(folder_node)) else 0
+                    total_new += added
+                except Exception as e:
+                    logger.warning(f"Error indexing folder {folder_node}: {e}")
+                n_done += 1
+                if on_progress and n_total > 0:
+                    on_progress(n_done, n_total)
+
             for fpath in all_files:
                 try:
                     with self._lock:

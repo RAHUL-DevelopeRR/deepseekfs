@@ -102,6 +102,49 @@ PANEL_HOTKEYS = (
     PANEL_OS_SAFE_FALLBACK,
 )
 
+_HOTKEY_ALIASES = {
+    "shift+space": PANEL_PRIMARY,
+    "ctrl+space": PANEL_FALLBACK,
+    "control+space": PANEL_FALLBACK,
+    "ctrl+alt+space": PANEL_SAFE_FALLBACK,
+    "control+alt+space": PANEL_SAFE_FALLBACK,
+    "ctrl+alt+n": PANEL_OS_SAFE_FALLBACK,
+    "control+alt+n": PANEL_OS_SAFE_FALLBACK,
+}
+
+
+def normalize_hotkey(value: str | None) -> str:
+    """Normalize user-configured hotkey text to a stable config key."""
+    if not value:
+        return "shift+space"
+    parts = (
+        value.lower()
+        .replace("control", "ctrl")
+        .replace("-", "+")
+        .replace(" ", "+")
+        .split("+")
+    )
+    cleaned = [part for part in (p.strip() for p in parts) if part]
+    order = {"ctrl": 0, "alt": 1, "shift": 2}
+    modifiers = sorted([p for p in cleaned if p in order], key=lambda p: order[p])
+    keys = [p for p in cleaned if p not in order]
+    key = keys[-1] if keys else "space"
+    normalized = "+".join([*modifiers, key])
+    return normalized if normalized in _HOTKEY_ALIASES else "shift+space"
+
+
+def get_hotkey_label(value: str | None) -> str:
+    """Return a display label for a normalized or user-entered hotkey."""
+    return _HOTKEY_ALIASES[normalize_hotkey(value)].label
+
+
+def get_panel_hotkey_specs(value: str | None = None) -> tuple[HotkeySpec, ...]:
+    """Return the selected panel hotkey plus the OS-safe fallback."""
+    selected = _HOTKEY_ALIASES[normalize_hotkey(value)]
+    if selected == PANEL_OS_SAFE_FALLBACK:
+        return (PANEL_OS_SAFE_FALLBACK,)
+    return (selected, PANEL_OS_SAFE_FALLBACK)
+
 
 class _MSG(ctypes.Structure):
     _fields_ = [

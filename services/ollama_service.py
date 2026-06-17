@@ -13,7 +13,6 @@ Migration:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional, Dict
 
 from app.logger import logger
@@ -22,57 +21,13 @@ from app.logger import logger
 # ── File content extraction (preserved from original) ─────────
 def _read_file_content(path: str, max_chars: int = 4000) -> str:
     """Extract text from a file for AI analysis."""
-    ext = Path(path).suffix.lower()
-    text = ""
     try:
-        if ext in {".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx",
-                   ".rs", ".go", ".java", ".cpp", ".c", ".h", ".cs",
-                   ".rb", ".php", ".html", ".css", ".json", ".xml",
-                   ".yaml", ".yml", ".toml", ".ini", ".cfg", ".log",
-                   ".env", ".sh", ".bat", ".csv", ".sql"}:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                text = f.read(max_chars)
-        elif ext == ".pdf":
-            try:
-                import fitz  # PyMuPDF
-                doc = fitz.open(path)
-                for page in doc:
-                    text += page.get_text()
-                    if len(text) > max_chars: break
-                doc.close()
-            except Exception:
-                pass
-        elif ext in {".docx", ".doc"}:
-            try:
-                from docx import Document
-                doc = Document(path)
-                text = "\n".join(p.text for p in doc.paragraphs)
-            except Exception:
-                pass
-        elif ext in {".pptx"}:
-            try:
-                from pptx import Presentation
-                prs = Presentation(path)
-                for slide in prs.slides:
-                    for shape in slide.shapes:
-                        if shape.has_text_frame:
-                            text += shape.text + "\n"
-            except Exception:
-                pass
-        elif ext in {".xlsx", ".xls"}:
-            try:
-                from openpyxl import load_workbook
-                wb = load_workbook(path, read_only=True, data_only=True)
-                for ws in wb.worksheets[:3]:  # first 3 sheets
-                    for row in ws.iter_rows(max_row=50, values_only=True):
-                        text += " | ".join(str(c) for c in row if c is not None) + "\n"
-                wb.close()
-            except Exception:
-                pass
+        from services.document_reader import read_file_content
+
+        return read_file_content(path, max_chars=max_chars)
     except Exception as e:
         logger.warning(f"OllamaService: cannot read {path}: {e}")
-
-    return text[:max_chars].strip()
+        return ""
 
 
 class OllamaService:

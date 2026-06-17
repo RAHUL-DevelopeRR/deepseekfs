@@ -47,5 +47,8 @@ hdiutil create \
   -format UDZO \
   "dist/release/$OUTNAME"
 
+rm -rf dist/release/upload
+bash scripts/prepare_release_upload.sh "dist/release/$OUTNAME" dist/release/upload
+
 echo "=== Build complete ==="
 ls -lh dist/release/

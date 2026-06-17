@@ -18,14 +18,15 @@ from typing import Optional, Callable, Iterable
 from app.logger import logger
 
 # ── Model Configuration ──────────────────────────────────────
-# Single unified model: Qwen 2.5 Coder 3B Instruct (Q5_K_M)
-# This replaces the old dual-model setup (SmolLM3-3B + Qwen 0.5B).
-# Qwen 2.5 Coder 3B handles chat, summarization, tool calling,
-# AND code generation — better at everything, ~2.1 GB on disk,
-# ~2.5 GB RAM.  Sweet spot for 8 GB machines.
+# Primary local agent model. The older beta build shipped the 0.5B GGUF to
+# keep the installer small; that made tool calling and summaries too weak.
+# Neuron now treats the 3B model as the product default and only falls back to
+# the 0.5B model when NEURON_ALLOW_SMALL_MODEL_FALLBACK=1 is set explicitly.
 LLM_MODEL_REPO = "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
 LLM_MODEL_FILE = "qwen2.5-coder-3b-instruct-q5_k_m.gguf"
-LLM_MODEL_SIZE_MB = 2100  # approximate
+LLM_MODEL_SIZE_MB = 2450  # approximate
+LEGACY_SMALL_MODEL_FILE = "qwen2.5-coder-0.5b-instruct-q4_0.gguf"
+ALLOW_SMALL_MODEL_FALLBACK_ENV = "NEURON_ALLOW_SMALL_MODEL_FALLBACK"
 _MIN_GGUF_SIZE_BYTES = 50 * 1024 * 1024
 
 VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.22.zip"
@@ -35,7 +36,7 @@ VOSK_MODEL_SIZE_MB = 50
 ProgressCallback = Callable[[float, str], None]  # (progress_0_to_1, status_text)
 
 # ── Disk Space Guard ──────────────────────────────────────────
-# Downloads can be 420 MB to 1.8 GB.  Running out of disk mid-download
+# Downloads can be 2-3 GB. Running out of disk mid-download
 # leaves a corrupt partial file that later causes a cryptic llama.cpp
 # crash.  Better to fail fast with a clear message.
 _DISK_SPACE_SAFETY_FACTOR = 1.5  # require 1.5× model size free
@@ -158,6 +159,15 @@ def _iter_gguf_candidates() -> Iterable[Path]:
             logger.warning(f"ModelManager: skipped model cache scan {root}: {exc}")
 
 
+def _is_primary_qwen(path: Path) -> bool:
+    value = f"{path.name} {path}".lower()
+    return "qwen2.5-coder" in value and "3b" in value
+
+
+def _small_model_fallback_enabled() -> bool:
+    return os.getenv(ALLOW_SMALL_MODEL_FALLBACK_ENV, "").lower() in {"1", "true", "yes"}
+
+
 def get_llm_model_path() -> Optional[Path]:
     """Find the LLM GGUF model file.
     
@@ -171,18 +181,36 @@ def get_llm_model_path() -> Optional[Path]:
     if exact:
         return exact[0]
 
+    primary_qwen = [p for p in candidates if _is_primary_qwen(p)]
+    if primary_qwen:
+        chosen = sorted(primary_qwen, key=lambda p: p.stat().st_size, reverse=True)[0]
+        logger.info(f"ModelManager: Found compatible Qwen 3B GGUF model: {chosen}")
+        return chosen
+
     qwen = [
         p for p in candidates
         if "qwen2.5-coder" in p.name.lower() or "qwen2.5-coder" in str(p).lower()
     ]
     if qwen:
-        chosen = sorted(qwen, key=lambda p: p.stat().st_size, reverse=True)[0]
-        logger.info(f"ModelManager: Found cached Qwen GGUF model: {chosen}")
-        return chosen
+        if _small_model_fallback_enabled():
+            chosen = sorted(qwen, key=lambda p: p.stat().st_size, reverse=True)[0]
+            logger.warning(
+                "ModelManager: using non-primary Qwen fallback because %s=1: %s",
+                ALLOW_SMALL_MODEL_FALLBACK_ENV,
+                chosen,
+            )
+            return chosen
+        names = ", ".join(str(p) for p in qwen[:3])
+        logger.warning(
+            "ModelManager: Qwen GGUF candidates exist but no 3B model was found. "
+            "Ignoring fallback candidates unless %s=1. Candidates: %s",
+            ALLOW_SMALL_MODEL_FALLBACK_ENV,
+            names,
+        )
+        return None
 
-    chosen = sorted(candidates, key=lambda p: p.stat().st_size, reverse=True)[0]
-    logger.info(f"ModelManager: Found alternative GGUF model: {chosen}")
-    return chosen
+    logger.warning("ModelManager: GGUF files exist, but none match Qwen 2.5 Coder 3B.")
+    return None
 
 
 # Backward compatibility alias — the separate coder model no longer exists;

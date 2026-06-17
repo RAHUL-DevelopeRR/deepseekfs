@@ -14,7 +14,7 @@ from __future__ import annotations
 
 
 
-import ctypes, ctypes.wintypes, os, sys, platform, subprocess, time, math
+import ctypes, ctypes.wintypes, os, sys, platform, subprocess, time, math, threading
 
 from pathlib import Path
 
@@ -111,12 +111,14 @@ _ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 
 class SpotlightPanel(QWidget):
+    _sig_idx_count = pyqtSignal(object)
 
 
 
     def __init__(self, svc: DesktopService):
 
         super().__init__()
+        self._sig_idx_count.connect(self._apply_idx_count)
 
         self._svc = svc
 
@@ -133,6 +135,7 @@ class SpotlightPanel(QWidget):
         self._indexing = False
 
         self._idx_count = 0
+        self._idx_count_refreshing = False
 
         self._settings: SettingsOverlay | None = None
 
@@ -198,7 +201,7 @@ class SpotlightPanel(QWidget):
 
 
 
-        self._refresh_idx_count()
+        QTimer.singleShot(0, self._refresh_idx_count)
 
 
 
@@ -888,7 +891,7 @@ class SpotlightPanel(QWidget):
 
         # brand with gradient
 
-        brand = QLabel("Neuron")
+        brand = QLabel("NeuCockpit")
 
         brand.setStyleSheet(f"""
 
@@ -2017,7 +2020,7 @@ class SpotlightPanel(QWidget):
 
                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
 
-        self._tray.setToolTip("Neuron — Shift+Space or Ctrl+Alt+N to search")
+        self._tray.setToolTip("NeuCockpit - Shift+Space or Ctrl+Alt+N to search")
 
         self._tray.show()
 
@@ -2035,17 +2038,17 @@ class SpotlightPanel(QWidget):
 
             if streak > 0:
 
-                tooltip = f"Neuron — Shift+Space or Ctrl+Alt+N to search\n{streak} day{'s' if streak != 1 else ''} streak"
+                tooltip = f"NeuCockpit - Shift+Space or Ctrl+Alt+N to search\n{streak} day{'s' if streak != 1 else ''} streak"
 
             else:
 
-                tooltip = "Neuron — Shift+Space or Ctrl+Alt+N to search"
+                tooltip = "NeuCockpit - Shift+Space or Ctrl+Alt+N to search"
 
             self._tray.setToolTip(tooltip)
 
         except Exception:
 
-            self._tray.setToolTip("Neuron — Shift+Space or Ctrl+Alt+N to search")
+            self._tray.setToolTip("NeuCockpit - Shift+Space or Ctrl+Alt+N to search")
 
 
 
@@ -2053,27 +2056,45 @@ class SpotlightPanel(QWidget):
 
     def _refresh_idx_count(self):
 
-        """Poll the real DB count and update label. Runs every 3s."""
+        """Poll the real DB count without blocking the Qt thread."""
 
-        try:
+        if self._idx_count_refreshing:
 
-            cnt = self._svc.total_indexed()
+            return
 
-            if cnt != self._idx_count:
+        self._idx_count_refreshing = True
 
-                self._idx_count = cnt
+        def _worker():
 
-                if not self._indexing:
+            try:
 
-                    self.idx_lbl.setText(f"{cnt:,} files indexed")
+                cnt = self._svc.total_indexed()
 
-                # Update tray
+            except Exception:
 
-                self._update_tray_tooltip()
+                cnt = None
 
-        except Exception:
+            self._sig_idx_count.emit(cnt)
 
-            pass
+        threading.Thread(target=_worker, name="idx-count-refresh", daemon=True).start()
+
+    def _apply_idx_count(self, cnt):
+
+        self._idx_count_refreshing = False
+
+        if cnt is None:
+
+            return
+
+        if cnt != self._idx_count:
+
+            self._idx_count = cnt
+
+            if not self._indexing:
+
+                self.idx_lbl.setText(f"{cnt:,} files indexed")
+
+            self._update_tray_tooltip()
 
 
 
@@ -2845,40 +2866,33 @@ class SpotlightPanel(QWidget):
 
     def toggle_panel(self):
 
-        if self._vis: self._hide()
+        if self._vis or self.isVisible(): self._hide()
 
         else:         self._show()
 
-    def activate_from_hotkey(self):
+    def toggle_from_hotkey(self):
 
-        """Show or refocus the panel from a global hotkey.
+        """Toggle the panel from a debounced global hotkey.
 
         Global hotkeys can emit duplicate events while keys are held, depending
-        on keyboard layout, IME, and Windows focus state. Treating the hotkey as
-        show/focus keeps the panel from opening and immediately disappearing.
+        on keyboard layout, IME, and Windows focus state. The native hotkey
+        filter already debounces those repeats, so the user-visible behavior can
+        be a true show/hide toggle.
         """
 
-        logger.info(f"Panel: hotkey activation received (visible={self._vis})")
+        logger.info(f"Panel: hotkey toggle received (visible={self._vis}, shown={self.isVisible()})")
 
-        if self._vis:
+        if self._vis or self.isVisible():
 
-            self._fade.stop()
-
-            if not self.isVisible():
-
-                self.show()
-
-            self.raise_()
-
-            self.activateWindow()
-
-            self.search.setFocus()
-
-            self.search.selectAll()
+            self._hide()
 
             return
 
         self._show()
+
+    def activate_from_hotkey(self):
+        """Backward-compatible name for older tray/hotkey callers."""
+        self.toggle_from_hotkey()
 
 
 
@@ -2909,6 +2923,10 @@ class SpotlightPanel(QWidget):
     def _show(self):
 
         self._resize_to_screen()
+
+        try: self._fade.finished.disconnect(self._on_hidden)
+
+        except: pass
 
         scr = QGuiApplication.primaryScreen()
 
@@ -2982,6 +3000,10 @@ class SpotlightPanel(QWidget):
 
         self._fade.stop()
 
+        try: self._fade.finished.disconnect(self._on_hidden)
+
+        except: pass
+
         self._fade.setStartValue(self.windowOpacity())
 
         self._fade.setEndValue(0.0)
@@ -3029,6 +3051,18 @@ class SpotlightPanel(QWidget):
                 return True
 
         return super().event(e)
+
+
+    @staticmethod
+    def _is_shift_space_event(e):
+        """Return True for the local Shift+Space panel shortcut."""
+        try:
+            return (
+                e.key() == Qt.Key.Key_Space
+                and bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            )
+        except Exception:
+            return False
 
 
 

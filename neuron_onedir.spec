@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Neuron v5.0 - PyInstaller --onedir spec (ONNX)
+NeuCockpit v1.0 - PyInstaller --onedir spec (BGE ONNX)
 ===============================================
 Bundles the desktop app with ONNX Runtime for neural embeddings.
 No PyTorch/torch dependency — uses the same MiniLM model exported
@@ -10,7 +10,7 @@ Build:
     pyinstaller neuron_onedir.spec --noconfirm
 
 Output:
-    dist/Neuron/Neuron.exe   (+ all DLLs, packages, assets, model)
+    dist/Neuron/NeuCockpit.exe   (+ all DLLs, packages, assets, models)
 """
 import os
 import sys
@@ -26,6 +26,7 @@ block_cipher = None
 
 # ── Paths ──────────────────────────────────────────────────────
 PROJECT = os.path.abspath('.')
+APP_ICON = 'assets/neuron_icon.ico' if sys.platform.startswith('win') else None
 
 # ── Data files to bundle ──────────────────────────────────────
 datas = [
@@ -36,8 +37,8 @@ datas = [
     ('ui', 'ui'),
     # Assets (icons, images)
     ('assets', 'assets'),
-    # ONNX model (neural search without torch)
-    ('storage/models/onnx', 'storage/models/onnx'),
+    # Primary bundled embedding model: BGE Small ONNX.
+    ('storage/models/BAAI/bge-small-en-v1.5', 'storage/models/BAAI/bge-small-en-v1.5'),
     # Docs
     ('docs', 'docs'),
     # Headless command surface
@@ -45,9 +46,12 @@ datas = [
     ('neufs.cmd', '.'),
 ]
 
-# Bundle any local GGUF model files so the desktop app can run offline.
-for gguf in Path('storage/models').glob('*.gguf'):
-    datas.append((str(gguf), 'storage/models'))
+# Product builds bundle the primary Qwen 2.5 Coder 3B GGUF so MemoryOS works
+# from dist/Neuron without a separate model setup step.
+if os.environ.get('NEURON_SKIP_QWEN_GGUF') != '1':
+    primary_gguf = Path('storage/models/qwen2.5-coder-3b-instruct-q5_k_m.gguf')
+    if primary_gguf.exists():
+        datas.append((str(primary_gguf), 'storage/models'))
 
 # llama-cpp-python loads DLLs from llama_cpp/lib at runtime.
 binaries = collect_dynamic_libs('llama_cpp')
@@ -55,6 +59,7 @@ binaries = collect_dynamic_libs('llama_cpp')
 # Explicitly copy metadata PyInstaller misses for runtime dependencies.
 datas += copy_metadata('tqdm')
 datas += copy_metadata('regex')
+datas += copy_metadata('huggingface_hub')
 
 # Only include datas that exist
 datas = [(src, dst) for src, dst in datas if os.path.exists(src)]
@@ -95,6 +100,9 @@ hiddenimports = [
     'services.model_manager', 'services.coder_engine',
     'services.internet_search', 'services.stability',
     'services.jinja2_patches', 'services.agent_context',
+    'services.llm_client', 'services.llm_worker',
+    'services.model_health',
+    'services.platform_support',
 
     # ── services.agent ──
     'services.agent', 'services.agent.executor',
@@ -104,7 +112,7 @@ hiddenimports = [
     'services.tools', 'services.tools.base', 'services.tools.common',
     'services.tools.file_tools', 'services.tools.folder_tools',
     'services.tools.execution_tools', 'services.tools.search_tools',
-    'services.tools.registry',
+    'services.tools.system_tools', 'services.tools.registry',
 
     # ── services sub-packages ──
     'services.cache',
@@ -148,6 +156,7 @@ hiddenimports = [
     'mdurl',
     'numpy',
     'tqdm',
+    'huggingface_hub',
     'regex',
     'certifi',
     'yaml',
@@ -177,7 +186,7 @@ excludes = [
     'torch.testing', 'torch.utils.tensorboard',
     'torch', 'torchvision', 'torchaudio',
     'transformers', 'sentence_transformers',
-    'huggingface_hub', 'safetensors',
+    'safetensors',
     'torch._dynamo', 'torch._inductor', 'torch._export',
     'torch._functorch', 'torch._higher_order_ops', 'torch._subclasses',
     'functorch', 'torch.func', 'torch.compiler', 'torch.onnx',
@@ -192,6 +201,21 @@ excludes = [
     'sympy', 'mpmath', 'IPython', 'ipykernel', 'ipywidgets', 'jupyter',
     'debugpy', 'traitlets', 'pydantic', 'httpx', 'aiohttp',
     'PIL',  # We don't need Pillow for the Qt app
+]
+
+worker_hiddenimports = [
+    'app', 'app.config', 'app.logger',
+    'services', 'services.llm_worker', 'services.llm_engine',
+    'services.model_manager', 'services.ollama_service',
+    'services.jinja2_patches', 'services.model_health',
+    'llama_cpp',
+    'jinja2', 'numpy', 'tqdm', 'huggingface_hub', 'regex', 'certifi',
+    'fitz', 'docx', 'pptx', 'openpyxl',
+]
+
+worker_excludes = excludes + [
+    'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',
+    'onnxruntime', 'faiss', 'watchdog', 'markdown_it',
 ]
 
 # ── Analysis ──────────────────────────────────────────────────
@@ -211,14 +235,48 @@ a = Analysis(
     noarchive=True,
 )
 
+worker_a = Analysis(
+    ['run_llm_worker.py'],
+    pathex=[PROJECT],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=worker_hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=worker_excludes,
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=True,
+)
+
+cli_a = Analysis(
+    ['neufs.py'],
+    pathex=[PROJECT],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=True,
+)
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+worker_pyz = PYZ(worker_a.pure, worker_a.zipped_data, cipher=block_cipher)
+cli_pyz = PYZ(cli_a.pure, cli_a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
     [],                     # --onedir: don't pack binaries into exe
     exclude_binaries=True,  # --onedir mode
-    name='Neuron',
+    name='NeuCockpit',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -229,14 +287,60 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/neuron_icon.ico',
+    icon=APP_ICON,
+)
+
+worker_exe = EXE(
+    worker_pyz,
+    worker_a.scripts,
+    [],
+    exclude_binaries=True,
+    name='NeuronLLMWorker',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=APP_ICON,
+)
+
+cli_exe = EXE(
+    cli_pyz,
+    cli_a.scripts,
+    [],
+    exclude_binaries=True,
+    name='neufs',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=APP_ICON,
 )
 
 coll = COLLECT(
     exe,
+    worker_exe,
+    cli_exe,
     a.binaries,
+    worker_a.binaries,
+    cli_a.binaries,
     a.zipfiles,
+    worker_a.zipfiles,
+    cli_a.zipfiles,
     a.datas,
+    worker_a.datas,
+    cli_a.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

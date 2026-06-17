@@ -16,6 +16,7 @@ Architecture:
 from __future__ import annotations
 
 import html
+import os
 import re
 import threading
 
@@ -24,7 +25,7 @@ from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QWidget,
     QTextEdit, QLineEdit, QPushButton, QLabel, QMessageBox, QCheckBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QTextCursor
 
 from app.logger import logger
@@ -108,6 +109,8 @@ class MemoryOSPanel(QFrame):
         self._streaming = False  # True while tokens are arriving
         self._stream_mode = ""  # Mode during current stream
         self._stream_buffer = ""
+        self._stream_pending = ""
+        self._stream_flush_scheduled = False
         self._stream_content_start = -1
 
         # RLHF feedback state
@@ -121,6 +124,14 @@ class MemoryOSPanel(QFrame):
         self._sig_token.connect(self._on_token)
         self._sig_stream_end.connect(self._on_stream_end)
         self._sig_confirm.connect(self._on_confirm_request)
+        try:
+            timeout_ms = int(os.getenv("NEURON_UI_GENERATION_TIMEOUT_MS", "90000") or "90000")
+        except ValueError:
+            timeout_ms = 90000
+        self._generation_timeout_ms = max(15000, timeout_ms)
+        self._generation_timer = QTimer(self)
+        self._generation_timer.setSingleShot(True)
+        self._generation_timer.timeout.connect(self._on_generation_timeout)
 
         self._build_ui()
 
@@ -355,6 +366,7 @@ class MemoryOSPanel(QFrame):
         mode_label = MODE_LABELS[self._mode].upper()
         self._append_message("You", text, color="#65B8FF", badge=mode_label)
         self._set_status(f"Thinking ({mode_label})...")
+        self._generation_timer.start(self._generation_timeout_ms)
 
         current_mode = self._mode
         threading.Thread(
@@ -381,9 +393,13 @@ class MemoryOSPanel(QFrame):
             agent = get_memory_os()
             agent.on_confirmation = self._confirm_tool_action
 
-            # Wire streaming callback → emits signal per token
+            # The legacy PyQt panel is more stable when it receives one
+            # completed answer. Streaming can be re-enabled for diagnostics.
             self._stream_mode = mode
-            agent.on_token = lambda token: self._sig_token.emit(token)
+            if os.getenv("NEURON_UI_STREAMING", "1").lower() in {"1", "true", "yes"}:
+                agent.on_token = lambda token: self._sig_token.emit(token)
+            else:
+                agent.on_token = None
 
             logger.info(f"MemoryOSPanel: [{mode.upper()}] {text!r}")
             response = agent.chat(text, mode=mode)
@@ -443,8 +459,8 @@ class MemoryOSPanel(QFrame):
         finally:
             request["event"].set()
 
-    def _on_token(self, token: str):
-        """Handle a single streaming token (main thread, signal-safe)."""
+    def _on_token_legacy(self, token: str):
+        """Legacy per-token renderer retained for reference; not connected."""
         if not self._streaming:
             # First token — create the response block header
             self._streaming = True
@@ -474,8 +490,8 @@ class MemoryOSPanel(QFrame):
         vbar = self._chat.verticalScrollBar()
         vbar.setValue(vbar.maximum())
 
-    def _on_stream_end(self):
-        """Streaming complete — close the response block."""
+    def _on_stream_end_legacy(self):
+        """Legacy final markdown re-renderer retained for reference; not connected."""
         markdown_text = self._last_response or self._stream_buffer
         if self._stream_content_start >= 0:
             cursor = self._chat.textCursor()
@@ -501,6 +517,7 @@ class MemoryOSPanel(QFrame):
         self._show_feedback_bar()  # Show / after stream ends
 
     def _on_response(self, markdown_text: str, mode: str):
+        self._generation_timer.stop()
         color, _ = MODE_COLORS.get(mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
         label = MODE_LABELS.get(mode, "MemoryOS")
         rendered = _markdown_to_html(markdown_text)
@@ -517,13 +534,125 @@ class MemoryOSPanel(QFrame):
         self._set_status("Ready")
         self._show_feedback_bar()  # Show / after response
 
-    def _on_error(self, error_msg: str):
+    def _on_error_legacy(self, error_msg: str):
         self._append_html(
             f'<p style="color: #ff6666; margin: 4px 0;">'
             f'<b>Error:</b> {error_msg}</p>'
         )
         self._input.setEnabled(True)
         self._set_status("Error")
+
+    # Replacement streaming handlers. These names intentionally override the
+    # earlier definitions in the class so Qt connects to the lightweight path.
+    def _on_token(self, token: str):
+        """Handle streaming tokens in small UI batches."""
+        if not self._streaming:
+            self._streaming = True
+            self._stream_buffer = ""
+            self._stream_pending = ""
+            self._stream_content_start = -1
+            color, _ = MODE_COLORS.get(self._stream_mode, ("#7c8aff", "rgba(100,120,255,0.3)"))
+            label = MODE_LABELS.get(self._stream_mode, "MemoryOS")
+            self._append_html(
+                f'<div style="color: rgba(255,255,255,0.85); margin: 6px 0; '
+                f'padding: 8px; background: rgba(255,255,255,0.03); '
+                f'border-radius: 6px; border-left: 3px solid {color};">'
+                f'<b style="color: {color};">{label}:</b><br>'
+            )
+            cursor = self._chat.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self._stream_content_start = cursor.position()
+            self._set_status("Streaming...")
+
+        self._stream_pending += token.replace("\r", "")
+        if not self._stream_flush_scheduled:
+            self._stream_flush_scheduled = True
+            QTimer.singleShot(45, self._flush_stream_tokens)
+
+    def _flush_stream_tokens(self):
+        """Append buffered stream text without hammering QTextEdit."""
+        self._stream_flush_scheduled = False
+        text = self._stream_pending
+        if not text:
+            return
+        self._stream_pending = ""
+        self._stream_buffer += text
+        cursor = self._chat.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._chat.setTextCursor(cursor)
+        cursor.insertText(text)
+        vbar = self._chat.verticalScrollBar()
+        vbar.setValue(vbar.maximum())
+
+    def _on_stream_end(self):
+        """Streaming complete; replace raw stream text with rendered Markdown."""
+        self._generation_timer.stop()
+        self._flush_stream_tokens()
+        render_final = os.getenv("NEURON_UI_RENDER_STREAM_MARKDOWN", "1").lower() in {"1", "true", "yes"}
+        if render_final and self._stream_content_start >= 0:
+            markdown_text = self._last_response or self._stream_buffer
+            cursor = self._chat.textCursor()
+            cursor.setPosition(self._stream_content_start)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.End,
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+            cursor.removeSelectedText()
+            self._chat.setTextCursor(cursor)
+            self._chat.insertHtml(_markdown_to_html(markdown_text))
+        self._streaming = False
+        self._stream_buffer = ""
+        self._stream_pending = ""
+        self._stream_flush_scheduled = False
+        self._stream_content_start = -1
+        self._input.setEnabled(True)
+        self._input.setFocus()
+        self._set_status("Ready")
+        self._show_feedback_bar()
+
+    def _on_error(self, error_msg: str):
+        self._generation_timer.stop()
+        self._flush_stream_tokens()
+        self._streaming = False
+        self._stream_buffer = ""
+        self._stream_pending = ""
+        self._stream_flush_scheduled = False
+        self._stream_content_start = -1
+        self._append_html(
+            f'<p style="color: #ff6666; margin: 4px 0;">'
+            f'<b>Error:</b> {html.escape(error_msg)}</p>'
+        )
+        self._input.setEnabled(True)
+        self._input.setFocus()
+        self._set_status("Error")
+
+    def _on_generation_timeout(self):
+        """Recover the panel if the local worker stalls mid-generation."""
+        logger.warning("MemoryOSPanel: generation timed out; cancelling worker")
+        try:
+            from services.memory_os import get_memory_os
+            agent = get_memory_os()
+            agent.on_token = None
+            engine = getattr(agent, "_engine", None)
+            if engine is not None and hasattr(engine, "cancel"):
+                engine.cancel()
+        except Exception as exc:
+            logger.warning(f"MemoryOSPanel: cancellation failed: {exc}")
+
+        self._flush_stream_tokens()
+        self._streaming = False
+        self._stream_buffer = ""
+        self._stream_pending = ""
+        self._stream_flush_scheduled = False
+        self._stream_content_start = -1
+        self._input.setEnabled(True)
+        self._input.setFocus()
+        self._set_status("Timed out")
+        self._append_html(
+            '<p style="color: #ffb86c; margin: 4px 0;">'
+            '<b>Generation timed out.</b> The local Qwen worker was restarted; try the prompt again.'
+            '</p>'
+        )
 
     # ── HTML Helpers ──────────────────────────────────────────
 

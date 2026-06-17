@@ -4,10 +4,13 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from .base import BaseTool, ToolResult
+from .claw_tools import ClawToolIndexTool
 from .execution_tools import GlobTool, PythonExecTool, ShellTool
 from .file_tools import FileDeleteTool, FileEditTool, FileReadTool, FileWriteTool
 from .folder_tools import FolderCreateTool, FolderListTool, FolderOrganizeTool, FolderSearchTool
 from .search_tools import OCRTool, SemanticSearchTool, SummarizeTool
+from .session_tools import PowerShellSessionTool
+from .system_tools import SystemProfileTool
 
 ALL_TOOLS: Dict[str, BaseTool] = {}
 
@@ -32,6 +35,9 @@ def _register_tools() -> None:
         SemanticSearchTool,
         SummarizeTool,
         OCRTool,
+        SystemProfileTool,
+        ClawToolIndexTool,
+        PowerShellSessionTool,
         ShellTool,
         PythonExecTool,
         GlobTool,

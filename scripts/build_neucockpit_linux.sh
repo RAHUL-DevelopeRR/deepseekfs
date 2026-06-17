@@ -32,10 +32,14 @@ python3 -m PyInstaller neuron_onedir.spec --noconfirm
 mkdir -p dist/release
 ARCH=$(uname -m)
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    tar -C dist -czf "dist/release/NeuCockpit-v1.0-linux-arm64.tar.gz" Neuron
+    OUT="dist/release/NeuCockpit-v1.0-linux-arm64.tar.gz"
 else
-    tar -C dist -czf "dist/release/NeuCockpit-v1.0-linux-x64.tar.gz" Neuron
+    OUT="dist/release/NeuCockpit-v1.0-linux-x64.tar.gz"
 fi
+tar -C dist -czf "$OUT" Neuron
+
+rm -rf dist/release/upload
+bash scripts/prepare_release_upload.sh "$OUT" dist/release/upload
 
 echo "=== Build complete ==="
 ls -lh dist/release/

@@ -83,8 +83,8 @@ class TaskExecutor:
         # Tool relevance scoring based on keywords
         _TOOL_KEYWORDS = {
             "file_read":       {"read", "open", "content", "view", "show"},
-            "file_write":      {"write", "create", "save", "make"},
-            "file_edit":       {"edit", "modify", "change", "update"},
+            "file_write":      {"write", "create", "save", "make", "give", "code", "program", "project"},
+            "file_edit":       {"edit", "modify", "change", "update", "alter", "insert"},
             "file_delete":     {"delete", "remove", "trash", "erase"},
             "folder_create":   {"folder", "directory", "mkdir", "create folder"},
             "folder_list":     {"list", "dir", "folder", "what's in", "show folder"},
@@ -92,10 +92,13 @@ class TaskExecutor:
             "folder_organize": {"organize", "sort", "clean", "arrange"},
             "semantic_search": {"search", "find", "about", "related"},
             "summarize":       {"summarize", "summary", "describe", "overview"},
-            "shell":           {"run", "command", "shell", "cmd", "pip", "npm", "git"},
+            "shell":           {"run", "command", "shell", "cmd", "powershell", "terminal", "compile", "javac", "java", "pip", "npm", "git"},
             "python_exec":     {"python", "code", "script", "execute", "run python"},
-            "glob":            {"glob", "pattern", "find files", "wildcard"},
+            "glob":            {"glob", "pattern", "find files", "wildcard", "locate"},
             "ocr":             {"ocr", "image", "text from", "screenshot"},
+            "system_profile":  {"system", "os", "platform", "device", "windows", "linux", "mac"},
+            "claw_tool_index":  {"claw", "claude", "tool", "tools", "agent"},
+            "powershell_session": {"powershell", "terminal", "session", "run", "compile", "test", "javac", "java", "npm", "git"},
         }
 
         scored = []
@@ -112,6 +115,15 @@ class TaskExecutor:
 
         # Always include safe read/list fallbacks for navigation context.
         names = {s.get("function", {}).get("name") for s in selected}
+        if self._looks_like_coding_agent_goal(goal):
+            for coding_tool in ["file_write", "file_edit", "file_read", "glob", "powershell_session", "shell"]:
+                if coding_tool not in names:
+                    for s in all_schemas:
+                        if s.get("function", {}).get("name") == coding_tool:
+                            selected.append(s)
+                            names.add(coding_tool)
+                            break
+
         for fallback in ["folder_list", "file_read", "glob"]:
             if fallback not in names:
                 for s in all_schemas:
@@ -121,6 +133,20 @@ class TaskExecutor:
 
         logger.info(f"Executor: Selected {len(selected)} tools for: {goal[:50]}")
         return selected
+
+    @staticmethod
+    def _looks_like_coding_agent_goal(goal: str) -> bool:
+        low = goal.lower()
+        has_code_subject = re.search(
+            r"\b(code|program|project|app|application|class|java|python|"
+            r"javascript|typescript|html|css|database|sql|jdbc)\b",
+            low,
+        )
+        has_creation_or_change = re.search(
+            r"\b(give|create|write|make|build|generate|alter|edit|modify|run|compile|save)\b",
+            low,
+        )
+        return bool(has_code_subject and has_creation_or_change)
 
     # ── Main execution loop ───────────────────────────────────
 
@@ -347,7 +373,7 @@ class TaskExecutor:
             step.description = "Calling folder_list"
 
         permission = tool.permission
-        if tool_name == "shell" and hasattr(tool, "_classify_command"):
+        if hasattr(tool, "_classify_command"):
             permission = tool._classify_command(cleaned_args.get("command", ""))
 
         # Permission check

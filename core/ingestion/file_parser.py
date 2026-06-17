@@ -48,6 +48,14 @@ class FileParser:
             elif ext in (".env", ".ini", ".toml", ".cfg", ".yaml", ".yml"):
                 return FileParser._parse_config(file_path)
 
+            # Scripts
+            elif ext in (".bat", ".cmd", ".ps1"):
+                return FileParser._parse_config(file_path)
+
+            # Executables / binary launchers: searchable by metadata only.
+            elif ext in config.METADATA_ONLY_EXTENSIONS:
+                return FileParser._parse_file_metadata_text(file_path)
+
             # Code (all languages)
             elif ext in (".py", ".js", ".ts", ".jsx", ".tsx",
                          ".rs", ".go", ".java", ".cpp", ".c", ".h",
@@ -239,6 +247,18 @@ class FileParser:
         name = os.path.basename(file_path)
         name_clean = name.replace("_", " ").replace("-", " ").replace(".", " ")
         return f"Video file: {name_clean}"
+
+    @staticmethod
+    def _parse_file_metadata_text(file_path: str) -> str:
+        path = Path(file_path)
+        name_clean = path.name.replace("_", " ").replace("-", " ")
+        return (
+            f"File: {path.name}\n"
+            f"Path: {path}\n"
+            f"Extension: {path.suffix.lower() or '(none)'}\n"
+            f"Searchable name: {name_clean}\n"
+            "Content: binary or launcher file indexed by metadata only."
+        )
 
     # ── File metadata ─────────────────────────────────────────
     @staticmethod

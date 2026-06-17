@@ -19,6 +19,8 @@ from app.logger import logger
 from core.embeddings.embedder import get_embedder
 from core.ingestion.file_parser import FileParser
 
+FOLDER_EXTENSION = "[folder]"
+
 
 def _is_skipped_dir(name: str) -> bool:
     low = name.lower()
@@ -29,10 +31,58 @@ def _is_skipped_file(name: str) -> bool:
     low = name.lower()
     return (
         low.startswith("~$")
+        or low in {"desktop.ini", "thumbs.db", ".ds_store"}
         or low.endswith(".tmp")
         or low.endswith(".temp")
         or low.endswith(".part")
         or low.endswith(".crdownload")
+    )
+
+
+def _folder_index_text(folder: Path, max_items: int = 80) -> str:
+    """Build a compact searchable description for a folder node."""
+    child_dirs: list[str] = []
+    child_files: list[str] = []
+    ext_counts: dict[str, int] = {}
+    total_size = 0
+
+    try:
+        entries = sorted(
+            folder.iterdir(),
+            key=lambda entry: (not entry.is_dir(), entry.name.lower()),
+        )
+    except (OSError, PermissionError):
+        entries = []
+
+    for entry in entries[:max_items]:
+        if entry.name.startswith("."):
+            continue
+        if entry.is_dir():
+            if _is_skipped_dir(entry.name):
+                continue
+            child_dirs.append(entry.name)
+            continue
+        if _is_skipped_file(entry.name):
+            continue
+        child_files.append(entry.name)
+        ext = entry.suffix.lower() or "(no extension)"
+        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+        try:
+            total_size += entry.stat().st_size
+        except OSError:
+            pass
+
+    top_types = ", ".join(
+        f"{ext} files ({count})"
+        for ext, count in sorted(ext_counts.items(), key=lambda item: -item[1])[:8]
+    )
+    return (
+        f"Folder: {folder.name}\n"
+        f"Path: {folder}\n"
+        f"Subfolders: {', '.join(child_dirs[:30]) or 'none'}\n"
+        f"Files: {', '.join(child_files[:50]) or 'none'}\n"
+        f"File types: {top_types or 'none'}\n"
+        f"Approx child file bytes: {total_size}"
     )
 
 
@@ -279,6 +329,60 @@ class IndexBuilder:
                 logger.error(f"Error indexing {norm_path}: {e}")
                 return False
 
+    def add_folder(self, folder_path: str) -> bool:
+        """Add a folder node to the semantic index.
+
+        Folder entries make queries like "find my database project folder" work
+        without requiring a specific file inside the folder to match.
+        """
+        with self.lock:
+            norm_path = str(Path(folder_path).resolve())
+
+            try:
+                p = Path(norm_path).resolve()
+                base_dir = config.BASE_DIR.resolve()
+                if p == base_dir or base_dir in p.parents:
+                    return False
+            except Exception:
+                pass
+
+            if self._db.contains(norm_path):
+                return False
+
+            try:
+                p = Path(norm_path)
+                if not p.exists() or not p.is_dir() or _is_skipped_dir(p.name):
+                    return False
+
+                text = _folder_index_text(p)
+                if len(text.strip()) < 10:
+                    return False
+
+                embedding = self.embedder.encode_single(text)
+                embedding = np.array([embedding], dtype=np.float32)
+                try:
+                    stat = p.stat()
+                    modified = stat.st_mtime
+                    created = stat.st_ctime
+                except OSError:
+                    modified = created = time.time()
+                meta = {
+                    "path": norm_path,
+                    "name": p.name,
+                    "size": 0,
+                    "modified_time": modified,
+                    "created_time": created,
+                    "extension": FOLDER_EXTENSION,
+                }
+
+                faiss_id = self.index.ntotal
+                self.index.add(embedding)
+                self._db.insert(faiss_id, meta)
+                return True
+            except Exception as e:
+                logger.error(f"Error indexing folder {norm_path}: {e}")
+                return False
+
     def remove_file(self, file_path: str) -> bool:
         """Remove a file from the index (soft delete — marks in SQLite, FAISS vector stays but unused)."""
         with self.lock:
@@ -297,6 +401,7 @@ class IndexBuilder:
             return 0
 
         files = []
+        folders = []
         if recursive:
             for root, dirs, fnames in os.walk(directory):
                 try:
@@ -309,6 +414,7 @@ class IndexBuilder:
                     pass
 
                 dirs[:] = [d for d in dirs if not _is_skipped_dir(d)]
+                folders.append(root)
 
                 for fname in fnames:
                     if _is_skipped_file(fname):
@@ -322,11 +428,23 @@ class IndexBuilder:
                         except Exception:
                             pass
         else:
+            folders.append(str(path))
             for p in path.glob("*"):
-                if p.is_file() and p.suffix.lower() in config.SUPPORTED_EXTENSIONS:
+                if p.is_dir() and not _is_skipped_dir(p.name):
+                    folders.append(str(p))
+                elif p.is_file() and p.suffix.lower() in config.SUPPORTED_EXTENSIONS:
                     files.append(str(p))
 
-        logger.info(f"Found {len(files)} candidate files in {directory}")
+        logger.info(
+            f"Found {len(folders)} candidate folders and {len(files)} candidate files in {directory}"
+        )
+        for folder in folders:
+            try:
+                if self.add_folder(str(folder)):
+                    count += 1
+            except Exception as e:
+                logger.warning(f"Error processing folder {folder}: {e}")
+
         for i, f in enumerate(files):
             try:
                 if self.add_file(str(f)):
@@ -340,7 +458,7 @@ class IndexBuilder:
             # CPU throttle: yield 10ms every 10 files to prevent freeze without crawling
             if i % 10 == 9:
                 time.sleep(0.01)
-        logger.info(f"Indexed {count} NEW files from {directory}")
+        logger.info(f"Indexed {count} NEW file/folder records from {directory}")
         return count
 
     # ── access frequency ──────────────────────────────────────
