@@ -7,7 +7,7 @@ on:
       - "neucockpit-v*"
 
 env:
-  NEURON_SKIP_QWEN_GGUF: "1"   # Users download the 3 GB GGUF on first run
+  NEURON_SKIP_QWEN_GGUF: "0"   # Bundle the 2.1 GB Qwen GGUF in all builds
 
 jobs:
   # ─────────────────────── Linux x64 ───────────────────────
