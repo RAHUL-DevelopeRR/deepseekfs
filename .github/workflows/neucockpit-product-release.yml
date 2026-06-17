@@ -20,7 +20,7 @@ env:
 
 jobs:
   linux-x64:
-    name: Linux x64 tarball
+    name: Linux x64 installer
     runs-on: ubuntu-22.04
     env:
       NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
@@ -42,7 +42,7 @@ jobs:
           if-no-files-found: error
 
   linux-arm64:
-    name: Linux ARM64 tarball
+    name: Linux ARM64 installer
     runs-on: ubuntu-24.04-arm
     env:
       NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
@@ -105,7 +105,7 @@ jobs:
           if-no-files-found: error
 
   windows-arm64:
-    name: Windows ARM64 zip
+    name: Windows ARM64 installer
     runs-on: windows-11-arm
     env:
       NEURON_SKIP_QWEN_GGUF: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_qwen == 'false' && '1' || '0' }}
@@ -114,12 +114,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
       - name: Build NeuCockpit Windows ARM64 package
         shell: pwsh
-        run: scripts/build_neucockpit_windows.ps1 -Arch arm64
+        run: scripts/build_neucockpit_windows.ps1 -Arch arm64 -Package installer
       - uses: actions/upload-artifact@v4
         with:
-          name: NeuCockpit-v1.0-windows-arm64
+          name: NeuCockpit-v1.0-windows-arm64-installer
           path: dist/release/upload/*
           if-no-files-found: error
 
@@ -179,12 +182,12 @@ jobs:
           $MODEL_NOTE
 
           Platforms included when their native runner succeeds:
-          - Linux x64: NeuCockpit-v1.0-linux-x64.tar.gz
-          - Linux ARM64: NeuCockpit-v1.0-linux-arm64.tar.gz
+          - Linux x64: NeuCockpit-v1.0-linux-x64.run
+          - Linux ARM64: NeuCockpit-v1.0-linux-arm64.run
           - macOS ARM64: NeuCockpit-v1.0-macos-arm64.dmg
           - macOS Intel: NeuCockpit-v1.0-macos-intel.dmg
           - Windows x64: NeuCockpitSetup_v1.0_windows_x64.exe
-          - Windows ARM64: NeuCockpit-v1.0-windows-arm64.zip
+          - Windows ARM64: NeuCockpitSetup_v1.0_windows_arm64.exe
 
           Runtime fix in this build: the bundled llama.cpp backend is compiled with portable CPU flags to avoid illegal-instruction crashes on older Windows/Linux/macOS machines.
 

@@ -52,11 +52,77 @@ python -m PyInstaller neuron_onedir.spec --noconfirm
 
 mkdir -p dist/release
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    OUT="dist/release/NeuCockpit-v1.0-linux-arm64.tar.gz"
+    ARCH_LABEL="arm64"
 else
-    OUT="dist/release/NeuCockpit-v1.0-linux-x64.tar.gz"
+    ARCH_LABEL="x64"
 fi
-tar -C dist -czf "$OUT" Neuron
+
+PAYLOAD="dist/release/NeuCockpit-v1.0-linux-${ARCH_LABEL}.payload.tar.gz"
+OUT="dist/release/NeuCockpit-v1.0-linux-${ARCH_LABEL}.run"
+tar -C dist -czf "$PAYLOAD" Neuron
+
+cat > "$OUT" <<'INSTALLER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="NeuCockpit"
+INSTALL_DIR="${NEUCOCKPIT_INSTALL_DIR:-$HOME/.local/share/NeuCockpit}"
+BIN_DIR="${NEUCOCKPIT_BIN_DIR:-$HOME/.local/bin}"
+DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+
+echo "Installing $APP_NAME to $INSTALL_DIR"
+tmp="$(mktemp -d)"
+cleanup() {
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+payload_line="$(awk '/^__NEUCOCKPIT_PAYLOAD_BELOW__$/ { print NR + 1; exit }' "$0")"
+if [ -z "$payload_line" ]; then
+  echo "Installer payload marker not found." >&2
+  exit 1
+fi
+
+tail -n +"$payload_line" "$0" > "$tmp/payload.tar.gz"
+tar -xzf "$tmp/payload.tar.gz" -C "$tmp"
+
+mkdir -p "$(dirname "$INSTALL_DIR")" "$BIN_DIR" "$DESKTOP_DIR"
+rm -rf "$INSTALL_DIR"
+mv "$tmp/Neuron" "$INSTALL_DIR"
+
+chmod +x "$INSTALL_DIR/NeuCockpit" "$INSTALL_DIR/neufs" "$INSTALL_DIR/NeuronLLMWorker" 2>/dev/null || true
+ln -sf "$INSTALL_DIR/NeuCockpit" "$BIN_DIR/neucockpit"
+ln -sf "$INSTALL_DIR/neufs" "$BIN_DIR/neufs"
+
+icon_path="$INSTALL_DIR/assets/neuron_icon.png"
+if [ ! -f "$icon_path" ]; then
+  icon_path="$INSTALL_DIR/assets/neuron_icon.ico"
+fi
+
+cat > "$DESKTOP_DIR/neucockpit.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=NeuCockpit
+Comment=Semantic search and offline chat workspace
+Exec=$INSTALL_DIR/NeuCockpit
+Icon=$icon_path
+Terminal=false
+Categories=Utility;Office;
+DESKTOP
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+fi
+
+echo "$APP_NAME installed."
+echo "Run it from your app launcher, or start it with: $BIN_DIR/neucockpit"
+exit 0
+
+__NEUCOCKPIT_PAYLOAD_BELOW__
+INSTALLER
+cat "$PAYLOAD" >> "$OUT"
+chmod +x "$OUT"
+rm -f "$PAYLOAD"
 
 rm -rf dist/release/upload
 bash scripts/prepare_release_upload.sh "$OUT" dist/release/upload

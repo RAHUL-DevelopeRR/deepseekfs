@@ -135,12 +135,23 @@ try {
     }
 
     if ($Package -in @("installer", "both")) {
-        if ($Arch -ne "x64") {
-            throw "The Inno Setup installer target is currently Windows x64 only. Use -Package zip for $Arch."
-        }
         $iscc = Find-Iscc
-        & $iscc (Join-Path $Root "neuron_installer.iss")
-        $installer = "installer_output\NeuCockpitSetup_v1.0_windows_x64.exe"
+        if ($Arch -eq "arm64") {
+            $installerBase = "NeuCockpitSetup_v1.0_windows_arm64"
+            $allowedArch = "arm64"
+            $installMode = "arm64"
+        } else {
+            $installerBase = "NeuCockpitSetup_v1.0_windows_x64"
+            $allowedArch = "x64compatible"
+            $installMode = "x64compatible"
+        }
+
+        & $iscc `
+            "/DMySetupOutputBaseFilename=$installerBase" `
+            "/DMySetupArchitecturesAllowed=$allowedArch" `
+            "/DMySetupArchitecturesInstallIn64BitMode=$installMode" `
+            (Join-Path $Root "neuron_installer.iss")
+        $installer = "installer_output\$installerBase.exe"
         if (-not (Test-Path $installer)) {
             throw "Expected installer was not created: $installer"
         }

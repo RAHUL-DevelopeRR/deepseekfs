@@ -19,6 +19,15 @@
 #define MyCliExeName "neufs.exe"
 #define MyWorkerExeName "NeuronLLMWorker.exe"
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
+#ifndef MySetupOutputBaseFilename
+#define MySetupOutputBaseFilename "NeuCockpitSetup_v1.0_windows_x64"
+#endif
+#ifndef MySetupArchitecturesAllowed
+#define MySetupArchitecturesAllowed "x64compatible"
+#endif
+#ifndef MySetupArchitecturesInstallIn64BitMode
+#define MySetupArchitecturesInstallIn64BitMode "x64compatible"
+#endif
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -33,7 +42,7 @@ DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=installer_output
-OutputBaseFilename=NeuCockpitSetup_v1.0_windows_x64
+OutputBaseFilename={#MySetupOutputBaseFilename}
 SetupIconFile=assets\neuron_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
@@ -46,8 +55,8 @@ PrivilegesRequired=lowest
 ChangesEnvironment=yes
 CloseApplications=yes
 RestartApplications=no
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#MySetupArchitecturesAllowed}
+ArchitecturesInstallIn64BitMode={#MySetupArchitecturesInstallIn64BitMode}
 DiskSpanning=no
 VersionInfoVersion=1.0.0.0
 VersionInfoCompany={#MyAppPublisher}
