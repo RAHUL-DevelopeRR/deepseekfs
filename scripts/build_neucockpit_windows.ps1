@@ -60,7 +60,20 @@ try {
     python -m pip install -r $req pyinstaller
 
     if ($Arch -eq "arm64") {
-        $env:CMAKE_ARGS = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF"
+        $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
+        if (-not $clang) {
+            $clang = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter clang-cl.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\Llvm\\ARM64\\bin\\clang-cl\.exe$' } |
+                Select-Object -First 1
+        }
+        if (-not $clang) {
+            throw "clang-cl.exe was not found. Windows ARM64 llama.cpp builds require clang."
+        }
+        $clangPath = if ($clang.Source) { $clang.Source } else { $clang.FullName }
+        $env:CC = $clangPath
+        $env:CXX = $clangPath
+        $env:CMAKE_GENERATOR = "Ninja"
+        $env:CMAKE_ARGS = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DCMAKE_C_COMPILER=`"$clangPath`" -DCMAKE_CXX_COMPILER=`"$clangPath`""
         $env:FORCE_CMAKE = "1"
         python -m pip install --no-cache-dir llama-cpp-python
     }
