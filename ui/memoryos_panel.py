@@ -806,10 +806,15 @@ class MemoryOSPanel(QFrame):
     def _welcome_html() -> str:
         return (
             '<div style="color: rgba(255,255,255,0.35); font-style: italic; padding: 8px;">'
-            '<b style="font-size: 14px;">Welcome to MemoryOS</b><br><br>'
+            '<b style="font-size: 14px;">Welcome to MemoryOS</b><br>'
+            '<span style="font-style: normal;">NeuCockpit combines semantic file search with a local offline chat engine.</span><br><br>'
             '<span style="font-style: normal;">Intelligent modes:</span><br>'
             '<b style="color: #a78bfa;">Auto</b> &#8212; Model decides how to handle your request (default)<br>'
             '<b style="color: #4dd0a0;">Query</b> &#8212; Force file search by meaning<br>'
             '<b style="color: #ff8c42;">Action</b> &#8212; Force file operations &amp; shell commands<br><br>'
-            '<span style="font-style: normal;">Just type &mdash; the AI routes automatically.</span></div>'
+            '<span style="font-style: normal;">Try:</span><br>'
+            '<span style="font-family: Consolas, monospace;">summarize my latest PDF</span><br>'
+            '<span style="font-family: Consolas, monospace;">find files about invoices</span><br>'
+            '<span style="font-family: Consolas, monospace;">create a notes file in Downloads</span><br><br>'
+            '<span style="font-style: normal;">Use the Internet toggle only when you need live public data.</span></div>'
         )

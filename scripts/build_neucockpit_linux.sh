@@ -19,7 +19,7 @@ fi
 python -m pip install --upgrade pip
 
 # Filter out Windows-only packages from requirements.txt
-grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes)' requirements.txt > /tmp/requirements-linux.txt
+grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|^llama-cpp-python)' requirements.txt > /tmp/requirements-linux.txt
 
 # Also filter torch+cpu Windows wheel URL if present
 sed -i 's/torch==.*+cpu/torch/g' /tmp/requirements-linux.txt
@@ -32,12 +32,18 @@ if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
     mv /tmp/requirements-linux-arm.txt /tmp/requirements-linux.txt
 fi
 
-python -m pip install pyinstaller huggingface_hub
+python -m pip install pyinstaller huggingface_hub cmake ninja
 python -m pip install -r /tmp/requirements-linux.txt pyinstaller || {
     echo "Some packages failed, trying with --ignore-installed..."
     python -m pip install -r /tmp/requirements-linux.txt pyinstaller --ignore-installed 2>&1 || true
 }
-python -m pip install pyinstaller huggingface_hub
+python -m pip install pyinstaller huggingface_hub cmake ninja
+
+# Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit
+# illegal-instruction crashes on older x64 CPUs.
+export CMAKE_ARGS="${CMAKE_ARGS:-} -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
+export FORCE_CMAKE=1
+python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
 
 # Download release models into app-local storage so PyInstaller bundles them.
 python scripts/prepare_release_models.py

@@ -188,7 +188,7 @@ class UserConfig:
         "hotkey": "shift+space",
         "internet_enabled": False,
         "internet_max_results": 3,
-        "auto_index_on_launch": False,
+        "auto_index_on_launch": True,
     }
 
     @classmethod

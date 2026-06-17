@@ -88,6 +88,9 @@ install_crash_diagnostics()
 # ═══════════════════════════════════════════════════════════════
 def _preload_llm():
     """Pre-load an existing local LLM before PyQt6, without downloading."""
+    if os.getenv("NEURON_LLM_BACKEND", "worker").lower() == "worker":
+        logger.info("Encyl: LLM preload skipped; worker backend loads Qwen on demand.")
+        return
     try:
         from services.model_manager import get_llm_model_path
         if get_llm_model_path() is None:

@@ -29,10 +29,17 @@ function Find-Iscc {
 
 Push-Location $Root
 try {
+    if (-not $SkipPyInstaller -and -not $SkipInstaller) {
+        & "$PSScriptRoot\build_neucockpit_windows.ps1" -Arch x64 -Package installer
+        return
+    }
+
     if (-not $SkipPyInstaller) {
         if ($env:NEURON_SKIP_PIP_INSTALL -ne "1") {
             python -m pip install --upgrade pip
-            python -m pip install -r requirements.txt pyinstaller
+            $env:NEURON_SKIP_QWEN_GGUF = "0"
+            & "$PSScriptRoot\build_neucockpit_windows.ps1" -Arch x64 -Package zip
+            return
         }
         python -c "from services.model_manager import download_llm_model; download_llm_model()"
         $env:NEURON_SKIP_QWEN_GGUF = "0"

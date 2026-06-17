@@ -12,7 +12,7 @@ echo "Platform: $(uname -m)"
 python3 -m pip install --upgrade pip
 
 # Filter out Windows-only and Linux-specific packages
-grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|vosk)' requirements.txt > /tmp/requirements-macos.txt
+grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|vosk|^llama-cpp-python)' requirements.txt > /tmp/requirements-macos.txt
 
 # Replace torch+cpu with plain torch (macOS uses MPS or CPU)
 sed -i '' 's/torch==.*+cpu/torch/g' /tmp/requirements-macos.txt 2>/dev/null || \
@@ -22,7 +22,13 @@ python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller || {
     echo "Some packages failed, retrying..."
     python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller --ignore-installed 2>&1 || true
 }
-python3 -m pip install pyinstaller huggingface_hub
+python3 -m pip install pyinstaller huggingface_hub cmake ninja
+
+# Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit
+# illegal-instruction crashes on older Intel CPUs.
+export CMAKE_ARGS="${CMAKE_ARGS:-} -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
+export FORCE_CMAKE=1
+python3 -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
 
 # Download release models into app-local storage so PyInstaller bundles them.
 python3 scripts/prepare_release_models.py

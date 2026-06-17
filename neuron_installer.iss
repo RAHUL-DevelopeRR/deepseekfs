@@ -35,7 +35,7 @@ AllowNoIcons=yes
 OutputDir=installer_output
 OutputBaseFilename=NeuCockpitSetup_v1.0_windows_x64
 SetupIconFile=assets\neuron_icon.ico
-UninstallDisplayIcon={app}\assets\neuron_icon.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
 Compression=lzma2
 SolidCompression=no
@@ -74,12 +74,12 @@ Name: "runonstartup"; Description: "Launch NeuCockpit on Windows startup"; Group
 Source: "dist\Neuron\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\neuron_icon.ico"
-Name: "{group}\neufs command"; Filename: "{app}\{#MyCliExeName}"; IconFilename: "{app}\assets\neuron_icon.ico"; Tasks: startmenuicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "Rahul.NeuCockpit.Desktop.1.0"
+Name: "{group}\neufs command"; Filename: "{app}\{#MyCliExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\neuron_icon.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "Rahul.NeuCockpit.Desktop.1.0"; Tasks: desktopicon
 ; Startup folder shortcut — ensures app appears in Windows Settings > Startup Apps
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: runonstartup
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "Rahul.NeuCockpit.Desktop.1.0"; Tasks: runonstartup
 
 [Registry]
 ; PATH registration
@@ -97,6 +97,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#MyCli
 ; Application registration metadata (for Add/Remove Programs visibility)
 Root: HKCU; Subkey: "Software\{#MyAppName}"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\{#MyAppName}"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Rahul.NeuCockpit.Desktop.1.0"; ValueType: string; ValueName: "DisplayName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Rahul.NeuCockpit.Desktop.1.0"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\{#MyAppExeName}"; Flags: uninsdeletekey
 
 [Run]
 ; Launch Neuron after install

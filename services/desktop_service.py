@@ -78,11 +78,17 @@ class DesktopService:
         """
         user_config = UserConfig.load()
         env_enabled = os.getenv("NEURON_STARTUP_INDEX_ON_LAUNCH", "").lower()
-        auto_index = user_config.get("auto_index_on_launch", False) or env_enabled in {
-            "1",
-            "true",
-            "yes",
-        }
+        should_index_empty = False
+        try:
+            should_index_empty = self.total_indexed() == 0
+        except Exception:
+            should_index_empty = False
+        env_requested = env_enabled in {"1", "true", "yes"}
+        auto_index = (
+            user_config.get("auto_index_on_launch", True)
+            or env_requested
+            or should_index_empty
+        )
         if not auto_index:
             logger.info("DesktopService: startup indexing disabled; watcher starts from existing index")
             try:

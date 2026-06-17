@@ -667,7 +667,7 @@ class SpotlightPanel(QWidget):
 
         # empty-state
 
-        self.empty = QLabel("Type to search your files\n\nIndexes Desktop · Documents · Downloads\nand more across your machine")
+        self.empty = QLabel("Type to search your files\n\nIndexes Desktop, Documents, Downloads\nand more across your machine")
 
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -684,6 +684,38 @@ class SpotlightPanel(QWidget):
         """)
 
         self.rl.addWidget(self.empty)
+
+        self._guide_card = QFrame()
+        self._guide_card.setStyleSheet("""
+            QFrame {
+                background: rgba(255,255,255,0.035);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px;
+            }
+        """)
+        guide_lay = QVBoxLayout(self._guide_card)
+        guide_lay.setContentsMargins(16, 12, 16, 12)
+        guide_lay.setSpacing(6)
+
+        guide_title = QLabel("What is NeuCockpit?")
+        guide_title.setStyleSheet(f"font-family: {FN}; font-size: 13px; font-weight: 800; color: rgba(255,255,255,0.76); background: transparent;")
+        guide_lay.addWidget(guide_title)
+
+        guide_copy = QLabel(
+            "NeuCockpit is a local semantic search and MemoryOS chat workspace. "
+            "Search by meaning, open files, add folders, and use MemoryOS for Auto, Query, and Action requests."
+        )
+        guide_copy.setWordWrap(True)
+        guide_copy.setStyleSheet(f"font-family: {FN}; font-size: 11.5px; color: rgba(255,255,255,0.45); background: transparent;")
+        guide_lay.addWidget(guide_copy)
+
+        guide_hint = QLabel(
+            "Start: type a question or file idea above. Add data: click Add Folder. Refresh: click Re-index. Chat: open MemoryOS."
+        )
+        guide_hint.setWordWrap(True)
+        guide_hint.setStyleSheet(f"font-family: {MN}; font-size: 9.5px; color: rgba(96,205,255,0.72); background: transparent;")
+        guide_lay.addWidget(guide_hint)
+        self.rl.addWidget(self._guide_card)
 
 
 
@@ -919,7 +951,7 @@ class SpotlightPanel(QWidget):
 
 
 
-        self.idx_lbl = QLabel("Indexing…")
+        self.idx_lbl = QLabel("Checking index...")
 
         self.idx_lbl.setStyleSheet(f"font-size: 10px; color: rgba(255,255,255,0.18); background: transparent;")
 
@@ -998,7 +1030,7 @@ class SpotlightPanel(QWidget):
 
             w = it.widget()
 
-            if w and w not in (self.empty, self._acw, self._sgw, self._today_card):
+            if w and w not in (self.empty, self._guide_card, self._acw, self._sgw, self._today_card):
 
                 w.deleteLater()
 
@@ -1008,7 +1040,7 @@ class SpotlightPanel(QWidget):
 
         if msg: self.empty.setText(msg)
 
-        self.empty.show(); self._acw.show(); self._sgw.show()
+        self.empty.show(); self._guide_card.show(); self._acw.show(); self._sgw.show()
 
         self._today_card.show()
 
@@ -1018,7 +1050,7 @@ class SpotlightPanel(QWidget):
 
     def _hide_empty(self):
 
-        self.empty.hide(); self._acw.hide(); self._sgw.hide()
+        self.empty.hide(); self._guide_card.hide(); self._acw.hide(); self._sgw.hide()
 
         self._today_card.hide()
 
@@ -1037,6 +1069,7 @@ class SpotlightPanel(QWidget):
             self._show_empty("No matching files — try different keywords")
 
             self.rl.addWidget(self.empty)
+            self.rl.addWidget(self._guide_card)
 
             self.rl.addWidget(self._acw)
 
@@ -1945,12 +1978,9 @@ class SpotlightPanel(QWidget):
     def _reindex(self):
 
         try:
-
-            from services.startup_indexer import StartupIndexer
-
-            si = StartupIndexer()
-
-            si.reindex_in_background("manual")
+            if self._indexing:
+                return
+            self._kick_index()
 
         except Exception as e:
 
@@ -2086,15 +2116,26 @@ class SpotlightPanel(QWidget):
 
             return
 
-        if cnt != self._idx_count:
+        self._idx_count = cnt
 
-            self._idx_count = cnt
+        if not self._indexing:
+            try:
+                from services.startup_indexer import StartupIndexer
+                indexer_running = StartupIndexer.is_running()
+            except Exception:
+                indexer_running = False
 
-            if not self._indexing:
-
+            if indexer_running:
+                if cnt > 0:
+                    self.idx_lbl.setText(f"Indexing... {cnt:,} files")
+                else:
+                    self.idx_lbl.setText("Indexing...")
+            elif cnt > 0:
                 self.idx_lbl.setText(f"{cnt:,} files indexed")
+            else:
+                self.idx_lbl.setText("0 files indexed - add a folder or re-index")
 
-            self._update_tray_tooltip()
+        self._update_tray_tooltip()
 
 
 
@@ -2114,11 +2155,11 @@ class SpotlightPanel(QWidget):
 
             else:
 
-                self.idx_lbl.setText("Indexing…")
+                self.idx_lbl.setText("Indexing...")
 
         except Exception:
 
-            self.idx_lbl.setText("Indexing…")
+            self.idx_lbl.setText("Indexing...")
 
 
 
@@ -2130,7 +2171,7 @@ class SpotlightPanel(QWidget):
 
         self._it.progress.connect(
 
-            lambda d, t: self.idx_lbl.setText(f"Indexing… {min(int(d/t*100),99)}%") if t > 0 else None)
+            lambda d, t: self.idx_lbl.setText(f"Indexing... {min(int(d/t*100),99)}%") if t > 0 else None)
 
         self._it.finished.connect(self._idx_done)
 
@@ -2144,7 +2185,10 @@ class SpotlightPanel(QWidget):
 
         self._idx_count = self._svc.total_indexed()
 
-        self.idx_lbl.setText(f"{self._idx_count:,} files indexed")
+        if self._idx_count > 0:
+            self.idx_lbl.setText(f"{self._idx_count:,} files indexed")
+        else:
+            self.idx_lbl.setText("0 files indexed - add a folder or re-index")
 
         # Stop live refresh — indexing is done
 
@@ -2394,7 +2438,7 @@ class SpotlightPanel(QWidget):
 
         if self._idx_count == 0 and not self._indexing:
 
-            self.status.setText("Index empty — waiting for indexing…"); return
+            self.status.setText("No files indexed yet - click Re-index or Add Folder."); return
 
         self.status.setText("Searching…")
 
