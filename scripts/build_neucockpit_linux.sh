@@ -39,10 +39,8 @@ python -m pip install -r /tmp/requirements-linux.txt pyinstaller || {
 }
 python -m pip install pyinstaller huggingface_hub
 
-# Download models if not skipping
-if [ "${NEURON_SKIP_QWEN_GGUF}" != "1" ]; then
-    python -c "from services.model_manager import download_llm_model; download_llm_model()" || echo "Model download skipped"
-fi
+# Download release models into app-local storage so PyInstaller bundles them.
+python scripts/prepare_release_models.py
 
 python -m PyInstaller neuron_onedir.spec --noconfirm
 

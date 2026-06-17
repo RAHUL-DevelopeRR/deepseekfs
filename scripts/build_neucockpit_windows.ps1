@@ -78,9 +78,7 @@ try {
         python -m pip install --no-cache-dir llama-cpp-python
     }
 
-    if ($env:NEURON_SKIP_QWEN_GGUF -ne "1") {
-        python -c "from services.model_manager import download_llm_model; download_llm_model()"
-    }
+    python scripts\prepare_release_models.py
 
     python -m PyInstaller neuron_onedir.spec --noconfirm
 

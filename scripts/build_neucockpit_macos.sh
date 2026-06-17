@@ -22,11 +22,10 @@ python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller || {
     echo "Some packages failed, retrying..."
     python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller --ignore-installed 2>&1 || true
 }
+python3 -m pip install pyinstaller huggingface_hub
 
-# Download models if not skipping
-if [ "${NEURON_SKIP_QWEN_GGUF}" != "1" ]; then
-    python3 -c "from services.model_manager import download_llm_model; download_llm_model()" || echo "Model download skipped"
-fi
+# Download release models into app-local storage so PyInstaller bundles them.
+python3 scripts/prepare_release_models.py
 
 python3 -m PyInstaller neuron_onedir.spec --noconfirm
 
