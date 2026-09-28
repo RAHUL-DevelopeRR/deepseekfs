@@ -3,6 +3,18 @@ name: Headless package usability
 on:
   push:
     branches: [codex/ui-ux-unique-icons]
+    paths:
+      - 'app/**'
+      - 'core/**'
+      - 'services/**'
+      - 'ui/**'
+      - 'scripts/build_neucockpit_linux.sh'
+      - 'scripts/build_neucockpit_macos.sh'
+      - 'scripts/headless_usability_smoke.py'
+      - 'requirements-package.txt'
+      - 'neuron_onedir.spec'
+      - 'run_desktop.py'
+      - 'neufs.py'
   workflow_dispatch:
 
 jobs:

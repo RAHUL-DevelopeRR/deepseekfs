@@ -23,7 +23,7 @@ def main() -> int:
     command = [sys.executable, str(cli)] if cli.suffix == ".py" else [str(cli)]
 
     with tempfile.TemporaryDirectory(prefix="neufs-usability-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
         documents = root / "documents"
         documents.mkdir()
         env = os.environ.copy()
@@ -60,7 +60,7 @@ def main() -> int:
         assert indexed["index_count"] >= 2
         found = run("search", "search", "Q3 revenue", "--limit", "5")
         assert any(item["path"] == str(report) and item.get("page") == 8
-                   for item in found["results"]), "Page 8 was not retrieved"
+                   for item in found["results"]), f"Page 8 was not retrieved: {found['results'][:5]}"
         answered = run("query", "chat", "What was Q3 revenue?", "--mode", "query",
                        "--worker", "--offline")
         assert "987654" in answered["response"] and "Page 8" in answered["response"]

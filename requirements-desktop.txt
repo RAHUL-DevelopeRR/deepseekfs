@@ -1,0 +1,2 @@
+-r requirements-package.txt
+llama-cpp-python>=0.3.0

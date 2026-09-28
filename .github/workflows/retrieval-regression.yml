@@ -15,7 +15,7 @@ jobs:
     env:
       HF_HUB_OFFLINE: '1'
       QT_QPA_PLATFORM: offscreen
-      NEURON_STORAGE_DIR: ${{ runner.temp }}/neucockpit-retrieval-tests
+      NEURON_STORAGE_DIR: ${{ github.workspace }}/neucockpit-retrieval-tests
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
