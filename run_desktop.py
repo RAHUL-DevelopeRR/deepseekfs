@@ -70,8 +70,8 @@ if "--llm-worker" in sys.argv:
 
 # Keep llama.cpp native faults and CPU-instruction failures outside Qt.
 os.environ.setdefault("NEURON_LLM_BACKEND", "worker")
-os.environ.setdefault("NEURON_LLM_PROFILE", "performance")
-os.environ.setdefault("NEURON_LLM_BATCH", "512")
+os.environ.setdefault("NEURON_LLM_PROFILE", "balanced")
+os.environ.setdefault("NEURON_LLM_BATCH", "128")
 os.environ.setdefault("NEURON_UI_STREAMING", "1")
 
 # ── Core imports (must happen BEFORE PyQt6) ───────────────────

@@ -7,6 +7,7 @@ from watchdog.observers import Observer
 import app.config as config
 from app.logger import logger
 from core.indexing.index_builder import IndexBuilder, _is_skipped_dir, _is_skipped_file
+from core.ingestion.chunks import VIDEO_EXTENSIONS
 
 
 def _is_skipped_path(path: str) -> bool:
@@ -42,7 +43,7 @@ class FileEventHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if not event.is_directory:
-            self._process_file(event.src_path)
+            self._process_file(event.src_path, event_type="modified")
 
     def on_deleted(self, event):
         if _is_skipped_path(event.src_path):
@@ -50,41 +51,51 @@ class FileEventHandler(FileSystemEventHandler):
         path = str(Path(event.src_path).resolve())
         if self.index_builder.remove_file(path):
             logger.info(f"Removed from index: {event.src_path}")
+        self._refresh_video_sidecar(event.src_path)
 
     def on_moved(self, event):
-        if _is_skipped_path(event.src_path) or _is_skipped_path(event.dest_path):
-            return
-        old_path = str(Path(event.src_path).resolve())
-        self.index_builder.remove_file(old_path)
-        if event.is_directory:
-            self._process_folder(event.dest_path)
-        else:
-            self._process_file(event.dest_path)
+        if not _is_skipped_path(event.src_path):
+            self.index_builder.remove_file(str(Path(event.src_path).resolve()))
+            self._refresh_video_sidecar(event.src_path)
+        if not _is_skipped_path(event.dest_path):
+            if event.is_directory:
+                self._process_folder(event.dest_path)
+            else:
+                self._process_file(event.dest_path)
         logger.info(f"Path moved: {event.src_path} -> {event.dest_path}")
 
     def _process_folder(self, folder_path: str):
         if _is_skipped_path(folder_path):
             return
         logger.info(f"New folder detected: {folder_path}")
-        if self.index_builder.add_folder(folder_path):
+        if self.index_builder.index_directory(folder_path):
             self.index_builder.save()
 
-    def _process_file(self, file_path: str):
+    def _refresh_video_sidecar(self, file_path: str):
+        path = Path(file_path)
+        if path.suffix.lower() in {".srt", ".vtt"}:
+            for ext in VIDEO_EXTENSIONS:
+                video = path.with_suffix(ext)
+                if video.is_file():
+                    self.index_builder.add_file(str(video), force=True)
+
+    def _process_file(self, file_path: str, event_type: str = "created"):
         """Process file if supported, then evaluate watch hooks."""
         if _is_skipped_path(file_path):
             return
+        self._refresh_video_sidecar(file_path)
         ext = Path(file_path).suffix.lower()
         if ext not in config.SUPPORTED_EXTENSIONS:
             return
 
-        logger.info(f"New file detected: {file_path}")
-        if self.index_builder.add_file(file_path):
+        logger.info(f"File {event_type}: {file_path}")
+        if self.index_builder.add_file(file_path, force=event_type == "modified"):
             self.index_builder.save()
 
         try:
             from services.watch_rules import get_watch_hooks
 
-            get_watch_hooks().evaluate(file_path, "created")
+            get_watch_hooks().evaluate(file_path, event_type)
         except Exception:
             pass
 

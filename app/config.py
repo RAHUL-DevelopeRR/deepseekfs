@@ -294,6 +294,7 @@ SUPPORTED_EXTENSIONS = {
     # trying to read binary contents.
     ".exe", ".msi", ".dll", ".lnk", ".bat", ".cmd", ".ps1",
     # Media (metadata only)
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff",
     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
 }
 

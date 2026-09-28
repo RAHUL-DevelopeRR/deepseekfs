@@ -135,21 +135,20 @@ class StartupIndexer:
 
     # ── Wipe ──────────────────────────────────────────────────
     def _wipe_index(self, reason: str = "stale"):
-        """Delete all index files so a fresh scan starts."""
+        """Reset through the live index; never unlink a database with open writers."""
         logger.info(f"Wiping index ({reason})...")
+        idx = get_index()
+        idx._create_fresh_index()
+        idx.save()
         for p in [
-            config.FAISS_INDEX_PATH,
             config.METADATA_PATH,
             config.INDEXED_PATHS_DB,
-            config.SQLITE_DB_PATH,
             str(config.FIRST_RUN_FLAG),
         ]:
             try:
                 Path(p).unlink(missing_ok=True)
             except Exception:
                 pass
-        idx = get_index()
-        idx._create_fresh_index()
         logger.info("Index wiped. Starting fresh scan.")
 
     # ── Run ───────────────────────────────────────────────────

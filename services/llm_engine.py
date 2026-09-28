@@ -5,7 +5,7 @@ Direct in-process GGUF model inference.
 NO Ollama. NO server. NO network exposure.
 
 Architecture:
-- Uses llama-cpp-python to load Qwen 2.5 Coder 3B Instruct (Q5_K_M) GGUF
+- Uses llama-cpp-python to load Qwen 2.5 Coder 1.5B Instruct (Q4_K_M) GGUF
 - Single unified model for chat, summarization, tool calling, AND code
 - Model loaded once, kept in RAM for session lifetime
 - Thread-safe with lock (single inference at a time)
@@ -79,7 +79,7 @@ def _log_generation_stats(kind: str, started: float, response: dict, content: st
     )
 
 # ── Configuration ─────────────────────────────────────────────
-DEFAULT_N_CTX = 4096        # Context window (tokens)
+DEFAULT_N_CTX = 2048        # Modest default; callers can request a larger context
 DEFAULT_N_THREADS = 0       # 0 = auto-detect CPU cores
 DEFAULT_N_BATCH = 256       # Lower batch keeps preloaded memory pressure modest
 DEFAULT_TEMPERATURE = 0.3   # Low temp for consistent outputs
@@ -188,7 +188,7 @@ class LLMEngine:
                 if model_path is None:
                     if not allow_download:
                         self._load_error = (
-                            "Qwen 2.5 Coder 3B GGUF model not found. "
+                            "Qwen 2.5 Coder 1.5B GGUF model not found. "
                             "Place it in storage/models, %LOCALAPPDATA%/Neuron/models, "
                             "or set NEURON_MODEL_DIRS. Set NEURON_ALLOW_SMALL_MODEL_FALLBACK=1 "
                             "only for diagnostics on the older 0.5B beta model."
@@ -209,7 +209,7 @@ class LLMEngine:
             logger.info(f"LLMEngine: Loading model from {self._model_path}...")
             t0 = time.time()
             
-            from llama_cpp import Llama
+            from llama_cpp import Llama, GGML_TYPE_Q8_0, GGML_TYPE_F16
             
             # Auto-detect thread count; allow local speed/power tuning.
             cores = os.cpu_count() or 4
@@ -221,7 +221,7 @@ class LLMEngine:
                 elif profile == "performance":
                     n_threads = max(2, min(8, cores))
                 else:
-                    n_threads = max(1, cores // 2)
+                    n_threads = max(1, min(4, cores))
             else:
                 n_threads = int(raw_threads or str(DEFAULT_N_THREADS))
                 if n_threads == 0:
@@ -254,11 +254,9 @@ class LLMEngine:
                 use_mmap,
             )
             
-            # Performance optimizations:
-            #   flash_attn  = faster attention computation
-            #   type_k/v    = KV cache quantization (50% memory savings)
-            #   n_batch=512 = faster prompt processing
-            #   chat_format = native function calling (like GPT/Claude)
+            kv_type = (GGML_TYPE_Q8_0 if os.getenv("NEURON_LLM_KV_TYPE", "f16").lower() == "q8_0"
+                       else GGML_TYPE_F16)
+            # Q4_K_M quantizes model weights separately from this KV cache.
             load_kwargs = dict(
                 model_path=self._model_path,
                 n_batch=n_batch,
@@ -268,19 +266,21 @@ class LLMEngine:
                 use_mmap=use_mmap,
                 use_mlock=False,
                 flash_attn=True,
-                type_k=1,     # q8_0 KV cache (key)
-                type_v=1,     # q8_0 KV cache (value)
+                type_k=kv_type,
+                type_v=kv_type,
                 chat_format="chatml",
             )
             
-            # First attempt with 2048 context
+            # Preserve the requested context on fallback; 512 tokens cannot
+            # accommodate grounded retrieval prompts and an answer.
             try:
-                self._model = Llama(n_ctx=min(self._n_ctx, 2048), **load_kwargs)
+                self._model = Llama(n_ctx=self._n_ctx, **load_kwargs)
             except Exception as e1:
                 logger.warning(f"LLMEngine: First load failed: {e1}, trying fallback...")
                 load_kwargs["n_batch"] = 128
                 load_kwargs["n_threads"] = max(1, n_threads // 2)
-                self._model = Llama(n_ctx=512, **load_kwargs)
+                load_kwargs.update(flash_attn=False, type_k=GGML_TYPE_F16, type_v=GGML_TYPE_F16)
+                self._model = Llama(n_ctx=self._n_ctx, **load_kwargs)
             
             elapsed = time.time() - t0
             size_mb = file_size / (1024 * 1024)
@@ -428,6 +428,41 @@ class LLMEngine:
                 logger.error(f"LLMEngine: Stream error: {e}")
                 yield f"\n[AI error: {e}]"
     
+    def _fit_chat_messages(self, messages: List[dict], max_tokens: int):
+        """Budget the actual ChatML tokens, including roles and answer space."""
+        from llama_cpp.llama_chat_format import format_chatml
+        fitted = [dict(message) for message in messages]
+        max_tokens = max(1, min(max_tokens, self._model.n_ctx() // 2))
+        budget = self._model.n_ctx() - max_tokens - 16
+
+        def count_tokens():
+            prompt = format_chatml(messages=fitted).prompt
+            return len(self._model.tokenize(prompt.encode('utf-8'), special=True))
+
+        while len(fitted) > 2 and count_tokens() > budget:
+            # Preserve the system instruction and latest user turn.
+            removable = next((i for i, message in enumerate(fitted[:-1]) if message.get('role') != 'system'), None)
+            if removable is None:
+                break
+            fitted.pop(removable)
+        if count_tokens() > budget:
+            if not fitted or fitted[-1].get('role') == 'system':
+                raise ValueError('System instructions exceed the model context budget')
+            original = fitted[-1].get('content') or ''
+            marker = '\n[Input truncated to context budget; omitted evidence is unavailable.]'
+            low, high = 0, len(original)
+            while low < high:
+                middle = (low + high + 1) // 2
+                fitted[-1]['content'] = original[:middle] + marker
+                if count_tokens() <= budget:
+                    low = middle
+                else:
+                    high = middle - 1
+            fitted[-1]['content'] = original[:low] + marker
+            if count_tokens() > budget:
+                raise ValueError('System instructions exceed the model context budget')
+        return fitted, max_tokens
+
     def chat(
         self,
         messages: List[dict],
@@ -445,7 +480,7 @@ class LLMEngine:
         
         with self._lock:
             try:
-                # Pass messages through as-is — caller manages context
+                messages, max_tokens = self._fit_chat_messages(messages, max_tokens)
                 started = time.time()
                 response = self._model.create_chat_completion(
                     messages=messages,
@@ -485,6 +520,7 @@ class LLMEngine:
 
         with self._lock:
             try:
+                messages, max_tokens = self._fit_chat_messages(messages, max_tokens)
                 started = time.time()
                 emitted: list[str] = []
                 first_token_s: float | None = None
@@ -601,7 +637,6 @@ class LLMEngine:
             return summary
         
         name = Path(path).name
-        ext = Path(path).suffix.lower()
         prompt = (
             "Summarize this file using ONLY the extracted evidence below. "
             "If the extraction notes say the PDF has a weak text layer, say "

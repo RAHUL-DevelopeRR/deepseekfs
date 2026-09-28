@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from pathlib import Path
 from typing import List, Union
 
@@ -175,7 +176,10 @@ class _OnnxBgeEmbedder:
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        self.session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = max(1, int(os.getenv("NEURON_EMBEDDING_THREADS", "2")))
+        options.inter_op_num_threads = 1
+        self.session = ort.InferenceSession(str(model_path), sess_options=options, providers=["CPUExecutionProvider"])
         self.tokenizer = Tokenizer.from_file(str(tokenizer_dir / "tokenizer.json"))
         self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
         self.tokenizer.enable_truncation(max_length=int(os.getenv("NEURON_EMBEDDING_MAX_TOKENS", "512")))
@@ -221,6 +225,8 @@ class Embedder:
         self.model = None
         self._backend = None
         self._fallback = _FallbackEmbedder(config.EMBEDDING_DIM)
+        self._encode_lock = threading.RLock()
+        self.identity = f"lexical-blake2b-v1:{config.EMBEDDING_DIM}"
 
         logger.info("Loading embedding model: %s", model_name)
 
@@ -230,6 +236,7 @@ class Embedder:
                 model_path, tokenizer_dir = bge_onnx
                 self._backend = _OnnxBgeEmbedder(model_path, tokenizer_dir)
                 self.model = self._backend
+                self.identity = f"{model_name}:onnx-cls:{model_path.name}:{model_path.stat().st_size}"
                 logger.info("BGE ONNX embedder ready. Dimension: %s", self._backend.dim)
                 return
             except Exception as exc:
@@ -254,11 +261,9 @@ class Embedder:
                 self.model = self._backend
                 dim = int(self._backend.get_sentence_embedding_dimension())
                 if dim != config.EMBEDDING_DIM:
-                    logger.warning(
-                        "Embedding dimension mismatch: model=%s config=%s. Existing FAISS index may need rebuild.",
-                        dim,
-                        config.EMBEDDING_DIM,
-                    )
+                    self.model = self._backend = None
+                    raise ValueError(f"Embedding dimension {dim} != configured {config.EMBEDDING_DIM}")
+                self.identity = f"{model_name}:sentence-transformers:{dim}"
                 logger.info("Sentence-transformer embedder ready from %s. Dimension: %s", source, dim)
                 return
             except Exception as exc:
@@ -272,6 +277,7 @@ class Embedder:
             try:
                 self._backend = _OnnxMiniLmEmbedder(onnx_dir)
                 self.model = self._backend
+                self.identity = "minilm:onnx-mean:384"
                 logger.warning(
                     "Legacy MiniLM ONNX fallback active. Install %s for primary BGE search.",
                     config.MODEL_NAME,
@@ -288,6 +294,11 @@ class Embedder:
         batch_size: int = 32,
         show_progress_bar: bool = False,
     ) -> np.ndarray:
+        # Tokenizers and native backends are shared by indexing and UI queries.
+        with self._encode_lock:
+            return self._encode(texts, batch_size, show_progress_bar)
+
+    def _encode(self, texts, batch_size, show_progress_bar) -> np.ndarray:
         if isinstance(texts, str):
             texts = [texts]
 
@@ -310,10 +321,13 @@ class Embedder:
 
 
 _embedder_instance: Embedder | None = None
+_embedder_lock = threading.Lock()
 
 
 def get_embedder() -> Embedder:
     global _embedder_instance
     if _embedder_instance is None:
-        _embedder_instance = Embedder()
+        with _embedder_lock:
+            if _embedder_instance is None:
+                _embedder_instance = Embedder()
     return _embedder_instance

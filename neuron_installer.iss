@@ -71,7 +71,7 @@ InfoBeforeFile=docs\pre_install_info.txt
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-english.WelcomeLabel2=This will install [name/ver] on your computer.%n%nNeuCockpit v1.0 is a local semantic search engine and offline chat engine with optional internet access for live data.%n%nIncluded:%n  - BGE Small ONNX embeddings for semantic search%n  - Qwen 2.5 Coder 3B GGUF for offline chat%n  - MemoryOS Auto / Query / Action modes%n  - neufs terminal command%n%nMinimum Requirements:%n  - Windows 10/11 (64-bit)%n  - 8 GB RAM minimum, 16 GB recommended%n  - 6 GB free disk space
+english.WelcomeLabel2=This will install [name/ver] on your computer.%n%nNeuCockpit v1.0 is a local semantic search engine and offline chat engine with optional internet access for live data.%n%nIncluded:%n  - BGE Small ONNX embeddings for semantic search%n  - Qwen 2.5 Coder 1.5B GGUF for offline chat%n  - MemoryOS Auto / Query / Action modes%n  - neufs terminal command%n%nMinimum Requirements:%n  - Windows 10/11 (64-bit)%n  - 8 GB RAM minimum, 16 GB recommended%n  - 6 GB free disk space
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"

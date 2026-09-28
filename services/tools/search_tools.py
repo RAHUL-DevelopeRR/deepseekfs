@@ -41,7 +41,7 @@ class SemanticSearchTool(BaseTool):
             from core.search.semantic_search import SemanticSearch
 
             searcher = SemanticSearch()
-            results = searcher.search(query, top_k=max_results)
+            results = searcher.search(query, top_k=max(1, min(int(max_results), 20)))
             if not results:
                 return ToolResult(True, f"No results found for: {query}")
 
@@ -49,7 +49,11 @@ class SemanticSearchTool(BaseTool):
             for index, result in enumerate(results, 1):
                 name = result.get("name", Path(result.get("path", "")).name)
                 score = result.get("combined_score", result.get("semantic_score", 0))
-                output_lines.append(f"  {index}. {name} (score: {score:.2f})")
+                output_lines.append(f"  {index}. {name} (score: {score:.2f})\n    Path: {result.get('path', '')}")
+                if result.get("section"):
+                    output_lines.append(f"    Location: {result['section']}")
+                if result.get("text"):
+                    output_lines.append(f"    Evidence ({result.get('evidence_kind', 'content')}): {result['text'][:240]}")
             return ToolResult(True, "\n".join(output_lines), results)
         except Exception as exc:
             return ToolResult(False, f"Search error: {exc}")

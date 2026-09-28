@@ -15,13 +15,9 @@ python3 -m pip install --upgrade pip
 grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|vosk|^llama-cpp-python)' requirements.txt > /tmp/requirements-macos.txt
 
 # Replace torch+cpu with plain torch (macOS uses MPS or CPU)
-sed -i '' 's/torch==.*+cpu/torch/g' /tmp/requirements-macos.txt 2>/dev/null || \
-sed 's/torch==.*+cpu/torch/g' requirements.txt > /tmp/requirements-macos.txt
+sed -i '' 's/torch==.*+cpu/torch/g' /tmp/requirements-macos.txt
 
-python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller || {
-    echo "Some packages failed, retrying..."
-    python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller --ignore-installed 2>&1 || true
-}
+python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller
 python3 -m pip install pyinstaller huggingface_hub cmake ninja
 
 # Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit

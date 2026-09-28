@@ -34,6 +34,19 @@ class SemanticSearch:
         self.embedder = get_embedder()
         self._preloaded_index = index
 
+    def search_evidence(self, query: str, top_k: int = 8) -> List[Dict]:
+        files = self.search(query, top_k=top_k, use_time_ranking=False)
+        index = self._preloaded_index if self._preloaded_index is not None else get_index()
+        embedding = np.asarray(self.embedder.encode_single(query), dtype=np.float32)
+        evidence = index.evidence_for_paths(embedding, [item['path'] for item in files])
+        # Metadata-only results remain useful for listing files, but must never
+        # be presented as document evidence.
+        covered = {item['path'] for item in evidence}
+        return evidence[:12] + [
+            {key: value for key, value in item.items() if key not in {'text', 'section', 'page'}}
+            for item in files if item['path'] not in covered
+        ]
+
     def search(
         self,
         query: str,
@@ -131,7 +144,6 @@ class SemanticSearch:
 
             results = []
             time_multiplier = get_time_multiplier(query) if use_time_ranking else 1.0
-            home_str = str(Path.home()).lower()
 
             for i, idx in enumerate(indices):
                 if idx < 0:
@@ -224,7 +236,7 @@ class SemanticSearch:
                         + 0.05 * access_score
                     )
                 else:
-                    time_score = calculate_time_score(meta.get("modified_time", 0))
+                    time_score = calculate_time_score(meta.get("modified_time", 0)) if use_time_ranking else 0.0
                     combined_score = (
                         0.55 * similarity
                         + 0.20 * time_score * time_multiplier
@@ -234,6 +246,10 @@ class SemanticSearch:
                     )
 
                 results.append({
+                    **{key: meta.get(key) for key in (
+                        "chunk_id", "text", "section", "page", "offset_start", "offset_end",
+                        "evidence_kind", "timestamp", "truncated", "content_hash",
+                    )},
                     "path": file_path,
                     "name": meta["name"],
                     "extension": meta["extension"],
@@ -274,6 +290,16 @@ class SemanticSearch:
                             if fpath in result_paths:
                                 continue
                             if not Path(fpath).exists():
+                                continue
+                            if target_exts and row_dict.get("extension", "").lower() not in target_exts:
+                                continue
+                            if path_filter and path_filter.lower() not in fpath.lower():
+                                continue
+                            if any(excluded.lower() in fpath.lower() for excluded in excluded_paths):
+                                continue
+                            if size_filter == "large" and row_dict.get("size", 0) < _LARGE_FILE_THRESHOLD:
+                                continue
+                            if size_filter == "small" and row_dict.get("size", 0) > _SMALL_FILE_THRESHOLD:
                                 continue
                             name = row_dict.get("name", "")
                             name_l = name.lower()

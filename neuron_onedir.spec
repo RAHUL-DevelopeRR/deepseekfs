@@ -46,12 +46,14 @@ datas = [
     ('neufs.cmd', '.'),
 ]
 
-# Product builds bundle the primary Qwen 2.5 Coder 3B GGUF so MemoryOS works
+# Product builds bundle the primary Qwen 2.5 Coder 1.5B GGUF so MemoryOS works
 # from dist/Neuron without a separate model setup step.
 if os.environ.get('NEURON_SKIP_QWEN_GGUF') != '1':
-    primary_gguf = Path('storage/models/qwen2.5-coder-3b-instruct-q5_k_m.gguf')
+    primary_gguf = Path('storage/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf')
     if primary_gguf.exists():
         datas.append((str(primary_gguf), 'storage/models'))
+    else:
+        raise FileNotFoundError(f'Bundled release requested, but Qwen GGUF is missing: {primary_gguf}')
 
 # llama-cpp-python loads DLLs from llama_cpp/lib at runtime.
 binaries = collect_dynamic_libs('llama_cpp')

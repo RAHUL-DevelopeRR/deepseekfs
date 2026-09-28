@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 import threading
+import time
+from queue import Queue, Empty
 from itertools import count
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -32,6 +34,8 @@ class LLMWorkerClient:
         self._loaded = False
         self._load_error: str | None = None
         self._stderr_thread: threading.Thread | None = None
+        self._responses: Queue = Queue()
+        self.request_timeout = float(os.getenv("NEURON_LLM_REQUEST_TIMEOUT", "120"))
 
     @property
     def is_loaded(self) -> bool:
@@ -85,10 +89,14 @@ class LLMWorkerClient:
         )
         self._stderr_thread = threading.Thread(
             target=self._drain_stderr,
+            args=(self._process,),
             name="llm-worker-stderr",
             daemon=True,
         )
         self._stderr_thread.start()
+        self._responses = Queue()
+        threading.Thread(target=self._drain_stdout, args=(self._process, self._responses),
+                         name="llm-worker-stdout", daemon=True).start()
 
         try:
             ready = self._read_response(expect_event=True, timeout_s=20)
@@ -102,8 +110,7 @@ class LLMWorkerClient:
                     pass
             raise
 
-    def _drain_stderr(self) -> None:
-        proc = self._process
+    def _drain_stderr(self, proc) -> None:
         if proc is None or proc.stderr is None:
             return
         for line in proc.stderr:
@@ -111,26 +118,37 @@ class LLMWorkerClient:
             if line:
                 logger.info(f"LLMWorker: {line}")
 
+    @staticmethod
+    def _drain_stdout(proc, responses):
+        try:
+            for line in proc.stdout:
+                responses.put(line)
+        finally:
+            responses.put(None)
+
     def _read_response(self, expect_event: bool = False, timeout_s: float = 120) -> dict[str, Any]:
         proc = self._process
         if proc is None or proc.stdout is None:
             raise RuntimeError("LLM worker is not running")
 
-        # ``readline`` is blocking; the worker is only used from background
-        # inference paths, and the timeout is enforced by the worker lifetime
-        # checks around EOF/crash.
+        responses = self._responses
+        deadline = time.monotonic() + timeout_s
         while True:
-            if proc.poll() is not None:
-                raise RuntimeError(
-                    normalize_model_error(f"LLM worker exited with code {proc.returncode}")
-                )
-            line = proc.stdout.readline()
-            if not line:
-                raise RuntimeError("LLM worker closed stdout")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("LLM worker response timed out")
+            try:
+                line = responses.get(timeout=remaining)
+            except Empty as exc:
+                raise TimeoutError("LLM worker response timed out") from exc
+            if line is None:
+                raise RuntimeError(f"LLM worker closed stdout (exit code {proc.poll()})")
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
                 logger.info(f"LLMWorker stdout: {line.rstrip()}")
+                continue
+            if not isinstance(payload, dict):
                 continue
             if expect_event and payload.get("event") != "ready":
                 continue
@@ -154,14 +172,16 @@ class LLMWorkerClient:
                 )
                 proc.stdin.flush()
 
+                deadline = time.monotonic() + self.request_timeout
                 while True:
-                    response = self._read_response()
+                    response = self._read_response(timeout_s=max(0, deadline - time.monotonic()))
                     if response.get("id") != request_id:
                         continue
                     if not response.get("ok"):
                         raise RuntimeError(response.get("error", "worker request failed"))
                     return response.get("result")
             except Exception as exc:
+                self.cancel()
                 self._loaded = False
                 self._load_error = normalize_model_error(exc)
                 logger.error(f"LLMWorkerClient: {command} failed: {self._load_error}")
@@ -189,8 +209,9 @@ class LLMWorkerClient:
                 )
                 proc.stdin.flush()
 
+                deadline = time.monotonic() + self.request_timeout
                 while True:
-                    response = self._read_response()
+                    response = self._read_response(timeout_s=max(0, deadline - time.monotonic()))
                     if response.get("id") != request_id:
                         continue
                     if not response.get("ok"):
@@ -206,6 +227,7 @@ class LLMWorkerClient:
                             yield result
                         return
             except Exception as exc:
+                self.cancel()
                 self._loaded = False
                 self._load_error = normalize_model_error(exc)
                 logger.error(f"LLMWorkerClient: {command} failed: {self._load_error}")
@@ -223,20 +245,8 @@ class LLMWorkerClient:
         return self._loaded
 
     def unload(self) -> None:
-        proc = self._process
-        if proc is not None and proc.poll() is None:
-            try:
-                self._request("exit")
-            except Exception:
-                pass
-            try:
-                proc.wait(timeout=5)
-            except Exception:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-        self._loaded = False
+        # Closing the app must not wait for an inference lock or stalled worker.
+        self.cancel()
 
     def cancel(self) -> None:
         """Terminate an in-flight worker request without waiting on the client lock."""

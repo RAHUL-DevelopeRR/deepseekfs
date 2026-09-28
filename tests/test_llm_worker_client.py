@@ -58,3 +58,44 @@ def test_worker_client_chat_stream_uses_worker_stream(monkeypatch):
     assert output == "hello"
     assert seen["command"] == "chat_stream"
     assert seen["payload"]["max_tokens"] == 9
+
+
+def test_worker_timeout_terminates_stalled_process_and_recovers():
+    import sys
+    import time
+    from services.llm_client import LLMWorkerClient
+    stalled = "import json,time,sys; print(json.dumps({'event':'ready','ok':True}),flush=True); sys.stdin.readline(); time.sleep(30)"
+    client = LLMWorkerClient(command=[sys.executable, '-u', '-c', stalled])
+    client.request_timeout = 0.2
+    started = time.monotonic()
+    try:
+        assert client._request('chat') is None
+        assert time.monotonic() - started < 5
+        assert 'timed out' in client.load_error.lower()
+        assert client._process is None
+        healthy = "import json,sys; print(json.dumps({'event':'ready','ok':True}),flush=True); r=json.loads(sys.stdin.readline()); print(json.dumps({'id':r['id'],'ok':True,'result':'recovered'}),flush=True)"
+        client._command = [sys.executable, '-u', '-c', healthy]
+        client.request_timeout = 3
+        assert client._request('chat') == 'recovered'
+    finally:
+        client.cancel()
+
+
+def test_worker_unload_does_not_wait_for_inference_lock():
+    import threading
+    from services.llm_client import LLMWorkerClient
+    client = LLMWorkerClient()
+    entered, release = threading.Event(), threading.Event()
+    def hold():
+        with client._lock:
+            entered.set()
+            release.wait(3)
+    worker = threading.Thread(target=hold)
+    worker.start()
+    try:
+        assert entered.wait(1)
+        client.unload()
+        assert not release.is_set()
+    finally:
+        release.set()
+        worker.join(3)

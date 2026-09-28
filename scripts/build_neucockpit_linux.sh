@@ -33,10 +33,7 @@ if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
 fi
 
 python -m pip install pyinstaller huggingface_hub cmake ninja
-python -m pip install -r /tmp/requirements-linux.txt pyinstaller || {
-    echo "Some packages failed, trying with --ignore-installed..."
-    python -m pip install -r /tmp/requirements-linux.txt pyinstaller --ignore-installed 2>&1 || true
-}
+python -m pip install -r /tmp/requirements-linux.txt pyinstaller
 python -m pip install pyinstaller huggingface_hub cmake ninja
 
 # Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit

@@ -73,7 +73,7 @@ class TaskExecutor:
     def _select_relevant_schemas(self, goal: str) -> List[Dict]:
         """Select only relevant tool schemas based on the goal.
         
-        Sending all 14 schemas to a 3B model creates a massive prompt
+        Sending all schemas to a small local model creates a massive prompt
         (2000+ tokens) and causes 60-90 second inference times.
         Selecting 4-6 relevant tools cuts this to ~5-10 seconds.
         """
@@ -427,4 +427,7 @@ class TaskExecutor:
             f"Executor: [{task.task_id}] {tool_name} -> "
             f"{status_tag} ({duration_ms}ms, {len(result.output)} chars)"
         )
+        if tool_name == "semantic_search" and result.success and isinstance(result.data, list):
+            from services.retrieval_context import search_observation
+            return f"[{status_tag}] {search_observation(result.data)}"
         return f"[{status_tag}] {result.output[:2000]}"

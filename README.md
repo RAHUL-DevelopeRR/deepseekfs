@@ -25,7 +25,7 @@
   <img src="assets/readme/lucide-keyboard.svg" width="22" alt="Hotkeys"/>
 </p>
 
-Neuron is a Windows desktop application for private, local file intelligence. It indexes your files, performs offline semantic search, summarizes documents, and answers questions with a local Qwen GGUF model. Internet mode is optional and off by default.
+Neuron is a desktop application for private, local file intelligence. It indexes your files, performs offline semantic search, summarizes documents, and answers questions with a local Qwen GGUF model. Internet mode is optional and off by default. Windows, Linux, and macOS packages are built, but installed AI runtime certification remains platform specific.
 
 The brand direction is intentionally stark: near-black canvas, white product voice, sharp orange for action, cyan for live/edge signals, and muted grey for secondary text.
 
@@ -37,7 +37,7 @@ Use it when you want:
 
 - Fast local search across documents, code, notes, PDFs, spreadsheets, and presentations.
 - Offline semantic search using bundled BGE Small ONNX embeddings and a FAISS/HNSW index.
-- Local Qwen output generation after the installer performs the one-time model download.
+- Local Qwen output generation with a bundled or separately downloaded model, depending on the release option.
 - A headless command surface through `neufs.py` / `neufs.cmd`.
 - Optional internet-assisted answers through an explicit toggle, routed as Internet -> Model -> User.
 
@@ -59,7 +59,7 @@ Use it when you want:
 | <img src="assets/readme/lucide-keyboard.svg" width="16" alt="Keyboard"/> Desktop UI | Active | PyQt6 Spotlight-style panel with tray activation |
 | <img src="assets/readme/lucide-database.svg" width="16" alt="Memory"/> MemoryOS chat | Active | Auto/query/action modes with local model responses |
 | <img src="assets/readme/lucide-search.svg" width="16" alt="Search"/> Offline semantic search | Active | Bundled BGE ONNX embeddings plus vector index |
-| <img src="assets/readme/lucide-cpu.svg" width="16" alt="CPU"/> Qwen GGUF generation | Active | Installer downloads Qwen 2.5 Coder 3B into `%LOCALAPPDATA%\Neuron\models` |
+| <img src="assets/readme/lucide-cpu.svg" width="16" alt="CPU"/> Qwen GGUF generation | Active | Qwen 2.5 Coder 1.5B Instruct Q4_K_M through llama.cpp; bundled when release model bundling is enabled |
 | <img src="assets/readme/lucide-wifi-off.svg" width="16" alt="Internet"/> Internet mode | Optional | Off by default, explicit user-controlled toggle |
 | <img src="assets/readme/lucide-terminal.svg" width="16" alt="Terminal"/> Headless CLI | Active | `neufs status`, `search`, `chat`, `action`, `index`, `summarize` |
 | <img src="assets/readme/lucide-package.svg" width="16" alt="Package"/> Rust/Tauri port | Drafted | See `docs/rust_react_desktop_port_draft.md` |
@@ -86,7 +86,7 @@ pip install -r requirements.txt
 python run_desktop.py
 ```
 
-The desktop app preloads an existing local Qwen GGUF model before PyQt starts. It does not download the model during desktop launch.
+The desktop app opens PyQt while the isolated model worker loads Qwen on demand. It does not download a model during desktop launch. A release build bundles Qwen 2.5 Coder 1.5B Q4_K_M by default; the explicit unbundled release option requires a later model download.
 
 ## Headless Commands
 

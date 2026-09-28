@@ -359,7 +359,7 @@ class MemoryOSAgent:
     def _generate_code_artifact(self, user_message: str, context: str = "") -> Optional[tuple[str, str]]:
         """Generate one complete code artifact for deterministic Action mode."""
         engine = self._get_engine()
-        self._thinking("Drafting source code with local Qwen 3B...")
+        self._thinking("Drafting source code with local Qwen 1.5B...")
         t0 = time.time()
         messages = [
             {
@@ -400,7 +400,7 @@ class MemoryOSAgent:
     ) -> Optional[tuple[str, str]]:
         """Rewrite an existing code block for edit/alter follow-up requests."""
         engine = self._get_engine()
-        self._thinking("Rewriting the existing code with local Qwen 3B...")
+        self._thinking("Rewriting the existing code with local Qwen 1.5B...")
         t0 = time.time()
         messages = [
             {
@@ -761,8 +761,6 @@ class MemoryOSAgent:
 
     def _query_mode(self, user_message: str) -> str:
         """Semantic search + AI summary."""
-        engine = self._get_engine()
-        profile = get_profile_manager().get_active()
         store = get_event_store()
         self._remember("user", user_message, "query")
 
@@ -784,28 +782,37 @@ class MemoryOSAgent:
         ))
 
         if results:
+            unique_files = list({r['path']: r for r in results}.values())
             raw_list = "\n".join(
                 f"  {i+1}. {r.get('name', '')} — {r['path']}"
-                for i, r in enumerate(results[:8])
+                for i, r in enumerate(unique_files[:8])
             )
         else:
             raw_list = ""
 
         # Summarize with LLM
         from services.agent_context import build_query_context
+        from services.retrieval_context import build_evidence
+        evidence, sources = build_evidence(results)
+        if not evidence and not live_context:
+            response = (f"Matching files (metadata only; no current readable evidence):\n{raw_list}"
+                        if results else "No matching files found. Try a different query.")
+            self._remember("assistant", response, "query")
+            return response
+        engine = self._get_engine()
         messages = [{"role": "system", "content": build_query_context()}]
 
         if results or live_context:
-            local_part = f"Local file results:\n{raw_list}\n\n" if results else "No local files found.\n\n"
-            live_part = f"{live_context}\n\n" if live_context else ""
-            memory_part = f"Recent MemoryOS context:\n{self._context_block(limit=8, max_chars=2500)}\n\n"
+            local_part = (f"Local evidence:\n{evidence}\n\n" if evidence else
+                          f"File metadata only; contents unavailable:\n{raw_list[:1500]}\n\n")
+            live_part = f"{live_context[:1800]}\n\n" if live_context else ""
             messages.append({
                 "role": "user",
                 "content": (
-                    f"The user searched for: '{user_message}'\n"
-                    f"{memory_part}{local_part}{live_part}"
-                    "Answer concisely. Keep local file results and live public web "
-                    "results clearly separate when both are present."
+                    f"Question: {user_message[:1000]}\n"
+                    f"{local_part}{live_part}"
+                    "Answer concisely. "
+                    + ("Keep local and web evidence separate." if evidence and live_context else "")
                 ),
             })
         else:
@@ -815,7 +822,19 @@ class MemoryOSAgent:
             })
 
         t0 = time.time()
-        response = engine.chat(messages=messages, max_tokens=350, temperature=0.2)
+        if getattr(self, "on_token", None) is not None:
+            from services.llm_engine import _strip_thinking
+
+            tokens = []
+            for token in engine.chat_stream(messages=messages, max_tokens=350, temperature=0.2):
+                tokens.append(token)
+                try:
+                    self.on_token(token)
+                except Exception:
+                    pass
+            response = _strip_thinking("".join(tokens).strip()) if tokens else ""
+        else:
+            response = engine.chat(messages=messages, max_tokens=350, temperature=0.2)
         elapsed = int((time.time() - t0) * 1000)
 
         store.insert(AgentEvent.llm_inference(elapsed))
@@ -829,6 +848,9 @@ class MemoryOSAgent:
         if live_context:
             response = _normalize_verified_live_response(response, live_context)
 
+        if sources:
+            response += f"\n\nRetrieved sources:\n{sources}"
+
         logger.info(
             f"MemoryOS [QUERY]: {elapsed}ms, {len(results)} local results, "
             f"{live_count} live results"
@@ -841,11 +863,10 @@ class MemoryOSAgent:
         try:
             from core.search.semantic_search import SemanticSearch
             searcher = SemanticSearch()
-            results = searcher.search(query, top_k=10)
+            results = searcher.search_evidence(query, top_k=8)
             return [
                 {
-                    "path": r["path"],
-                    "name": r.get("name", ""),
+                    **r,
                     "score": r.get("combined_score", 0),
                 }
                 for r in results
