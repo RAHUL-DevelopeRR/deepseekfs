@@ -91,6 +91,8 @@ SKIP_DIRS = {
 def is_drive_root(path: str | Path) -> bool:
     """True for broad roots like C:/ or / that should not be live-watched."""
     try:
+        if re.fullmatch(r"[A-Za-z]:[\\/]*", str(path)):
+            return True
         p = Path(path).resolve()
         if platform.system().lower().startswith("win"):
             return bool(p.anchor) and str(p).rstrip("\\/").lower() == p.anchor.rstrip("\\/").lower()

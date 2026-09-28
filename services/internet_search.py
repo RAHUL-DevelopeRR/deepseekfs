@@ -125,6 +125,9 @@ def is_public_factual_query(query: str) -> bool:
 
 def should_use_live_data(query: str) -> bool:
     """Use internet only when enabled and the query benefits from grounding."""
+    if not query.lower().strip().startswith(("web:", "internet:", "online:")):
+        if re.search(r"\b(my|mine|our|local|downloads|documents|desktop|folder|files)\b", query, re.I):
+            return False
     return internet_enabled() and (
         is_live_data_query(query) or is_public_factual_query(query)
     )

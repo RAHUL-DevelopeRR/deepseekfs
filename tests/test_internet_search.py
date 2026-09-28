@@ -70,6 +70,14 @@ def test_public_factual_questions_use_online_grounding_when_enabled(monkeypatch)
         ) is True
 
 
+def test_local_questions_stay_offline_even_with_internet_enabled():
+    from services import internet_search
+
+    with internet_search.internet_enabled_for_request(True):
+        assert not internet_search.should_use_live_data("What is in my Downloads folder?")
+        assert internet_search.should_use_live_data("web: What is in my Downloads folder?")
+
+
 def test_disabled_search_does_not_call_network(monkeypatch):
     from services import internet_search
 

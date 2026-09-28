@@ -37,3 +37,4 @@ def test_live_watcher_filters_drive_roots():
 
     paths = [r"C:\\", r"C:\Users\rahul\Downloads"]
     assert config.filter_live_watch_paths(paths) == [r"C:\Users\rahul\Downloads"]
+    assert config.is_drive_root("C:/")

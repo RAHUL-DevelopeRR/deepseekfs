@@ -152,7 +152,7 @@ the packaged backend, and the BGE ONNX embedding model, then downloads Qwen
 2.5 Coder during setup:
 
 ```powershell
-.\scripts\build_neuron_cockpit_installer.ps1
+.\scripts\build_neucockpit_windows.ps1
 ```
 
 To hand off a single archive:

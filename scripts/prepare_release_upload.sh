@@ -21,9 +21,9 @@ BASENAME="$(basename "$ASSET")"
 SIZE="$(wc -c < "$ASSET" | tr -d ' ')"
 
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$ASSET" > "$UPLOAD_DIR/$BASENAME.sha256"
+  (cd "$(dirname "$ASSET")" && sha256sum "$BASENAME") > "$UPLOAD_DIR/$BASENAME.sha256"
 else
-  shasum -a 256 "$ASSET" > "$UPLOAD_DIR/$BASENAME.sha256"
+  (cd "$(dirname "$ASSET")" && shasum -a 256 "$BASENAME") > "$UPLOAD_DIR/$BASENAME.sha256"
 fi
 
 if [ "$SIZE" -gt "$CHUNK_BYTES" ]; then
@@ -49,6 +49,7 @@ else
   cp "$ASSET" "$UPLOAD_DIR/$BASENAME"
 fi
 
-find "$UPLOAD_DIR" -maxdepth 1 -type f | sort | while IFS= read -r f; do
+for f in "$UPLOAD_DIR"/*; do
+  [ -f "$f" ] || continue
   printf '%s %s bytes\n' "$(basename "$f")" "$(wc -c < "$f" | tr -d ' ')"
 done

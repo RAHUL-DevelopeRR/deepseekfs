@@ -10,6 +10,7 @@ Handles:
 from __future__ import annotations
 
 import os
+import sys
 import hashlib
 import shutil
 from pathlib import Path
@@ -80,7 +81,7 @@ def get_models_dir() -> Path:
     """
     # Try app-local storage first
     app_dir = Path(__file__).resolve().parent.parent / "storage" / "models"
-    if app_dir.exists():
+    if app_dir.exists() and not getattr(sys, "frozen", False):
         return app_dir
     
     # Fall back to LOCALAPPDATA
