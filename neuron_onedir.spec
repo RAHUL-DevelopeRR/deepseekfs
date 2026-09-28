@@ -89,7 +89,7 @@ hiddenimports = [
     'core.search.llm_reranker', 'core.search.nlp_parser',
 
     # ── core misc ──
-    'core.ingestion', 'core.ingestion.file_parser',
+    'core.ingestion', 'core.ingestion.file_parser', 'core.ingestion.chunks',
     'core.time', 'core.time.scoring',
     'core.watcher', 'core.watcher.file_watcher',
     'core.activity', 'core.activity.activity_logger',
@@ -105,6 +105,7 @@ hiddenimports = [
     'services.llm_client', 'services.llm_worker',
     'services.model_health',
     'services.platform_support',
+    'services.retrieval_context',
 
     # ── services.agent ──
     'services.agent', 'services.agent.executor',
@@ -146,6 +147,7 @@ hiddenimports = [
     'openpyxl',
     'lxml', 'lxml.etree',
     'pdfminer', 'pdfminer.high_level',
+    'PIL', 'PIL.Image',
 
     # ── ONNX Runtime (neural embeddings) ──
     'onnxruntime',
@@ -202,7 +204,6 @@ excludes = [
     'scipy._lib.array_api_compat.torch',
     'sympy', 'mpmath', 'IPython', 'ipykernel', 'ipywidgets', 'jupyter',
     'debugpy', 'traitlets', 'pydantic', 'httpx', 'aiohttp',
-    'PIL',  # We don't need Pillow for the Qt app
 ]
 
 worker_hiddenimports = [

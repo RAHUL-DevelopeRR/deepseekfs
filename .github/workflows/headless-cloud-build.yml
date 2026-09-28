@@ -1,0 +1,47 @@
+name: Headless package usability
+
+on:
+  push:
+    branches: [codex/ui-ux-unique-icons]
+  workflow_dispatch:
+
+jobs:
+  package-and-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            script: scripts/build_neucockpit_linux.sh
+            label: linux-x64
+          - os: macos-14
+            script: scripts/build_neucockpit_macos.sh
+            label: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libglib2.0-0 libxcb-cursor0 libxkbcommon-x11-0
+      - name: Build package with bundled Qwen and BGE
+        run: bash ${{ matrix.script }}
+      - name: Run packaged headless usability smoke
+        env:
+          NEURON_LLM_THREADS: '4'
+          NEURON_LLM_BATCH: '128'
+          QT_QPA_PLATFORM: offscreen
+        run: python scripts/headless_usability_smoke.py --cli dist/Neuron/neufs > headless-smoke.json
+      - name: Upload package and smoke result
+        uses: actions/upload-artifact@v4
+        with:
+          name: neucockpit-${{ matrix.label }}-headless-checked
+          path: |
+            dist/release/upload/*
+            headless-smoke.json
+          if-no-files-found: error

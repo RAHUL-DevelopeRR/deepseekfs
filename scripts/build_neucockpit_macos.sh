@@ -11,14 +11,7 @@ echo "Platform: $(uname -m)"
 
 python3 -m pip install --upgrade pip
 
-# Filter out Windows-only and Linux-specific packages
-grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|vosk|^llama-cpp-python)' requirements.txt > /tmp/requirements-macos.txt
-
-# Replace torch+cpu with plain torch (macOS uses MPS or CPU)
-sed -i '' 's/torch==.*+cpu/torch/g' /tmp/requirements-macos.txt
-
-python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller
-python3 -m pip install pyinstaller huggingface_hub cmake ninja
+python3 -m pip install -r requirements-package.txt
 
 # Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit
 # illegal-instruction crashes on older Intel CPUs.

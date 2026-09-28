@@ -18,23 +18,7 @@ fi
 
 python -m pip install --upgrade pip
 
-# Filter out Windows-only packages from requirements.txt
-grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|^llama-cpp-python)' requirements.txt > /tmp/requirements-linux.txt
-
-# Also filter torch+cpu Windows wheel URL if present
-sed -i 's/torch==.*+cpu/torch/g' /tmp/requirements-linux.txt
-
-# Ubuntu ARM64 runners do not have PyQt6 wheels for this pinned version.
-# The workflow installs python3-pyqt6 from apt, so do not let pip try to
-# build Qt bindings from source.
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    grep -viE '^(PyQt6|PyQt6-Qt6|PyQt6_sip)==|^(PyQt6|PyQt6-Qt6|PyQt6_sip)>=' /tmp/requirements-linux.txt > /tmp/requirements-linux-arm.txt
-    mv /tmp/requirements-linux-arm.txt /tmp/requirements-linux.txt
-fi
-
-python -m pip install pyinstaller huggingface_hub cmake ninja
-python -m pip install -r /tmp/requirements-linux.txt pyinstaller
-python -m pip install pyinstaller huggingface_hub cmake ninja
+python -m pip install -r requirements-package.txt
 
 # Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit
 # illegal-instruction crashes on older x64 CPUs.
