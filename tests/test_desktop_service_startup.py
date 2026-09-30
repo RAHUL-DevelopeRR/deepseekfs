@@ -45,6 +45,30 @@ def test_empty_index_starts_maintenance_scan_even_when_config_disabled(monkeypat
     assert events == ["index", "watch"]
 
 
+def test_explicit_startup_override_skips_empty_index_scan(monkeypatch):
+    import services.desktop_service as desktop_service
+    from services.desktop_service import DesktopService
+
+    events = []
+    _install_fake_watcher(monkeypatch, events)
+    monkeypatch.setenv("NEURON_STARTUP_INDEX_ON_LAUNCH", "0")
+    monkeypatch.setattr(desktop_service.UserConfig, "load", lambda: {"auto_index_on_launch": True})
+
+    class FakeStartupIndexer:
+        def run_synchronously(self):
+            events.append("index")
+
+    monkeypatch.setattr(desktop_service, "StartupIndexer", FakeStartupIndexer)
+
+    svc = DesktopService.__new__(DesktopService)
+    svc._idx = object()
+    svc.watcher = None
+    svc.total_indexed = lambda: 0
+    svc._maintenance_init()
+
+    assert events == ["watch"]
+
+
 def test_nonempty_index_respects_disabled_maintenance_scan(monkeypatch):
     import services.desktop_service as desktop_service
     from services.desktop_service import DesktopService

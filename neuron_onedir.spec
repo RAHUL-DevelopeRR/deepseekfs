@@ -270,6 +270,15 @@ cli_a = Analysis(
     noarchive=True,
 )
 
+# Poppler on the build host can contribute an incompatible ICU DLL. Qt uses
+# the Windows system ICU; a bundled Poppler copy breaks frozen Qt imports.
+if sys.platform.startswith('win'):
+    for analysis in (a, worker_a, cli_a):
+        analysis.binaries = [
+            entry for entry in analysis.binaries
+            if Path(entry[0]).name.lower() != 'icuuc.dll'
+        ]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 worker_pyz = PYZ(worker_a.pure, worker_a.zipped_data, cipher=block_cipher)
 cli_pyz = PYZ(cli_a.pure, cli_a.zipped_data, cipher=block_cipher)

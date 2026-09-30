@@ -2,9 +2,9 @@
 Neuron - Desktop Entry Point (v5.2.0)
 ======================================
 Bootstraps the PyQt6 application:
-  - Pre-loads torch DLLs when running as frozen exe
+  - Keeps llama.cpp isolated in its worker process
   - Shows a splash screen while DesktopService loads
-  - Registers global hotkey (Shift+Space) for search panel
+  - Registers the configured global shortcut for the search panel
   - Registers overlay hotkey (Ctrl+Shift+R) for research overlay
   - Sets AppUserModelID for Windows system integration
   - Launches SpotlightPanel (the real UI in ui/spotlight_panel.py)
@@ -17,43 +17,8 @@ from __future__ import annotations
 # Patch Jinja2 BEFORE any llama_cpp imports (SmolLM3 compatibility)
 import services.jinja2_patches  # noqa: F401
 
-# ═══════════════════════════════════════════════════════════════
-# MUST BE FIRST — Pre-load ALL PyTorch DLLs before any imports
-# ═══════════════════════════════════════════════════════════════
-import os, sys, glob, ctypes
-
-# When frozen by PyInstaller, resolve the _MEIPASS temp dir
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    _meipass = sys._MEIPASS
-    _torch_lib = os.path.join(_meipass, 'torch', 'lib')
-
-    for _p in [_torch_lib, _meipass]:
-        if os.path.isdir(_p):
-            try:
-                os.add_dll_directory(_p)
-            except OSError:
-                pass
-
-    os.environ['PATH'] = _torch_lib + ';' + _meipass + ';' + os.environ.get('PATH', '')
-
-    _load_order = [
-        'c10.dll', 'libiomp5md.dll', 'libiompstubs5md.dll',
-        'uv.dll', 'shm.dll', 'torch_global_deps.dll',
-        'torch.dll', 'torch_cpu.dll', 'torch_python.dll',
-    ]
-    _kernel32 = ctypes.WinDLL('kernel32.dll')
-    _kernel32.LoadLibraryW.restype = ctypes.c_void_p
-    _kernel32.SetDllDirectoryW(_torch_lib)
-
-    for _dll_name in _load_order:
-        _dll_path = os.path.join(_torch_lib, _dll_name)
-        if os.path.exists(_dll_path):
-            _kernel32.LoadLibraryW(_dll_path)
-
-    for _dll_path in glob.glob(os.path.join(_torch_lib, '*.dll')):
-        _kernel32.LoadLibraryW(_dll_path)
-# ═══════════════════════════════════════════════════════════════
-
+import os
+import sys
 import ctypes
 import ctypes.wintypes
 import platform
@@ -126,7 +91,7 @@ from services.desktop_service import DesktopService
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap, QBitmap, QRegion
-from ui.hotkeys import GlobalHotkeyManager, OVERLAY_PRIMARY, PANEL_HOTKEYS
+from ui.hotkeys import GlobalHotkeyManager, OVERLAY_PRIMARY, get_panel_hotkey_specs
 from ui.icon_helpers import make_circular_splash, make_white_bg_icon
 
 
@@ -243,7 +208,7 @@ def main():
 
     # ── 7. Register global hotkey ──
     panel_hotkey_ok = False
-    for spec in PANEL_HOTKEYS:
+    for spec in get_panel_hotkey_specs(config.UserConfig.load().get("hotkey")):
         panel_hotkey_ok |= hotkeys.register(spec, panel.toggle_from_hotkey)
     if not panel_hotkey_ok:
         logger.warning("Panel hotkeys unavailable; tray menu remains available.")

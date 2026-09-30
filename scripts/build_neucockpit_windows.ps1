@@ -12,6 +12,12 @@ $PSNativeCommandUseErrorActionPreference = $true
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $Root
 try {
+    $Python = if (Test-Path -LiteralPath ".venv\Scripts\python.exe") {
+        (Resolve-Path ".venv\Scripts\python.exe").Path
+    } else {
+        "python"
+    }
+
     function Find-Iscc {
         $cmd = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
         if ($cmd) {
@@ -32,7 +38,7 @@ try {
         throw "Inno Setup 6 compiler was not found. Install Inno Setup, then rerun this script."
     }
 
-    python -m pip install --upgrade pip setuptools wheel
+    & $Python -m pip install --upgrade pip setuptools wheel
 
     $req = Join-Path $env:TEMP "requirements-windows-$Arch.txt"
     $lines = Get-Content requirements.txt |
@@ -63,7 +69,7 @@ try {
     $lines | Set-Content -Encoding ascii $req
 
     if ($Arch -eq "arm64") {
-        python -m pip install --prefer-binary `
+        & $Python -m pip install --prefer-binary `
             numpy `
             PyQt6==6.10.2 `
             PyQt6-Qt6==6.10.2 `
@@ -80,8 +86,8 @@ try {
             ninja
     }
 
-    python -m pip install --prefer-binary pyinstaller cmake ninja
-    python -m pip install -r $req pyinstaller
+    & $Python -m pip install --prefer-binary pyinstaller cmake ninja
+    & $Python -m pip install -r $req pyinstaller
 
     $portableArgs = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
 
@@ -105,11 +111,26 @@ try {
     }
     $env:CMAKE_ARGS = $portableArgs
     $env:FORCE_CMAKE = "1"
-    python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
+    & $Python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
 
-    python scripts\prepare_release_models.py
+    & $Python scripts\prepare_release_models.py
 
-    python -m PyInstaller neuron_onedir.spec --noconfirm
+    & $Python -m PyInstaller neuron_onedir.spec --noconfirm
+
+    $env:NEURON_DESKTOP_SMOKE = "1"
+    $env:NEURON_STARTUP_INDEX_ON_LAUNCH = "0"
+    try {
+        $app = Start-Process -FilePath (Join-Path $Root "dist\Neuron\NeuCockpit.exe") `
+            -WorkingDirectory (Join-Path $Root "dist\Neuron") -WindowStyle Hidden -PassThru
+        if (-not $app.WaitForExit(120000)) {
+            $app.Kill()
+            throw "Packaged desktop startup timed out."
+        }
+        if ($app.ExitCode -ne 0) { throw "Packaged desktop startup failed: $($app.ExitCode)" }
+    }
+    finally {
+        Remove-Item Env:NEURON_DESKTOP_SMOKE,Env:NEURON_STARTUP_INDEX_ON_LAUNCH -ErrorAction SilentlyContinue
+    }
 
     $uploadDir = "dist\release\upload"
     if (Test-Path $uploadDir) {
@@ -128,7 +149,7 @@ try {
         if ($sevenZip) {
             & $sevenZip.Source a -tzip -mx=5 $zip ".\dist\Neuron\*" | Out-Host
         } else {
-            python -c "import pathlib, zipfile; root=pathlib.Path('dist/Neuron'); out=pathlib.Path(r'$zip'); z=zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True); [z.write(p, p.relative_to(root.parent).as_posix()) for p in root.rglob('*') if p.is_file()]; z.close()"
+            & $Python -c "import pathlib, zipfile; root=pathlib.Path('dist/Neuron'); out=pathlib.Path(r'$zip'); z=zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True); [z.write(p, p.relative_to(root.parent).as_posix()) for p in root.rglob('*') if p.is_file()]; z.close()"
         }
 
         & "$PSScriptRoot\prepare_release_upload.ps1" -AssetPath $zip -UploadDir $uploadDir

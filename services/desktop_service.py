@@ -84,11 +84,14 @@ class DesktopService:
         except Exception:
             should_index_empty = False
         env_requested = env_enabled in {"1", "true", "yes"}
-        auto_index = (
-            user_config.get("auto_index_on_launch", True)
-            or env_requested
-            or should_index_empty
-        )
+        if env_enabled in {"0", "false", "no"}:
+            auto_index = False
+        else:
+            auto_index = (
+                user_config.get("auto_index_on_launch", True)
+                or env_requested
+                or should_index_empty
+            )
         if not auto_index:
             logger.info("DesktopService: startup indexing disabled; watcher starts from existing index")
             try:

@@ -95,3 +95,33 @@ def test_local_shift_space_is_reserved_for_panel_toggle():
     )
 
     assert SpotlightPanel._is_shift_space_event(event)
+
+
+def test_settings_persists_selected_panel_shortcut():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication, QComboBox
+    from ui.spotlight_components import SettingsOverlay
+
+    class Service:
+        config = {"top_k": 20, "hotkey": "shift+space"}
+
+        def total_indexed(self):
+            return 0
+
+        def get_watch_paths(self):
+            return []
+
+        def get_config(self):
+            return dict(self.config)
+
+        def save_config(self, value):
+            self.config = value
+
+    app = QApplication.instance() or QApplication([])
+    service = Service()
+    overlay = SettingsOverlay(service)
+    selector = overlay.findChild(QComboBox)
+    assert selector.currentData() == "shift+space"
+    selector.setCurrentIndex(selector.findData("ctrl+space"))
+    assert service.config["hotkey"] == "ctrl+space"
+    overlay.close()

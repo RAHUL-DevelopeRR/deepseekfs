@@ -2028,7 +2028,7 @@ class SpotlightPanel(QWidget):
 
         """)
 
-        m.addAction("Show  (Shift+Space / Ctrl+Alt+N)").triggered.connect(self.toggle_panel)
+        m.addAction("Show NeuCockpit").triggered.connect(self.toggle_panel)
 
         m.addAction("Memory Lane").triggered.connect(self._toggle_memory_lane)
 
@@ -2050,7 +2050,7 @@ class SpotlightPanel(QWidget):
 
                 QSystemTrayIcon.ActivationReason.DoubleClick) else None)
 
-        self._tray.setToolTip("NeuCockpit - Shift+Space or Ctrl+Alt+N to search")
+        self._tray.setToolTip("NeuCockpit - open from tray or shortcut")
 
         self._tray.show()
 
@@ -2068,17 +2068,17 @@ class SpotlightPanel(QWidget):
 
             if streak > 0:
 
-                tooltip = f"NeuCockpit - Shift+Space or Ctrl+Alt+N to search\n{streak} day{'s' if streak != 1 else ''} streak"
+                tooltip = f"NeuCockpit - open from tray or shortcut\n{streak} day{'s' if streak != 1 else ''} streak"
 
             else:
 
-                tooltip = "NeuCockpit - Shift+Space or Ctrl+Alt+N to search"
+                tooltip = "NeuCockpit - open from tray or shortcut"
 
             self._tray.setToolTip(tooltip)
 
         except Exception:
 
-            self._tray.setToolTip("NeuCockpit - Shift+Space or Ctrl+Alt+N to search")
+            self._tray.setToolTip("NeuCockpit - open from tray or shortcut")
 
 
 

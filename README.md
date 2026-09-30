@@ -105,14 +105,15 @@ On Windows, `neufs.cmd` is provided as a convenience wrapper.
 
 | Shortcut | Behavior |
 |---|---|
-| `Shift + Space` | Show or focus Neuron |
-| `Ctrl + Space` | Fallback show/focus shortcut |
-| `Ctrl + Alt + Space` | Safer fallback show/focus shortcut |
-| `Ctrl + Alt + N` | OS-safe fallback show/focus shortcut |
+| `Shift + Space` | Default show/focus shortcut |
+| `Ctrl + Space` | Optional show/focus shortcut |
+| `Ctrl + Alt + Space` | Optional show/focus shortcut |
+| `Ctrl + Alt + N` | Optional shortcut and OS-safe fallback |
 | `Esc` | Hide the panel |
 | `Ctrl + Shift + R` | Research overlay |
 
 The global hotkey intentionally shows/focuses instead of toggling closed. This avoids the Windows repeat behavior where a held key opens and immediately hides the panel.
+On Windows, choose the panel shortcut in Settings and restart NeuCockpit to apply it. `Ctrl + Alt + N` remains a fallback unless it is the selected shortcut. Linux and macOS use tray/menu activation for now.
 
 ## Local Model And Cache Strategy
 
