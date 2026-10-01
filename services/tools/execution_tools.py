@@ -152,7 +152,7 @@ class ShellTool(BaseTool):
         # ── 2. Dangerous base command (first token) ──
         # Split on whitespace, pipes, semicolons to get the actual command
         # e.g. "echo hello | format C:" → check "echo" AND "format"
-        tokens = re.split(r'[|;&]', cmd_lower)
+        tokens = re.split(r'[|;&\r\n]', cmd_lower)
         for segment in tokens:
             first_token = segment.strip().split()[0] if segment.strip() else ""
             if first_token in _BLOCKED_BASES_LOWER:
@@ -161,7 +161,8 @@ class ShellTool(BaseTool):
 
         # ── 3. Safe prefix ──
         for safe in _SAFE_COMMANDS_LOWER:
-            if cmd_lower.startswith(safe):
+            if (not re.search(r'[|;&<>\r\n`]|\$\(', cmd_lower)
+                    and (cmd_lower == safe or cmd_lower.startswith(safe + " "))):
                 return PermissionLevel.SAFE
 
         return PermissionLevel.MODERATE

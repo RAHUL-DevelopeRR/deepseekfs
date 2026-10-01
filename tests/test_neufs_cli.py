@@ -76,3 +76,19 @@ def test_neufs_summarize_folder(tmp_path):
     assert "Folder summary" in payload["summary"]
     assert payload["data"]["files"] == 2
     assert payload["data"]["top_extensions"][".txt"] == 1
+
+
+def test_neufs_doctor_reports_model_without_loading():
+    result = subprocess.run(
+        [sys.executable, "neufs.py", "doctor"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=20,
+    )
+
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
+    assert payload["ok"] is True
+    assert "runtime" in payload
+    assert "model_search_dirs" in payload
+    assert payload["load_attempted"] is False

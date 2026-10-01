@@ -66,14 +66,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-desktop.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-package.txt') }}
           restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-desktop.txt
-          pip install pytest pytest-cov urllib3
+          python -m pip install -r requirements-package.txt pytest pytest-cov urllib3
 
       - name: Run unit tests
         run: |
@@ -117,14 +116,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-desktop.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-package.txt') }}
           restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-desktop.txt
-          pip install pytest pytest-cov urllib3
+          python -m pip install -r requirements-package.txt pytest pytest-cov urllib3
 
       - name: Run unit tests
         run: |
@@ -147,6 +145,7 @@ jobs:
     name: Build Launcher
     runs-on: windows-latest
     needs: [lint, test-windows]
+    if: github.event_name == 'release'
 
     steps:
       - uses: actions/checkout@v4

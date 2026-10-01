@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://zero-x.live"><img src="https://img.shields.io/badge/zero--x.live-edge%20AI-050509?style=for-the-badge" alt="zero-x.live"/></a>
   <img src="https://img.shields.io/badge/offline-first-ffffff?style=for-the-badge&labelColor=050509&color=ffffff" alt="offline first"/>
-  <img src="https://img.shields.io/badge/Qwen-bundled-ff4d00?style=for-the-badge&labelColor=050509" alt="bundled qwen"/>
+  <img src="https://img.shields.io/badge/Qwen-installer%20download-ff4d00?style=for-the-badge&labelColor=050509" alt="qwen installer download"/>
   <img src="https://img.shields.io/badge/PyQt6-desktop-00d4ff?style=for-the-badge&labelColor=050509" alt="PyQt6 desktop"/>
 </p>
 
@@ -25,7 +25,7 @@
   <img src="assets/readme/lucide-keyboard.svg" width="22" alt="Hotkeys"/>
 </p>
 
-Neuron is a Windows desktop application for private, local file intelligence. It indexes your files, performs offline semantic search, summarizes documents, and answers questions with a bundled Qwen GGUF model. Internet mode is optional and off by default.
+Neuron is a desktop application for private, local file intelligence. It indexes your files, performs offline semantic search, summarizes documents, and answers questions with a local Qwen GGUF model. Internet mode is optional and off by default. Windows, Linux, and macOS packages are built, but installed AI runtime certification remains platform specific.
 
 The brand direction is intentionally stark: near-black canvas, white product voice, sharp orange for action, cyan for live/edge signals, and muted grey for secondary text.
 
@@ -36,8 +36,8 @@ Data centers are power hungry. Neuron shifts useful AI work to the local machine
 Use it when you want:
 
 - Fast local search across documents, code, notes, PDFs, spreadsheets, and presentations.
-- Offline semantic search using ONNX MiniLM embeddings and a FAISS/HNSW index.
-- Local Qwen output generation without downloading a model on every launch.
+- Offline semantic search using bundled BGE Small ONNX embeddings and a FAISS/HNSW index.
+- Local Qwen output generation with a bundled or separately downloaded model, depending on the release option.
 - A headless command surface through `neufs.py` / `neufs.cmd`.
 - Optional internet-assisted answers through an explicit toggle, routed as Internet -> Model -> User.
 
@@ -46,7 +46,7 @@ Use it when you want:
 | Icon | Capability | What it means |
 |---:|---|---|
 | <img src="assets/readme/lucide-search.svg" width="18" alt="Search"/> | Semantic search | Find files by meaning, not only by exact names. |
-| <img src="assets/readme/lucide-cpu.svg" width="18" alt="CPU"/> | Local Qwen output | Generate answers with the bundled GGUF model. |
+| <img src="assets/readme/lucide-cpu.svg" width="18" alt="CPU"/> | Local Qwen output | Generate answers with the installer-provisioned GGUF model. |
 | <img src="assets/readme/lucide-shield-check.svg" width="18" alt="Shield"/> | Private by default | Local index, local model, optional internet mode off by default. |
 | <img src="assets/readme/lucide-terminal.svg" width="18" alt="Terminal"/> | Headless mode | Run `neufs` commands without opening the desktop UI. |
 | <img src="assets/readme/lucide-keyboard.svg" width="18" alt="Keyboard"/> | Hotkey launcher | Global shortcuts show or focus the panel without hold-to-hide flicker. |
@@ -58,8 +58,8 @@ Use it when you want:
 |---|---:|---|
 | <img src="assets/readme/lucide-keyboard.svg" width="16" alt="Keyboard"/> Desktop UI | Active | PyQt6 Spotlight-style panel with tray activation |
 | <img src="assets/readme/lucide-database.svg" width="16" alt="Memory"/> MemoryOS chat | Active | Auto/query/action modes with local model responses |
-| <img src="assets/readme/lucide-search.svg" width="16" alt="Search"/> Offline semantic search | Active | ONNX embeddings plus vector index |
-| <img src="assets/readme/lucide-cpu.svg" width="16" alt="CPU"/> Qwen GGUF generation | Active | Bundled from `storage/models/*.gguf` when present |
+| <img src="assets/readme/lucide-search.svg" width="16" alt="Search"/> Offline semantic search | Active | Bundled BGE ONNX embeddings plus vector index |
+| <img src="assets/readme/lucide-cpu.svg" width="16" alt="CPU"/> Qwen GGUF generation | Active | Qwen 2.5 Coder 1.5B Instruct Q4_K_M through llama.cpp; bundled when release model bundling is enabled |
 | <img src="assets/readme/lucide-wifi-off.svg" width="16" alt="Internet"/> Internet mode | Optional | Off by default, explicit user-controlled toggle |
 | <img src="assets/readme/lucide-terminal.svg" width="16" alt="Terminal"/> Headless CLI | Active | `neufs status`, `search`, `chat`, `action`, `index`, `summarize` |
 | <img src="assets/readme/lucide-package.svg" width="16" alt="Package"/> Rust/Tauri port | Drafted | See `docs/rust_react_desktop_port_draft.md` |
@@ -86,7 +86,7 @@ pip install -r requirements.txt
 python run_desktop.py
 ```
 
-The desktop app preloads an existing local Qwen GGUF model before PyQt starts. It does not download the model during desktop launch.
+The desktop app opens PyQt while the isolated model worker loads Qwen on demand. It does not download a model during desktop launch. A release build bundles Qwen 2.5 Coder 1.5B Q4_K_M by default; the explicit unbundled release option requires a later model download.
 
 ## Headless Commands
 
@@ -105,14 +105,15 @@ On Windows, `neufs.cmd` is provided as a convenience wrapper.
 
 | Shortcut | Behavior |
 |---|---|
-| `Shift + Space` | Show or focus Neuron |
-| `Ctrl + Space` | Fallback show/focus shortcut |
-| `Ctrl + Alt + Space` | Safer fallback show/focus shortcut |
-| `Ctrl + Alt + N` | OS-safe fallback show/focus shortcut |
+| `Shift + Space` | Default show/focus shortcut |
+| `Ctrl + Space` | Optional show/focus shortcut |
+| `Ctrl + Alt + Space` | Optional show/focus shortcut |
+| `Ctrl + Alt + N` | Optional shortcut and OS-safe fallback |
 | `Esc` | Hide the panel |
 | `Ctrl + Shift + R` | Research overlay |
 
 The global hotkey intentionally shows/focuses instead of toggling closed. This avoids the Windows repeat behavior where a held key opens and immediately hides the panel.
+On Windows, choose the panel shortcut in Settings and restart NeuCockpit to apply it. `Ctrl + Alt + N` remains a fallback unless it is the selected shortcut. Linux and macOS use tray/menu activation for now.
 
 ## Local Model And Cache Strategy
 
@@ -145,6 +146,14 @@ Output:
 
 ```text
 dist\Neuron\Neuron.exe
+```
+
+Neuron Cockpit also has an Inno Setup installer that bundles the Tauri shell,
+the packaged backend, and the BGE ONNX embedding model, then downloads Qwen
+2.5 Coder during setup:
+
+```powershell
+.\scripts\build_neucockpit_windows.ps1
 ```
 
 To hand off a single archive:
@@ -197,7 +206,7 @@ Desktop services
         v
 Local engines
   |
-  +-- ONNX MiniLM embeddings
+  +-- BGE Small embeddings
   +-- FAISS/HNSW index
   +-- llama.cpp Qwen GGUF
 ```

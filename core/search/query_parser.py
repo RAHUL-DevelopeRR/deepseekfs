@@ -85,6 +85,12 @@ EXT_MAP = {
     # Logs
     "log":          [".log"],
     "logs":         [".log"],
+
+    # Folder nodes
+    "folder":       ["[folder]"],
+    "folders":      ["[folder]"],
+    "directory":    ["[folder]"],
+    "directories":  ["[folder]"],
 }
 
 # ── Fuzzy groups ──────────────────────────────────────────────────────────

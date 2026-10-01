@@ -1,7 +1,7 @@
 """Backward-compatibility shim — redirects to the unified LLM engine.
 
 The separate Qwen 0.5B coder model has been replaced by a single
-Qwen 2.5 Coder 3B Instruct that handles both general chat AND code.
+Qwen 2.5 Coder 1.5B Instruct that handles both general chat AND code.
 This module is kept so that ``scripts/manual_smoke/qwen_coder_smoke.py``
 and any future callers of ``get_coder_engine()`` continue to work.
 """
