@@ -35,6 +35,8 @@ jobs:
           sudo apt-get install -y libegl1 libgl1 libglib2.0-0 libxcb-cursor0 libxkbcommon-x11-0
       - name: Build NeuCockpit Linux x64 package
         run: bash scripts/build_neucockpit_linux.sh
+      - name: Verify packaged offline AI
+        run: python scripts/verify_release_ai.py --cli dist/Neuron/neufs > dist/release/upload/NeuCockpit-linux-x64-ai-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-linux-x64
@@ -62,6 +64,8 @@ jobs:
             libxkbcommon-x11-0
       - name: Build NeuCockpit Linux ARM64 package
         run: bash scripts/build_neucockpit_linux.sh
+      - name: Verify packaged offline AI
+        run: python3 scripts/verify_release_ai.py --cli dist/Neuron/neufs > dist/release/upload/NeuCockpit-linux-arm64-ai-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-linux-arm64
@@ -80,6 +84,8 @@ jobs:
           python-version: "3.11"
       - name: Build NeuCockpit macOS ARM64 package
         run: bash scripts/build_neucockpit_macos.sh
+      - name: Verify packaged offline AI
+        run: python3 scripts/verify_release_ai.py --cli dist/Neuron/neufs > dist/release/upload/NeuCockpit-macos-arm64-ai-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-macos-arm64
@@ -98,6 +104,8 @@ jobs:
           python-version: "3.11"
       - name: Build NeuCockpit macOS Intel package
         run: bash scripts/build_neucockpit_macos.sh
+      - name: Verify packaged offline AI
+        run: python3 scripts/verify_release_ai.py --cli dist/Neuron/neufs > dist/release/upload/NeuCockpit-macos-intel-ai-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-macos-intel
@@ -120,6 +128,9 @@ jobs:
       - name: Build NeuCockpit Windows ARM64 package
         shell: pwsh
         run: scripts/build_neucockpit_windows.ps1 -Arch arm64 -Package installer
+      - name: Verify packaged offline AI
+        shell: pwsh
+        run: python scripts/verify_release_ai.py --cli dist/Neuron/neufs.exe > dist/release/upload/NeuCockpit-windows-arm64-ai-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-windows-arm64-installer
@@ -142,6 +153,9 @@ jobs:
       - name: Build NeuCockpit Windows x64 installer
         shell: pwsh
         run: scripts/build_neucockpit_windows.ps1 -Arch x64 -Package installer
+      - name: Verify packaged offline AI
+        shell: pwsh
+        run: python scripts/verify_release_ai.py --cli dist/Neuron/neufs.exe > dist/release/upload/NeuCockpit-windows-x64-ai-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: NeuCockpit-v1.0-windows-x64-installer
@@ -194,6 +208,7 @@ jobs:
 
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
             --title "$TITLE" \
             --notes "$BODY" \
             --latest
