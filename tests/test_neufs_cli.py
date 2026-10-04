@@ -7,6 +7,12 @@ import pytest
 from neufs import _parse_tool_args
 
 
+@pytest.fixture(autouse=True)
+def isolated_cli_state(monkeypatch, tmp_path_factory):
+    monkeypatch.setenv('NEURON_STORAGE_DIR', str(tmp_path_factory.mktemp('neufs-cli-state')))
+    monkeypatch.setenv('HF_HUB_OFFLINE', '1')
+
+
 def test_parse_tool_args_accepts_repeatable_pairs():
     parsed = _parse_tool_args("{}", ["path=.", "max_items=5", "recursive=false"])
 

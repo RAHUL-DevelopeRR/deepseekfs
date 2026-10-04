@@ -18,6 +18,9 @@
 #define MyAppExeName "NeuCockpit.exe"
 #define MyCliExeName "neufs.exe"
 #define MyWorkerExeName "NeuronLLMWorker.exe"
+#ifndef MyBundleDir
+#define MyBundleDir "dist\Neuron"
+#endif
 #define MyAppURL "https://github.com/RAHUL-DevelopeRR/deepseekfs"
 #ifndef MySetupOutputBaseFilename
 #define MySetupOutputBaseFilename "NeuCockpitSetup_v1.0_windows_x64"
@@ -80,7 +83,7 @@ Name: "runonstartup"; Description: "Launch NeuCockpit on Windows startup"; Group
 
 [Files]
 ; ── PyInstaller --onedir output (ENTIRE self-contained app) ──
-Source: "dist\Neuron\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyBundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "Rahul.NeuCockpit.Desktop.1.0"

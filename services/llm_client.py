@@ -34,6 +34,7 @@ class LLMWorkerClient:
         self._loaded = False
         self._load_error: str | None = None
         self._stderr_thread: threading.Thread | None = None
+        self._stdout_thread: threading.Thread | None = None
         self._responses: Queue = Queue()
         self.request_timeout = float(os.getenv("NEURON_LLM_REQUEST_TIMEOUT", "120"))
 
@@ -95,8 +96,9 @@ class LLMWorkerClient:
         )
         self._stderr_thread.start()
         self._responses = Queue()
-        threading.Thread(target=self._drain_stdout, args=(self._process, self._responses),
-                         name="llm-worker-stdout", daemon=True).start()
+        self._stdout_thread = threading.Thread(target=self._drain_stdout, args=(self._process, self._responses),
+                                               name="llm-worker-stdout", daemon=True)
+        self._stdout_thread.start()
 
         try:
             ready = self._read_response(expect_event=True, timeout_s=20)
@@ -259,8 +261,16 @@ class LLMWorkerClient:
             except Exception:
                 try:
                     proc.kill()
+                    proc.wait(timeout=2)
                 except Exception:
                     pass
+        for reader in (self._stdout_thread, self._stderr_thread):
+            if reader is not None and reader is not threading.current_thread():
+                reader.join(timeout=2)
+        if proc is not None and proc.poll() is not None:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
         self._process = None
         self._loaded = False
 

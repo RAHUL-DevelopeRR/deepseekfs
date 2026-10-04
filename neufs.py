@@ -332,12 +332,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     import os
     os.environ.setdefault('NEURON_LLM_BACKEND', 'worker')
+    os.environ.setdefault('NEURON_LOG_STDERR', '1')
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return args.func(args)
     except Exception as exc:
         return _print_json({"ok": False, "error": str(exc), "type": type(exc).__name__})
+    finally:
+        module = sys.modules.get('services.llm_engine')
+        engine = getattr(module, '_engine', None)
+        if engine is not None:
+            engine.unload()
 
 
 if __name__ == "__main__":
