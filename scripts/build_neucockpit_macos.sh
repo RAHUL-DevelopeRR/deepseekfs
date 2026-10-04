@@ -16,6 +16,10 @@ python3 -m pip install -r requirements-package.txt
 # Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit
 # illegal-instruction crashes on older Intel CPUs.
 export CMAKE_ARGS="${CMAKE_ARGS:-} -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
+if [ "$(uname -m)" = "x86_64" ]; then
+    # Intel releases use CPU inference; omit Metal device/shader initialization.
+    export CMAKE_ARGS="$CMAKE_ARGS -DGGML_METAL=OFF"
+fi
 export FORCE_CMAKE=1
 python3 -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
 

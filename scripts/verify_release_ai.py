@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ def _run(cli: Path, *args: str, storage: Path) -> dict:
         timeout=240,
         check=False,
     )
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
     if result.returncode:
         raise RuntimeError(
             f"{' '.join(args)} exited {result.returncode}: "
