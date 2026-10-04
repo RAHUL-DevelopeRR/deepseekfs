@@ -211,12 +211,14 @@ jobs:
             --target "${{ github.sha }}" \
             --title "$TITLE" \
             --notes "$BODY" \
-            --latest
+            --draft
 
           find artifacts -type f | sort | while read -r f; do
             gh release upload "$TAG" "$f" --repo "${{ github.repository }}"
             echo "Uploaded $(basename "$f")"
           done
+
+          gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false --latest
 
           echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Release created: $TAG"

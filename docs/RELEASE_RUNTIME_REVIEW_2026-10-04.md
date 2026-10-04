@@ -19,3 +19,17 @@ Installed 1 October build, isolated temporary storage, offline mode:
 - Source BGE model initialization: 3.218 seconds; first embedding: 0.394 seconds.
 
 These checks did not reproduce a 30-second model load. Cold disk cache, antivirus, memory pressure and generation latency may change observed time. Final packaged measurements and deployment evidence will be appended after verification.
+
+## Verified fresh Windows package
+
+Source: cf17a08, `dist/fresh-20261004/Neuron`.
+
+- Full suite: 250 passed, 2 skipped. CLI tests use temporary state outside the document folder.
+- GitHub code and retrieval checks passed.
+- Offline packaged release check: BGE ONNX CLS backend confirmed; embedding check (including process startup) 5.501 s; Qwen check 6.310 s; first streamed token 6.850 s; response `AI MODE OK`.
+- Packaged desktop smoke: clean exit, 8.484 s to ready; isolated state, maintenance scan disabled.
+- Packaged retrieval smoke: found PDF page 8 and Q3 amount 987654, refreshed modified text, and retained exact paths in agent observations. Status 0.770 s, initial index 3.220 s, search 2.120 s, grounded answer 21.070 s, reindex 2.010 s.
+- Headless workers now stop and close their reader threads before CLI exit. This removes worker handles surviving interpreter shutdown; logs go to stderr while stdout contains the JSON response.
+- Future release workflows upload all assets as a draft before publishing, so latest download links cannot expose partially uploaded releases.
+
+Generation latency is distinct from loading: the grounded answer took 21 seconds including retrieval and inference. These are measurements on this PC, not a promise for every CPU or storage device.
