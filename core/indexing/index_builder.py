@@ -317,6 +317,8 @@ class IndexBuilder:
             "SELECT value FROM index_settings WHERE key='embedding'"
         ).fetchone()
         if old and old[0] != identity:
+            if identity.startswith('lexical-') and not old[0].startswith('lexical-'):
+                raise RuntimeError('Neural embedding runtime unavailable. Existing vectors were preserved; reinstall the full NeuCockpit build.')
             # Same dimension does NOT mean the same embedding space.
             logger.warning(
                 "Embedding backend changed; old vectors invalidated for background reindex"

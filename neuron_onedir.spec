@@ -14,8 +14,9 @@ Output:
 """
 import os
 import sys
+import importlib.util
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata
+from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata, collect_submodules
 
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("USE_FLAX", "0")
@@ -24,17 +25,16 @@ os.environ.setdefault("QT_API", "pyqt6")
 
 block_cipher = None
 
+for required_module in ('onnxruntime', 'tokenizers', 'faiss', 'llama_cpp'):
+    if importlib.util.find_spec(required_module) is None:
+        raise RuntimeError(f'Missing release dependency: {required_module}. Install requirements-package.txt before building.')
+
 # ── Paths ──────────────────────────────────────────────────────
 PROJECT = os.path.abspath('.')
 APP_ICON = 'assets/neuron_icon.ico' if sys.platform.startswith('win') else None
 
 # ── Data files to bundle ──────────────────────────────────────
 datas = [
-    # App source packages (imported at runtime)
-    ('app', 'app'),
-    ('core', 'core'),
-    ('services', 'services'),
-    ('ui', 'ui'),
     # Assets (icons, images)
     ('assets', 'assets'),
     # Primary bundled embedding model: BGE Small ONNX.
@@ -206,6 +206,9 @@ excludes = [
     'debugpy', 'traitlets', 'pydantic', 'httpx', 'aiohttp',
 ]
 
+for package in ('app', 'core', 'services', 'ui'):
+    hiddenimports += collect_submodules(package)
+
 worker_hiddenimports = [
     'app', 'app.config', 'app.logger',
     'services', 'services.llm_worker', 'services.llm_engine',
@@ -235,7 +238,7 @@ a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=True,
+    noarchive=False,
 )
 
 worker_a = Analysis(
@@ -251,7 +254,7 @@ worker_a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=True,
+    noarchive=False,
 )
 
 cli_a = Analysis(
@@ -267,7 +270,7 @@ cli_a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=True,
+    noarchive=False,
 )
 
 # Poppler on the build host can contribute an incompatible ICU DLL. Qt uses

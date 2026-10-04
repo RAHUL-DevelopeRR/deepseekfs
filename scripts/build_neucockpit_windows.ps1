@@ -41,7 +41,7 @@ try {
     & $Python -m pip install --upgrade pip setuptools wheel
 
     $req = Join-Path $env:TEMP "requirements-windows-$Arch.txt"
-    $lines = Get-Content requirements.txt |
+    $lines = Get-Content requirements-package.txt |
         Where-Object {
             $_ -notmatch '^\s*pyaudiowpatch' -and
             $_ -notmatch '^\s*vosk' -and

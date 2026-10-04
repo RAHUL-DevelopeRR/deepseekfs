@@ -518,3 +518,15 @@ def test_moving_into_excluded_folder_removes_old_entry(monkeypatch, tmp_path):
         )
     )
     assert removed == [str(tmp_path / "notes.txt")]
+
+
+def test_missing_neural_runtime_preserves_existing_vectors(index, tmp_path):
+    from types import SimpleNamespace
+    document = tmp_path / 'notes.txt'
+    document.write_text('important existing document evidence')
+    assert index.add_file(str(document))
+    count = index._db._conn().execute('SELECT COUNT(*) FROM chunks').fetchone()[0]
+    index.embedder = SimpleNamespace(identity='lexical-blake2b-v1:384')
+    with pytest.raises(RuntimeError, match='preserved'):
+        index._load_or_create_index()
+    assert index._db._conn().execute('SELECT COUNT(*) FROM chunks').fetchone()[0] == count

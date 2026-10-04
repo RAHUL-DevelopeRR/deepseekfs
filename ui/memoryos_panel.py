@@ -393,11 +393,14 @@ class MemoryOSPanel(QFrame):
             agent = get_memory_os()
             agent.on_confirmation = self._confirm_tool_action
 
-            # The legacy PyQt panel is more stable when it receives one
-            # completed answer. Streaming can be re-enabled for diagnostics.
+            streamed = False
+            def emit_token(token):
+                nonlocal streamed
+                streamed = True
+                self._sig_token.emit(token)
             self._stream_mode = mode
             if os.getenv("NEURON_UI_STREAMING", "1").lower() in {"1", "true", "yes"}:
-                agent.on_token = lambda token: self._sig_token.emit(token)
+                agent.on_token = emit_token
             else:
                 agent.on_token = None
 
@@ -415,7 +418,7 @@ class MemoryOSPanel(QFrame):
                 response = "(No response generated. Try rephrasing your query.)"
 
             # If we were streaming, signal end instead of full response
-            if self._streaming:
+            if streamed:
                 self._sig_stream_end.emit()
             else:
                 self._sig_response.emit(response, mode)
