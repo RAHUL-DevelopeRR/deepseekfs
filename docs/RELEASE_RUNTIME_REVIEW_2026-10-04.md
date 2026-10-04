@@ -33,3 +33,11 @@ Source: cf17a08, `dist/fresh-20261004/Neuron`.
 - Future release workflows upload all assets as a draft before publishing, so latest download links cannot expose partially uploaded releases.
 
 Generation latency is distinct from loading: the grounded answer took 21 seconds including retrieval and inference. These are measurements on this PC, not a promise for every CPU or storage device.
+
+## Installed upgrade and disk space
+
+- The first silent upgrade ran out of space on C: and rolled back. The stale build outputs were transferred to `D:/NeuCockpit-build-archive/2026-10-04`, freeing approximately 9 GB on C:.
+- The retry completed with installer exit code 0; no Windows restart was required.
+- All three installed executables match the fresh package by SHA-256. Read-only status succeeds, reports ONNX available, and retains the existing index with 263 records.
+- The installed-layout offline check passes BGE ONNX, Qwen generation, and streaming. During post-install system activity, BGE took 11.896 s, Qwen 24.809 s, and the first streamed token 17.297 s. This variation reinforces that the earlier isolated timings are not universal latency guarantees.
+- Intel macOS cold-start checks measured 32.712 s and 38.131 s. The Intel CPU package now excludes the unused Metal backend; the 30-second release gate remains in place. Native verification of that change is required before publishing the complete release.

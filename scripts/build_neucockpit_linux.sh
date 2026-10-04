@@ -24,7 +24,7 @@ python -m pip install -r requirements-package.txt
 # illegal-instruction crashes on older x64 CPUs.
 export CMAKE_ARGS="${CMAKE_ARGS:-} -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
 export FORCE_CMAKE=1
-python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
+python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python==0.3.35"
 
 # Download release models into app-local storage so PyInstaller bundles them.
 python scripts/prepare_release_models.py

@@ -21,7 +21,7 @@ if [ "$(uname -m)" = "x86_64" ]; then
     export CMAKE_ARGS="$CMAKE_ARGS -DGGML_METAL=OFF"
 fi
 export FORCE_CMAKE=1
-python3 -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
+python3 -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python==0.3.35"
 
 # Download release models into app-local storage so PyInstaller bundles them.
 python3 scripts/prepare_release_models.py

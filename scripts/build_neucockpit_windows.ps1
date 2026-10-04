@@ -111,7 +111,7 @@ try {
     }
     $env:CMAKE_ARGS = $portableArgs
     $env:FORCE_CMAKE = "1"
-    & $Python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python>=0.3.0"
+    & $Python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python==0.3.35"
 
     & $Python scripts\prepare_release_models.py
 
