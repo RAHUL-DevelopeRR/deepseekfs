@@ -108,6 +108,7 @@ try {
         $portableArgs = "$portableArgs -DCMAKE_C_COMPILER=`"$clangPath`" -DCMAKE_CXX_COMPILER=`"$clangPath`""
     } else {
         Remove-Item Env:\CMAKE_GENERATOR -ErrorAction SilentlyContinue
+        $portableArgs = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"
     }
     $env:CMAKE_ARGS = $portableArgs
     $env:FORCE_CMAKE = "1"

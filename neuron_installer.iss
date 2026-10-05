@@ -88,6 +88,7 @@ Source: "{#MyBundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 [InstallDelete]
 ; Python prefers version-tagged extensions over the new generic bundled binary.
 Type: files; Name: "{app}\_internal\tokenizers\*.pyd"
+Type: files; Name: "{app}\_internal\llama_cpp\lib\*.dll"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "Rahul.NeuCockpit.Desktop.1.0"

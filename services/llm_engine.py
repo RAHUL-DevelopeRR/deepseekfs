@@ -210,6 +210,18 @@ class LLMEngine:
             t0 = time.time()
             
             from llama_cpp import Llama, GGML_TYPE_Q8_0, GGML_TYPE_F16
+            if sys.platform == "win32":
+                import ctypes
+                import llama_cpp
+                backend_dir = Path(llama_cpp.__file__).parent / "lib"
+                if any(backend_dir.glob("ggml-cpu-*.dll")):
+                    # GGML's default search directory is the executable folder, not this package.
+                    self._backend_runtime = ctypes.CDLL(str(backend_dir / "ggml.dll"))
+                    load_backends = self._backend_runtime.ggml_backend_load_all_from_path
+                    load_backends.argtypes = [ctypes.c_char_p]
+                    load_backends.restype = None
+                    load_backends(str(backend_dir).encode("utf-8"))
+                    logger.info("LLMEngine: loaded compatible CPU backend from %s", backend_dir)
             
             # Auto-detect thread count; allow local speed/power tuning.
             cores = os.cpu_count() or 4

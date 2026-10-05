@@ -14,6 +14,7 @@
 | Embeddings | Character-bounded chunks can exceed BGE's token window; folder listings bypassed chunk splitting. | Split with the actual BGE tokenizer, preserving offsets and overlap, before embedding. Update parser version so existing files refresh. |
 | Startup | Python 3.13 and FAISS's ARM probe invoke Windows WMI even for simple platform checks. Resource failures appeared in local validation. | Use `sys.platform` for Windows checks; use NumPy's detected AVX2 support to choose the Windows FAISS library without WMI. |
 | Windows upgrade | An old `tokenizers.cp311-win_amd64.pyd` survived alongside the new `tokenizers.pyd`; Python selected the old extension, which lacked `DecodeStream`. | Remove bundled tokenizer `.pyd` files before the installer copies the replacement runtime. The local installation is archived and reinstalled into a clean directory. |
+| Windows inference | The baseline release disabled AVX, AVX2, FMA and F16C globally. On this PC the installed streamed probe took 42.85 seconds to its first token and Action timed out despite Qwen loading in 2.3–7.2 seconds. | Build the x64 runtime with dynamic CPU variants and let GGML score compatible backends. Load those backends from the bundled library directory before model creation. Keep a baseline CPU variant; remove obsolete runtime DLLs during upgrade. Installed performance verification is required before claiming improvement. |
 
 ## Tool and MCP scope
 
