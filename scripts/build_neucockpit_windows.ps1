@@ -108,11 +108,14 @@ try {
         $portableArgs = "$portableArgs -DCMAKE_C_COMPILER=`"$clangPath`" -DCMAKE_CXX_COMPILER=`"$clangPath`""
     } else {
         Remove-Item Env:\CMAKE_GENERATOR -ErrorAction SilentlyContinue
-        $portableArgs = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"
+        $portableArgs = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_INSTALL_BINDIR=llama_cpp/lib"
     }
     $env:CMAKE_ARGS = $portableArgs
     $env:FORCE_CMAKE = "1"
     & $Python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python==0.3.35"
+    if ($Arch -eq "x64") {
+        & $Python -c "from pathlib import Path; import llama_cpp; p=Path(llama_cpp.__file__).parent/'lib'; assert (p/'ggml-cpu-x64.dll').is_file() and (p/'ggml-cpu-haswell.dll').is_file(), f'Missing dynamic CPU backends in {p}'"
+    }
 
     & $Python scripts\prepare_release_models.py
 
