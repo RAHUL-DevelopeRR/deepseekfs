@@ -20,3 +20,7 @@ def test_action_coding_prompt_selects_coding_agent_tools(monkeypatch):
     names = {item["function"]["name"] for item in selected}
 
     assert {"file_write", "file_edit", "file_read", "glob", "shell"} <= names
+    from services.agent_context import build_action_context
+    assert "Save code" in build_action_context(coding=True)
+    assert "Save code" not in build_action_context()
+    assert "stop calling tools" in build_action_context()

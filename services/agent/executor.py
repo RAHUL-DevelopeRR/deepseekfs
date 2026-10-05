@@ -206,7 +206,8 @@ class TaskExecutor:
                 self.on_thinking(task, f"Step {turn + 1}/{MAX_TURNS}...")
 
             # Build messages
-            messages = [{"role": "system", "content": build_action_context("")}]
+            messages = [{"role": "system", "content": build_action_context(
+                self._looks_like_coding_agent_goal(task.goal.rsplit("Latest user request:\n", 1)[-1]))}]
             messages.append({"role": "user", "content": task.goal})
             messages.extend(conversation)
 
