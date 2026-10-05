@@ -38,12 +38,20 @@ else
     OUTNAME="NeuCockpit-v1.0-macos-intel.dmg"
 fi
 
-hdiutil create \
-  -volname "$VOLNAME" \
-  -srcfolder dist/Neuron \
-  -ov \
-  -format UDZO \
-  "dist/release/$OUTNAME"
+for attempt in 1 2 3; do
+    if hdiutil create \
+      -volname "$VOLNAME" \
+      -srcfolder dist/Neuron \
+      -ov \
+      -format UDZO \
+      "dist/release/$OUTNAME"; then
+        break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+        exit 1
+    fi
+    sleep 5
+done
 
 rm -rf dist/release/upload
 bash scripts/prepare_release_upload.sh "dist/release/$OUTNAME" dist/release/upload
