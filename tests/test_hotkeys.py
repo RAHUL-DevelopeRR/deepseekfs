@@ -47,6 +47,7 @@ def test_global_hotkey_manager_fails_closed_on_unsupported_os(monkeypatch):
     import ui.hotkeys as hotkeys
 
     monkeypatch.setattr(hotkeys.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(hotkeys.sys, "platform", "linux")
 
     manager = hotkeys.GlobalHotkeyManager(DummyApp())
     assert manager.supported is False

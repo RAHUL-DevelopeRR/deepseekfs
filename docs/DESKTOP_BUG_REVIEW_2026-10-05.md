@@ -1,0 +1,40 @@
+# NeuCockpit desktop review, 5 October 2026
+
+## Failures traced and corrected
+
+| Area | Cause | Change |
+| --- | --- | --- |
+| Hotkeys | Rearming waited for every modifier to be released, then blocked presses for another 450 ms. Settings only applied after restarting. | Rearm when the trigger key is released; keep a short repeat debounce. Apply changed shortcuts immediately and display actual registered shortcuts. |
+| Instances | No desktop ownership guard. Competing desktops can claim different global shortcuts and start duplicate model workers. | Per-user QLockFile ownership with Windows event activation and Qt local IPC elsewhere. Secondary launches activate the owner and exit before loading the desktop service. The separate model worker remains intentional. |
+| Conversation | The default history limit was one message, which was the current input. Previous Query/Action turns were filtered out. Action context budgets favored the oldest messages. | Send bounded recent turns across modes, preserve the full current input, prioritize newest persistent context, and resolve code follow-ups in Auto. |
+| Auto | Intent examples were neither bundled nor found under the install directory when user storage lacked them. | Package the example data and fall back to the bundled copy. |
+| Action | Plain ChatML discarded schemas passed in `tools`; errors fell back to chat. Only the first tool call was executed. Context instructions also contaminated tool selection. | Serialize schemas using Qwen's Hermes tool protocol, parse calls into the existing tool API, return observations, execute every returned call, enforce the exposed tool allowlist and report failures. Score the latest request separately from past context. |
+| Code actions | A denied/failed write could still run code and report it saved. Failed revisions could run the old program. | Stop on denied writes and failed revisions; record correct task outcomes. |
+| Worker cleanup | Windows venv launchers can leave their child interpreter and pipes alive when terminated alone. | Stop the worker process tree on Windows cancellation and clean up startup failures. |
+| Embeddings | Character-bounded chunks can exceed BGE's token window; folder listings bypassed chunk splitting. | Split with the actual BGE tokenizer, preserving offsets and overlap, before embedding. Update parser version so existing files refresh. |
+| Startup | Python 3.13 and FAISS's ARM probe invoke Windows WMI even for simple platform checks. Resource failures appeared in local validation. | Use `sys.platform` for Windows checks; use NumPy's detected AVX2 support to choose the Windows FAISS library without WMI. |
+
+## Tool and MCP scope
+
+The application exposes 17 built-in Python tools plus locally installed Python plugins. There is no MCP client, transport, server discovery or remote MCP authentication in this repository. Codex's own connectors are not exposed to NeuCockpit's model. This change fixes the local tool path; it does not claim MCP connectivity.
+
+Tool argument validation, moderate-operation confirmation and dangerous-operation denial remain enforced. Tool generation failure cannot be reported as successful plain chat.
+
+## Retrieval pipeline and limits
+
+Supported documents are parsed into page, slide, paragraph, table-row or section chunks. SQLite holds source references, content hashes, modification timestamps and float32 vectors; FAISS HNSW retrieves chunks. BGE Small ONNX uses CLS pooling and unit-length 384-dimensional vectors. Its input window is 512 tokens. Token splitting now prevents silent omission within that window.
+
+Folders contain listing metadata, not every descendant's document contents. Descendant files are indexed independently. Images provide metadata unless local OCR is enabled. Videos provide metadata and available subtitle sidecars; visual frames and audio are not understood. Scanned-PDF OCR is not implemented. Extraction remains capped at 64 MiB / 4,096 chunks and records truncation. Conversation history is also bounded by the model's 2,048-token context; stored history is not unlimited model memory.
+
+## Verification and release status
+
+- Latest focused run: **63 tests passed**, including native Windows event ownership/activation, modifier-held shortcut rearming, persistent history, multi-call execution, denial handling, permissions and retrieval.
+- Source compilation and whitespace checks passed.
+- A read-only installed-index audit found BGE ONNX active, SQLite integrity `ok`, 297 file/folder records, 538 valid normalized vectors and 256 records still pending chunk migration. No document contents were printed or uploaded. These counts are a point-in-time snapshot.
+- The real local model recalled the synthetic project name `Atlas` after reopening the conversation store. Actual BGE produced valid vectors and retrieved a synthetic deployment note.
+- The real Action loop timed out locally. CPU usage measured 99.7%, with approximately 80% RAM used. This is a failed performance verification, not proof that the new tool loop works end to end.
+- Full local suite at the time of review: 255 passed, 2 skipped, 2 timing failures (cold CLI inference and worker deadline including interpreter startup). Cancellation is now timed after worker startup; its focused regression passes. Cold CLI performance still needs a clean run.
+- A manual CI job runs the actual bundled BGE/Qwen models against synthetic chat, listing and file-writing tasks. Publication of replacement binaries remains gated on that check.
+- Native UI automation initialization failed with `failed to write kernel assets: The system cannot find the path specified (os error 3)`. No physical shortcut or complete desktop click-through is claimed.
+
+Anti-slop after-development audit: changes preserve the existing desktop design. The new shortcut status uses the existing pale blue accent to make successful registration and failure legible. Functional regression evidence is recorded above; full visual acceptance remains unverified.

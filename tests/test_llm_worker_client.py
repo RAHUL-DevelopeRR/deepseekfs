@@ -67,8 +67,9 @@ def test_worker_timeout_terminates_stalled_process_and_recovers():
     stalled = "import json,time,sys; print(json.dumps({'event':'ready','ok':True}),flush=True); sys.stdin.readline(); time.sleep(30)"
     client = LLMWorkerClient(command=[sys.executable, '-u', '-c', stalled])
     client.request_timeout = 0.2
-    started = time.monotonic()
     try:
+        client._start()
+        started = time.monotonic()
         assert client._request('chat') is None
         assert time.monotonic() - started < 5
         assert 'timed out' in client.load_error.lower()

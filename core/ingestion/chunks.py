@@ -20,7 +20,7 @@ CHUNK_CHARS = 900
 OVERLAP = 120
 MAX_CHUNKS = 4096
 MAX_CONTENT_BYTES = 64 * 1024 * 1024
-PARSER_VERSION = "chunks-v1"
+PARSER_VERSION = "chunks-v2-token-bounded"
 
 
 @dataclass

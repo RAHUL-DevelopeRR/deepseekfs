@@ -331,6 +331,9 @@ class DesktopService:
     def save_config(self, cfg: dict):
         UserConfig.save(cfg)
         config.WATCH_PATHS = UserConfig.get_all_watch_paths()
+        callback = getattr(self, "on_config_changed", None)
+        if callback is not None:
+            callback(cfg)
 
     # ── Activity tracking (Memory OS features) ───────────────
     def get_recent_files(self, limit: int = 5) -> List[dict]:

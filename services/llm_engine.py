@@ -563,26 +563,19 @@ class LLMEngine:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = DEFAULT_TEMPERATURE,
     ) -> dict:
-        """Native function calling — same API as GPT/Claude.
-        
-        Returns the full message dict which may contain:
-          - "content": text response (if no tool call)
-          - "tool_calls": [{"function": {"name": ..., "arguments": ...}}]
-        
-        The model autonomously decides whether to call a tool or respond.
-        No system prompt hacks, no regex parsing.
-        """
+        """Expose schemas using Qwen's Hermes protocol through plain ChatML."""
+        from services.tool_protocol import tool_messages, tool_response
         if not self._loaded:
             if not self.load_model():
-                return {"content": format_ai_unavailable(self._load_error)}
+                raise RuntimeError(format_ai_unavailable(self._load_error))
         
         with self._lock:
             try:
                 started = time.time()
+                messages = tool_messages(messages, tools)
+                messages, max_tokens = self._fit_chat_messages(messages, max_tokens)
                 response = self._model.create_chat_completion(
                     messages=messages,
-                    tools=tools,
-                    tool_choice="auto",
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
@@ -594,11 +587,11 @@ class LLMEngine:
                     msg["content"] = _strip_thinking(msg["content"].strip())
                 
                 _log_generation_stats("chat_with_tools", started, response, msg.get("content") or "")
-                return msg
+                return tool_response(msg.get("content") or "", tools)
                 
             except Exception as e:
                 logger.error(f"LLMEngine: Tool call error: {e}")
-                return {"content": f"[AI error: {e}]"}
+                raise RuntimeError(f"Tool generation failed: {e}") from e
     
     # ── High-Level API (compatible with OllamaService) ─────────
     

@@ -451,6 +451,9 @@ class MemoryOSAgent:
             {"path": str(path), "content": code, "overwrite": True},
         )
         outputs.append("File write:\n" + write_result)
+        if not write_result.startswith("[OK]"):
+            task.fail(write_result)
+            return "The code was not saved.\n\n" + write_result
 
         if self._wants_run(user_message):
             self._thinking("Preparing terminal command...")
@@ -478,11 +481,16 @@ class MemoryOSAgent:
                     {"command": command, "cwd": str(workspace), "timeout": 45},
                 )
                 outputs.append("PowerShell run:\n" + run_result)
+                if not run_result.startswith("[OK]"):
+                    task.fail(run_result)
+                    return f"Saved `{path}`, but execution failed.\n\n" + "\n\n".join(outputs)
 
-        return (
+        result = (
             f"Saved the Action-mode code artifact to `{path}`.\n\n"
             + "\n\n".join(outputs)
         )
+        task.complete(result)
+        return result
 
     def _run_contextual_code_followup(self, user_message: str, task: Task, executor: TaskExecutor) -> Optional[str]:
         """Save/run the previous code block without waiting for weak tool-call inference."""
@@ -495,8 +503,10 @@ class MemoryOSAgent:
         lang, code = artifact
         if self._wants_modify(user_message):
             rewritten = self._rewrite_code_artifact(lang, code, user_message)
-            if rewritten is not None:
-                lang, code = rewritten
+            if rewritten is None:
+                task.fail("The model did not produce the requested code revision.")
+                return task.error
+            lang, code = rewritten
 
         return self._save_and_optionally_run_code(lang, code, user_message, task, executor)
 
@@ -533,6 +543,11 @@ class MemoryOSAgent:
         ))
 
         effective = _detect_intent(user_message) if mode == "auto" else mode
+        if mode == "auto" and re.search(
+            r"\b(save|run|execute|compile|edit|modify|alter)\b.*\b(it|this|that|the program|the code)\b",
+            user_message, re.IGNORECASE,
+        ) and self._latest_code_artifact() is not None:
+            effective = "action"
 
         if effective == "query":
             return self._query_mode(user_message)
@@ -591,7 +606,7 @@ class MemoryOSAgent:
 
         # Optional exact response cache. Disabled by default so normal chat
         # measures real Qwen generation instead of hiding latency.
-        cache_key = low[:120]
+        cache_key = str((user_message, [(m["role"], m["content"]) for m in self._conversation[-12:]]))
         cache = get_response_cache() if _env_flag("NEURON_CHAT_RESPONSE_CACHE", False) else None
         cached = None if live_context or cache is None else cache.get(cache_key)
         if cached is not None:
@@ -635,20 +650,20 @@ class MemoryOSAgent:
             ]
         else:
             messages = [{"role": "system", "content": build_chat_context()}]
-            history_limit = _env_int("NEURON_CHAT_HISTORY_LIMIT", 1, minimum=0, maximum=24)
-            history_chars = _env_int("NEURON_CHAT_HISTORY_CHARS", 180, minimum=80, maximum=1500)
+            history_limit = _env_int("NEURON_CHAT_HISTORY_LIMIT", 12, minimum=1, maximum=24)
+            history_chars = _env_int("NEURON_CHAT_HISTORY_CHARS", 900, minimum=80, maximum=1500)
             messages.extend(
                 self._recent_messages(
                     limit=history_limit,
                     max_chars_per_message=history_chars,
-                    modes={"chat"},
                 )
             )
+            messages[-1] = {"role": "user", "content": user_message}
 
         # Dynamic token budget
         if len(low.split()) <= 3 and not any(w in low for w in ("code", "write", "create", "explain")):
             max_tokens = _env_int("NEURON_CHAT_SHORT_MAX_TOKENS", 32, minimum=16, maximum=128)
-        elif any(w in low for w in ("code", "program", "script", "algorithm", "implement", "function", "class")):
+        elif re.search(r"\b(code|program|script|algorithm|implement|function|class)\b", low):
             max_tokens = 800   # Code generation → needs room
         else:
             max_tokens = profile.llm.max_tokens_chat
@@ -801,6 +816,7 @@ class MemoryOSAgent:
             return response
         engine = self._get_engine()
         messages = [{"role": "system", "content": build_query_context()}]
+        messages.extend(self._recent_messages(limit=7, max_chars_per_message=600)[:-1])
 
         if results or live_context:
             local_part = (f"Local evidence:\n{evidence}\n\n" if evidence else

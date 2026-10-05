@@ -66,9 +66,7 @@ class TaskExecutor:
         return self._engine
 
     def _get_schemas(self) -> List[Dict]:
-        if self._tool_schemas is None:
-            self._tool_schemas = get_tool_schemas()
-        return self._tool_schemas
+        return self._tool_schemas if self._tool_schemas is not None else get_tool_schemas()
 
     def _select_relevant_schemas(self, goal: str) -> List[Dict]:
         """Select only relevant tool schemas based on the goal.
@@ -77,6 +75,7 @@ class TaskExecutor:
         (2000+ tokens) and causes 60-90 second inference times.
         Selecting 4-6 relevant tools cuts this to ~5-10 seconds.
         """
+        goal = goal.rsplit("Latest user request:\n", 1)[-1]
         keywords = goal.lower()
         all_schemas = self._get_schemas()
 
@@ -104,7 +103,10 @@ class TaskExecutor:
         scored = []
         for schema in all_schemas:
             name = schema.get("function", {}).get("name", "")
-            kw_set = _TOOL_KEYWORDS.get(name, set())
+            kw_set = _TOOL_KEYWORDS.get(name)
+            if kw_set is None:
+                kw_set = set(re.findall(r"\w+", schema.get("function", {}).get("description", "").lower()))
+                kw_set -= {"a", "an", "the", "to", "for", "of", "and", "with", "is"}
             score = sum(1 for kw in kw_set if kw in keywords)
             scored.append((score, schema))
 
@@ -170,6 +172,8 @@ class TaskExecutor:
 
         try:
             result = self._execute_loop(task)
+            if task.steps and not any(step.status == EventStatus.SUCCESS.value for step in task.steps):
+                raise RuntimeError("No requested tool operation succeeded. " + task.steps[-1].output)
             task.complete(result)
             store.insert(AgentEvent(
                 event_type=EventType.TASK_COMPLETED.value,
@@ -216,10 +220,7 @@ class TaskExecutor:
                     temperature=0.3,
                 )
             except Exception as e:
-                # Fallback to plain chat if tool calling fails
-                logger.warning(f"Executor: Native tools failed, falling back: {e}")
-                response = engine.chat(messages=messages, max_tokens=300, temperature=0.3)
-                return response or "I was unable to complete the task."
+                raise RuntimeError(f"Action could not generate a tool call: {e}") from e
 
             elapsed_ms = int((time.time() - t0) * 1000)
 
@@ -228,18 +229,22 @@ class TaskExecutor:
             # Check for tool calls
             tool_calls = result_msg.get("tool_calls")
             content = result_msg.get("content", "")
+            allowed = {schema["function"]["name"] for schema in schemas}
 
             if tool_calls and len(tool_calls) > 0:
-                tc = tool_calls[0]
-                fn = tc.get("function", {})
-                tool_name = fn.get("name", "")
+                conversation.append({"role": "assistant", "content": content or "",
+                                     "tool_calls": tool_calls})
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
 
-                try:
-                    tool_args = json.loads(fn.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    tool_args = parse_arguments(fn.get("arguments", ""))
+                    try:
+                        tool_args = json.loads(fn.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        tool_args = parse_arguments(fn.get("arguments", ""))
 
-                if tool_name and tool_name in ALL_TOOLS:
+                    if tool_name not in allowed:
+                        raise ValueError(f"Tool not exposed for this task: {tool_name}")
                     signature = json.dumps(
                         {"tool": tool_name, "args": tool_args},
                         sort_keys=True,
@@ -260,18 +265,17 @@ class TaskExecutor:
 
                     # Add observation to conversation
                     conversation.append({
-                        "role": "assistant",
-                        "content": content or f"Calling {tool_name}...",
-                    })
-                    conversation.append({
-                        "role": "user",
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", "call_0"),
                         "content": f"[Tool Result: {tool_name}]\n{step_result}",
                     })
-                    continue  # Next turn
+                continue
 
             fallback_call = self._extract_json_tool_call(content)
             if fallback_call:
                 tool_name, tool_args = fallback_call
+                if tool_name not in allowed:
+                    raise ValueError(f"Tool not exposed for this task: {tool_name}")
                 signature = json.dumps(
                     {"tool": tool_name, "args": tool_args},
                     sort_keys=True,
@@ -297,10 +301,17 @@ class TaskExecutor:
 
             # No tool call — this is the final answer
             if content and content.strip():
+                if not seen_tool_calls:
+                    if turn == 0:
+                        conversation.append({"role": "user", "content":
+                            "This is Action mode. Perform the requested operation using a listed tool. "
+                            "If a required path or permission is missing, explain what is needed."})
+                        continue
+                    raise RuntimeError("No tool was executed. Model response: " + content.strip())
                 return content.strip()
 
         # Max turns exhausted
-        return "Completed the available steps. Please check the results."
+        raise RuntimeError("Tool step limit reached before a final answer. Last result: " + last_tool_result)
 
     def _extract_json_tool_call(self, content: str) -> Optional[tuple[str, Dict]]:
         """Parse Qwen-style JSON tool calls emitted as plain text."""

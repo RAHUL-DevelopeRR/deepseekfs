@@ -86,7 +86,7 @@ class MemoryContextStore:
 
         lines: list[str] = []
         total = 0
-        for msg in messages:
+        for msg in reversed(messages):
             role = msg["role"].title()
             mode = msg.get("mode") or "chat"
             content = " ".join(str(msg["content"]).split())
@@ -97,7 +97,7 @@ class MemoryContextStore:
             if total > max_chars:
                 break
             lines.append(line)
-        return "\n".join(lines) if lines else "Prior context was too large to include."
+        return "\n".join(reversed(lines)) if lines else "Prior context was too large to include."
 
     def clear(self) -> None:
         with self._write_lock:

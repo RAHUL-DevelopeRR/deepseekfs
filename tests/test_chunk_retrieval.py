@@ -224,6 +224,7 @@ def test_query_mode_receives_content_and_source_locations(monkeypatch):
     agent = module.MemoryOSAgent.__new__(module.MemoryOSAgent)
     agent._get_engine = lambda: Engine()
     agent._remember = lambda *args: None
+    agent._recent_messages = lambda **kwargs: []
     agent._run_search = lambda query: [
         {
             "path": "C:/report.pdf",
@@ -262,6 +263,7 @@ def test_query_mode_streams_evidence_answer(monkeypatch):
     agent = module.MemoryOSAgent.__new__(module.MemoryOSAgent)
     agent._get_engine = lambda: Engine()
     agent._remember = lambda *args: None
+    agent._recent_messages = lambda **kwargs: []
     agent._run_search = lambda query: [{
         "path": "C:/report.pdf", "name": "report.pdf",
         "text": "Q3 revenue was 987654 dollars.",

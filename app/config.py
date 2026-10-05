@@ -94,7 +94,7 @@ def is_drive_root(path: str | Path) -> bool:
         if re.fullmatch(r"[A-Za-z]:[\\/]*", str(path)):
             return True
         p = Path(path).resolve()
-        if platform.system().lower().startswith("win"):
+        if sys.platform == "win32":
             return bool(p.anchor) and str(p).rstrip("\\/").lower() == p.anchor.rstrip("\\/").lower()
         return p.parent == p
     except Exception:
@@ -128,7 +128,7 @@ def get_user_watch_paths() -> list:
 
     # Windows machines can have redirected/OneDrive profile folders
     # where Path.home() does not match the real content roots.
-    if platform.system().lower().startswith("win"):
+    if sys.platform == "win32":
         user_profile = os.environ.get("USERPROFILE")
         if user_profile:
             up = Path(user_profile)

@@ -105,11 +105,7 @@ class LLMWorkerClient:
             if not ready.get("ok"):
                 raise RuntimeError(f"LLM worker did not start: {ready}")
         except Exception:
-            if self._process is not None and self._process.poll() is None:
-                try:
-                    self._process.terminate()
-                except Exception:
-                    pass
+            self.cancel()
             raise
 
     def _drain_stderr(self, proc) -> None:
@@ -256,6 +252,12 @@ class LLMWorkerClient:
         if proc is not None and proc.poll() is None:
             logger.warning("LLMWorkerClient: cancelling worker process")
             try:
+                if os.name == "nt":
+                    # Windows venv launchers spawn a child interpreter that owns the pipes.
+                    subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/taskkill.exe"),
+                        "/PID", str(proc.pid), "/T", "/F"], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, timeout=3,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
                 proc.terminate()
                 proc.wait(timeout=2)
             except Exception:
@@ -358,7 +360,9 @@ class LLMWorkerClient:
                 "temperature": temperature,
             },
         )
-        return result if isinstance(result, dict) else {"content": format_ai_unavailable(self._load_error)}
+        if not isinstance(result, dict):
+            raise RuntimeError(self._load_error or "Tool generation returned no response")
+        return result
 
     def summarize_file(self, path: str) -> str:
         result = self._request("summarize_file", {"path": path})

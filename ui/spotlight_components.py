@@ -1185,9 +1185,10 @@ class SettingsOverlay(QFrame):
             lambda _index: self._hotkey(shortcut.currentData())
         )
         root.addWidget(shortcut)
-        restart_hint = QLabel("Restart NeuCockpit to apply the shortcut.")
-        restart_hint.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.45); background: transparent;")
-        root.addWidget(restart_hint)
+        self._shortcut_status = QLabel(getattr(svc, "hotkey_status", "Shortcut changes apply immediately. Ctrl+Alt+N is the fallback."))
+        self._shortcut_status.setWordWrap(True)
+        self._shortcut_status.setStyleSheet("font-size: 11px; color: #B8C8FF; background: transparent;")
+        root.addWidget(self._shortcut_status)
         root.addStretch()
 
     def _add(self):
@@ -1203,6 +1204,7 @@ class SettingsOverlay(QFrame):
 
     def _hotkey(self, value):
         c = self._svc.get_config(); c["hotkey"] = value; self._svc.save_config(c)
+        self._shortcut_status.setText(getattr(self._svc, "hotkey_status", "Shortcut changes apply immediately. Ctrl+Alt+N is the fallback."))
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

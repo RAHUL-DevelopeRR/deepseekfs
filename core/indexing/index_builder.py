@@ -6,8 +6,14 @@ Singleton pattern so ALL modules share ONE index.
 - open_count / last_opened tracking for access-frequency scoring
 """
 
-import faiss
+import os
+import sys
 import numpy as np
+if sys.platform == "win32" and "FAISS_OPT_LEVEL" not in os.environ:
+    # FAISS's SVE probe calls Windows WMI even on x64; use its NumPy CPU probe instead.
+    from numpy._core._multiarray_umath import __cpu_features__
+    os.environ["FAISS_OPT_LEVEL"] = "AVX2" if __cpu_features__.get("AVX2") else "generic"
+import faiss
 import sqlite3
 import threading
 import time
@@ -26,6 +32,7 @@ from core.ingestion.chunks import (
     PARSER_VERSION,
     VIDEO_EXTENSIONS,
     MAX_CONTENT_BYTES,
+    MAX_CHUNKS,
 )
 
 FOLDER_EXTENSION = "[folder]"
@@ -473,6 +480,10 @@ class IndexBuilder:
                     truncated = False
                 else:
                     chunks, truncated = parse_chunks(str(path))
+                if hasattr(self.embedder, "split_chunks"):
+                    chunks = self.embedder.split_chunks(chunks)
+                    if len(chunks) > MAX_CHUNKS:
+                        chunks, truncated = chunks[:MAX_CHUNKS], True
                 vectors = []
                 for start in range(0, len(chunks), 8):
                     vectors.extend(

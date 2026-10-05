@@ -30,7 +30,7 @@ def _windows_local_appdata() -> Path:
 
 
 def get_platform_profile() -> PlatformProfile:
-    system = platform.system() or sys.platform
+    system = "Windows" if sys.platform == "win32" else platform.system() or sys.platform
     low = system.lower()
     home = Path.home()
 
@@ -49,7 +49,8 @@ def get_platform_profile() -> PlatformProfile:
 
     return PlatformProfile(
         system=system,
-        machine=platform.machine(),
+        machine=(os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE", "unknown"))
+            if sys.platform == "win32" else platform.machine(),
         python=platform.python_version(),
         home=str(home),
         config_dir=str(root / "config"),
@@ -62,7 +63,7 @@ def get_platform_profile() -> PlatformProfile:
 
 
 def is_windows_10_or_newer() -> bool:
-    if platform.system() != "Windows":
+    if sys.platform != "win32":
         return False
     try:
         return sys.getwindowsversion().major >= 10

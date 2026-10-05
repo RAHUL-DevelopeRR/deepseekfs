@@ -181,8 +181,12 @@ class _OnnxBgeEmbedder:
         options.inter_op_num_threads = 1
         self.session = ort.InferenceSession(str(model_path), sess_options=options, providers=["CPUExecutionProvider"])
         self.tokenizer = Tokenizer.from_file(str(tokenizer_dir / "tokenizer.json"))
+        self.chunk_tokenizer = Tokenizer.from_str(self.tokenizer.to_str())
+        self.chunk_tokenizer.no_truncation()
+        self.chunk_tokenizer.no_padding()
+        self.max_tokens = max(16, min(512, int(os.getenv("NEURON_EMBEDDING_MAX_TOKENS", "512"))))
         self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
-        self.tokenizer.enable_truncation(max_length=int(os.getenv("NEURON_EMBEDDING_MAX_TOKENS", "512")))
+        self.tokenizer.enable_truncation(max_length=self.max_tokens)
         self.input_names = [i.name for i in self.session.get_inputs()]
         self.dim = config.EMBEDDING_DIM
 
@@ -318,6 +322,35 @@ class Embedder:
 
     def encode_single(self, text: str) -> np.ndarray:
         return self.encode([text])[0]
+
+    def split_chunks(self, chunks):
+        """Keep every source span within BGE's token limit before embedding."""
+        backend = self._backend
+        tokenizer = getattr(backend, "chunk_tokenizer", None)
+        if tokenizer is None:
+            return chunks
+        capacity = backend.max_tokens - 2  # CLS and SEP.
+        output = []
+        with self._encode_lock:
+            for chunk in chunks:
+                text = chunk["text"]
+                offsets = tokenizer.encode(text, add_special_tokens=False).offsets
+                if len(offsets) <= capacity:
+                    output.append(chunk)
+                    continue
+                start = 0
+                while start < len(offsets):
+                    stop = min(start + capacity, len(offsets))
+                    first = 0 if start == 0 else offsets[start][0]
+                    last = len(text) if stop == len(offsets) else offsets[stop][0]
+                    part = dict(chunk, text=text[first:last])
+                    part["offset_start"] = chunk.get("offset_start", 0) + first
+                    part["offset_end"] = chunk.get("offset_start", 0) + last
+                    output.append(part)
+                    if stop == len(offsets):
+                        break
+                    start = stop - min(32, capacity // 4)
+        return output
 
 
 _embedder_instance: Embedder | None = None

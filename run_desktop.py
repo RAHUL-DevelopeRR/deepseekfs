@@ -120,6 +120,12 @@ def main():
     app.setApplicationVersion("1.0.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
+    from services.desktop_instance import DesktopInstance
+    instance = DesktopInstance()
+    if not instance.acquire():
+        logger.info("Desktop: existing instance activated; secondary launcher exits")
+        return
+    app.aboutToQuit.connect(instance.close)
     app.aboutToQuit.connect(lambda: logger.info("Desktop: QApplication aboutToQuit emitted"))
     app.lastWindowClosed.connect(lambda: logger.info("Desktop: QApplication lastWindowClosed emitted"))
     hotkeys = GlobalHotkeyManager(app)
@@ -193,6 +199,7 @@ def main():
     from ui.spotlight_panel import SpotlightPanel
 
     panel = SpotlightPanel(service)
+    instance.activated.connect(panel._show)
 
     # ── 6. Poll until service is ready, then close splash ──
     def _check_ready():
@@ -207,11 +214,14 @@ def main():
     QTimer.singleShot(300, _check_ready)
 
     # ── 7. Register global hotkey ──
-    panel_hotkey_ok = False
-    for spec in get_panel_hotkey_specs(config.UserConfig.load().get("hotkey")):
-        panel_hotkey_ok |= hotkeys.register(spec, panel.toggle_from_hotkey)
-    if not panel_hotkey_ok:
-        logger.warning("Panel hotkeys unavailable; tray menu remains available.")
+    def apply_panel_hotkey(cfg):
+        hotkeys.set_panel_shortcut(cfg.get("hotkey"), panel.toggle_from_hotkey)
+        service.hotkey_status = (
+            "Active shortcuts: " + ", ".join(hotkeys.registered_labels)
+            if hotkeys.registered_labels else "Global shortcuts unavailable. Open NeuCockpit from the tray."
+        )
+    apply_panel_hotkey(config.UserConfig.load())
+    service.on_config_changed = apply_panel_hotkey
 
     # ── 8. Register Research Overlay hotkey (Ctrl+Shift+R) ──
     _overlay = None

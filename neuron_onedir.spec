@@ -3,8 +3,7 @@
 NeuCockpit v1.0 - PyInstaller --onedir spec (BGE ONNX)
 ===============================================
 Bundles the desktop app with ONNX Runtime for neural embeddings.
-No PyTorch/torch dependency — uses the same MiniLM model exported
-to ONNX format for identical search quality without DLL conflicts.
+Uses the bundled BGE Small ONNX model without a PyTorch dependency.
 
 Build:
     pyinstaller neuron_onedir.spec --noconfirm
@@ -44,6 +43,7 @@ datas = [
     # Headless command surface
     ('neufs.py', '.'),
     ('neufs.cmd', '.'),
+    ('storage/intent_examples.json', 'storage'),
 ]
 
 # Product builds bundle the primary Qwen 2.5 Coder 1.5B GGUF so MemoryOS works
