@@ -30,11 +30,14 @@ Folders contain listing metadata, not every descendant's document contents. Desc
 
 - Latest focused run: **63 tests passed**, including native Windows event ownership/activation, modifier-held shortcut rearming, persistent history, multi-call execution, denial handling, permissions and retrieval.
 - Source compilation and whitespace checks passed.
+- Full local suite after the fixes: **259 passed, 2 skipped in 33.33 seconds**. The previous timing failures cleared when the competing workload ended and cancellation timing excluded interpreter startup.
+- Windows, Linux and macOS each passed the 68-test CI regression set.
 - A read-only installed-index audit found BGE ONNX active, SQLite integrity `ok`, 297 file/folder records, 538 valid normalized vectors and 256 records still pending chunk migration. No document contents were printed or uploaded. These counts are a point-in-time snapshot.
-- The real local model recalled the synthetic project name `Atlas` after reopening the conversation store. Actual BGE produced valid vectors and retrieved a synthetic deployment note.
-- The real Action loop timed out locally. CPU usage measured 99.7%, with approximately 80% RAM used. This is a failed performance verification, not proof that the new tool loop works end to end.
-- Full local suite at the time of review: 255 passed, 2 skipped, 2 timing failures (cold CLI inference and worker deadline including interpreter startup). Cancellation is now timed after worker startup; its focused regression passes. Cold CLI performance still needs a clean run.
+- The actual local BGE/Qwen flow check passed: normalized token-bounded embeddings, synthetic document retrieval, persisted `Atlas` recall, model-selected `folder_list` and model-selected `file_write` with the written file verified.
+- The first Action probe exposed unrelated follow-up calls caused by unconditional code-writing instructions. Scoping those instructions to coding requests and asking the model to stop after success corrected that run; permission checks blocked the unrelated write during the failed probe.
+- Qwen loaded in 3.2 seconds and persisted recall took 1.53 seconds with lower CPU load. Action listing took approximately 59 seconds and file writing 70 seconds across two model turns each. These actions are functional but not fast. Earlier runs at 99.7% CPU timed out; no universal latency guarantee is made.
 - A manual CI job runs the actual bundled BGE/Qwen models against synthetic chat, listing and file-writing tasks. Publication of replacement binaries remains gated on that check.
+- Each release package must also complete a model-driven folder listing with successful tool and task events in its isolated SQLite log, in addition to the existing offline BGE, Qwen and streaming checks.
 - Native UI automation initialization failed with `failed to write kernel assets: The system cannot find the path specified (os error 3)`. No physical shortcut or complete desktop click-through is claimed.
 
 Anti-slop after-development audit: changes preserve the existing desktop design. The new shortcut status uses the existing pale blue accent to make successful registration and failure legible. Functional regression evidence is recorded above; full visual acceptance remains unverified.
