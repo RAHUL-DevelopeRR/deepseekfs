@@ -896,7 +896,10 @@ class MemoryOSAgent:
     def _action_mode(self, user_message: str) -> str:
         """Create and execute a task with the TaskExecutor."""
         self._remember("user", user_message, "action")
-        context = self._context_block(limit=14, max_chars=6500)
+        # Leave space in the small local model's 2,048-token window for tool
+        # schemas and the current request. Code follow-ups fetch their artifact
+        # separately below, so Action only needs a short recent conversation.
+        context = self._context_block(limit=6, max_chars=1200)
         contextual_goal = (
             "Use the recent MemoryOS context to resolve pronouns and follow-up "
             "requests. If the latest request says save/run/alter 'it' or 'the "

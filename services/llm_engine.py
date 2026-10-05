@@ -449,16 +449,16 @@ class LLMEngine:
             if not fitted or fitted[-1].get('role') == 'system':
                 raise ValueError('System instructions exceed the model context budget')
             original = fitted[-1].get('content') or ''
-            marker = '\n[Input truncated to context budget; omitted evidence is unavailable.]'
+            marker = '[Earlier input omitted to fit the model context budget.]\n'
             low, high = 0, len(original)
             while low < high:
                 middle = (low + high + 1) // 2
-                fitted[-1]['content'] = original[:middle] + marker
+                fitted[-1]['content'] = marker + original[-middle:] if middle else marker
                 if count_tokens() <= budget:
                     low = middle
                 else:
                     high = middle - 1
-            fitted[-1]['content'] = original[:low] + marker
+            fitted[-1]['content'] = marker + original[-low:] if low else marker
             if count_tokens() > budget:
                 raise ValueError('System instructions exceed the model context budget')
         return fitted, max_tokens
