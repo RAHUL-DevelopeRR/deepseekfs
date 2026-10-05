@@ -8,7 +8,7 @@ def tool_messages(messages, tools):
     instruction = '\n# Tools\nYou may call the following functions:\n<tools>\n' + schemas + '\n</tools>\n'
     if len(tools) == 1:
         instruction += (
-            'Call the listed function. Output only its JSON arguments inside one '
+            'When an operation is needed, call the listed function. Output only its JSON arguments inside one '
             '<tool_call></tool_call> block; omit the function name and wrapper. '
             'Example: <tool_call>{"path":"/absolute/path"}</tool_call>. '
         )
@@ -17,7 +17,11 @@ def tool_messages(messages, tools):
             'For each function call return a JSON object inside <tool_call></tool_call> tags: '
             '<tool_call>{"name":"function_name","arguments":{"argument":"value"}}</tool_call>. '
         )
-    instruction += 'Use only listed functions. Never claim success without a successful tool result.'
+    instruction += (
+        'Use only listed functions. Never claim success without a successful tool result. '
+        'After the requested operations succeed, answer in plain text using the tool results. '
+        'Do not repeat completed operations.'
+    )
     fitted = [dict(message) for message in messages]
     if fitted and fitted[0].get("role") == "system":
         fitted[0]["content"] = (fitted[0].get("content") or "") + instruction
