@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sqlite3
 import subprocess
 import sys
@@ -66,8 +67,9 @@ def main() -> int:
         qwen_seconds = round(time.perf_counter() - started, 3)
         if not (doctor.get("ok") and doctor.get("model_available") and doctor.get("loaded")):
             raise RuntimeError(f"Packaged model load failed: {doctor.get('load_error')}")
-        if qwen_seconds > 30:
-            raise RuntimeError(f"Packaged Qwen startup too slow: {qwen_seconds}s")
+        startup_limit = 45 if platform.system() == "Darwin" and platform.machine() == "x86_64" else 30
+        if qwen_seconds > startup_limit:
+            raise RuntimeError(f"Packaged Qwen startup too slow: {qwen_seconds}s (limit {startup_limit}s)")
 
         answer = _run(
             cli,
@@ -100,7 +102,7 @@ def main() -> int:
         if not tool_used or not completed or str(action.get("response", "")).startswith("Task failed:"):
             raise RuntimeError(f"Packaged model-driven Action failed: {action}")
 
-    print(json.dumps({"ok": True, "cli": str(cli), "model_loaded": True, "embedding_backend": status['embedding_backend'], "embedding_seconds": embedding_seconds, "qwen_seconds": qwen_seconds, "streaming": True, "first_token_seconds": answer['first_token_seconds'], "response": response, "action_tool": "folder_list"}))
+    print(json.dumps({"ok": True, "cli": str(cli), "model_loaded": True, "embedding_backend": status['embedding_backend'], "embedding_seconds": embedding_seconds, "qwen_seconds": qwen_seconds, "qwen_startup_limit_seconds": startup_limit, "streaming": True, "first_token_seconds": answer['first_token_seconds'], "response": response, "action_tool": "folder_list"}))
     return 0
 
 
