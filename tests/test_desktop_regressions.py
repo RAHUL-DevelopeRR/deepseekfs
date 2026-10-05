@@ -82,9 +82,15 @@ def test_tool_protocol_exposes_schemas_and_observations():
     from services.tool_protocol import tool_messages, tool_response
     schema = {"type": "function", "function": {"name": "folder_list", "parameters": {"type": "object"}}}
     response = tool_response('<tool_call>{"name":"folder_list","arguments":{"path":"C:/test"}}</tool_call>', [schema])
+    compact = tool_response('<tool_call>{"path":"C:/test"}</tool_call>', [schema])
+    fenced = tool_response('```json\n{"path":"C:/test"}\n```', [schema])
     messages = tool_messages([{"role": "system", "content": "Do the task"},
         {"role": "assistant", **response}, {"role": "tool", "content": "found notes.txt"}], [schema])
     assert '"name": "folder_list"' in messages[0]["content"]
+    assert compact["tool_calls"][0]["function"]["name"] == "folder_list"
+    assert json.loads(compact["tool_calls"][0]["function"]["arguments"]) == {"path": "C:/test"}
+    assert fenced["content"] == ""
+    assert json.loads(fenced["tool_calls"][0]["function"]["arguments"]) == {"path": "C:/test"}
     assert '<tool_response>\nfound notes.txt' in messages[-1]["content"]
     assert "tool_calls" not in messages[1]
     assert response["tool_calls"]  # Input not mutated.
