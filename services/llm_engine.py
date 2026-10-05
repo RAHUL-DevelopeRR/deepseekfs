@@ -449,7 +449,7 @@ class LLMEngine:
             if not fitted or fitted[-1].get('role') == 'system':
                 raise ValueError('System instructions exceed the model context budget')
             original = fitted[-1].get('content') or ''
-            marker = '[Earlier input omitted to fit the model context budget.]\n'
+            marker = '[Earlier input omitted to fit the model context budget.] '
             low, high = 0, len(original)
             while low < high:
                 middle = (low + high + 1) // 2
