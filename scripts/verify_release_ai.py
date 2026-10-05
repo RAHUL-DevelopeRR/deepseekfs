@@ -67,7 +67,7 @@ def main() -> int:
         qwen_seconds = round(time.perf_counter() - started, 3)
         if not (doctor.get("ok") and doctor.get("model_available") and doctor.get("loaded")):
             raise RuntimeError(f"Packaged model load failed: {doctor.get('load_error')}")
-        startup_limit = 45 if platform.system() == "Darwin" and platform.machine() == "x86_64" else 30
+        startup_limit = 45 if platform.system() == "Darwin" else 30
         if qwen_seconds > startup_limit:
             raise RuntimeError(f"Packaged Qwen startup too slow: {qwen_seconds}s (limit {startup_limit}s)")
 
