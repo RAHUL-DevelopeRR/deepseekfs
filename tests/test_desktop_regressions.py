@@ -121,6 +121,36 @@ def test_action_executes_all_tool_calls_and_feeds_results(monkeypatch, tmp_path)
     assert len(calls) == 2
 
 
+def test_action_returns_after_single_tool_operation_succeeds(monkeypatch):
+    from services.agent.executor import TaskExecutor
+    from services.agent.task import Task
+
+    calls = []
+
+    class Engine:
+        def chat_with_tools(self, messages, tools, **kwargs):
+            calls.append(tools)
+            return {"content": "", "tool_calls": [{"id": "call_0", "function": {
+                "name": "folder_list", "arguments": json.dumps({"path": "C:/Users/example/Documents"})}}]}
+
+    executor = TaskExecutor(Engine())
+
+    def execute(task, name, args):
+        step = task.add_step(name, f"Calling {name}", **args)
+        step.status = "success"
+        step.output = "notes.txt"
+        return "[OK] notes.txt"
+
+    monkeypatch.setattr(executor, "_execute_tool_step", execute)
+    task = Task("List files in this folder: C:/Users/example/Documents")
+    result = executor.run(task)
+
+    assert task.status == "completed"
+    assert len(calls) == 1
+    assert [tool["function"]["name"] for tool in calls[0]] == ["folder_list"]
+    assert result == "notes.txt"
+
+
 def test_denied_code_write_never_runs_or_claims_saved(tmp_path, monkeypatch):
     from pathlib import Path
     from services.memory_os import MemoryOSAgent

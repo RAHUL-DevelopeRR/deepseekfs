@@ -43,6 +43,32 @@ def test_action_mode_includes_persistent_context(tmp_path):
     assert "Latest user request:\nreview the previous program" in captured["goal"]
 
 
+def test_action_mode_omits_context_for_self_contained_request(tmp_path):
+    from services.memory_os import MemoryOSAgent
+
+    captured = {}
+
+    class FakeExecutor:
+        on_step = None
+        on_thinking = None
+        on_confirmation = None
+
+        def run(self, task):
+            captured["goal"] = task.goal
+            return "done"
+
+    agent = MemoryOSAgent()
+    agent._memory = MemoryContextStore(str(tmp_path / "memory.db"))
+    agent._conversation = []
+    agent._executor = FakeExecutor()
+    agent._remember("assistant", "old unrelated project details", "chat")
+
+    assert agent._action_mode("list files in this folder: C:/Users/example/Documents") == "done"
+    assert "Latest user request:\nlist files in this folder:" in captured["goal"]
+    assert "Recent MemoryOS context" not in captured["goal"]
+    assert "old unrelated project details" not in captured["goal"]
+
+
 def test_action_mode_saves_and_runs_latest_code_block(tmp_path, monkeypatch):
     from services.memory_os import MemoryOSAgent
 

@@ -80,7 +80,7 @@ def test_dangerous_tool_is_blocked_even_with_confirmation(tmp_path):
     assert task.steps[0].status == "blocked"
 
 
-def test_repeated_tool_call_does_not_prompt_twice(tmp_path):
+def test_successful_single_tool_action_does_not_prompt_twice(tmp_path):
     target = tmp_path / "created-once.txt"
 
     class RepeatingEngine:
@@ -108,6 +108,6 @@ def test_repeated_tool_call_does_not_prompt_twice(tmp_path):
 
     result = executor.run(task)
 
-    assert "repeated file_write" in result
+    assert result.startswith("Created ")
     assert len(approvals) == 1
     assert target.read_text(encoding="utf-8") == "hello"

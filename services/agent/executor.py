@@ -73,7 +73,7 @@ class TaskExecutor:
         
         Sending all schemas to a small local model creates a massive prompt
         (2000+ tokens) and causes 60-90 second inference times.
-        Selecting 4-6 relevant tools cuts this to ~5-10 seconds.
+        Selecting only matching tools keeps the schema prefill small for local models.
         """
         goal = goal.rsplit("Latest user request:\n", 1)[-1]
         keywords = goal.lower()
@@ -85,7 +85,7 @@ class TaskExecutor:
             "file_write":      {"write", "create", "save", "make", "give", "code", "program", "project"},
             "file_edit":       {"edit", "modify", "change", "update", "alter", "insert"},
             "file_delete":     {"delete", "remove", "trash", "erase"},
-            "folder_create":   {"folder", "directory", "mkdir", "create folder"},
+            "folder_create":   {"mkdir", "create folder", "new folder", "create directory"},
             "folder_list":     {"list", "dir", "folder", "what's in", "show folder"},
             "folder_search":   {"search", "find", "locate", "where"},
             "folder_organize": {"organize", "sort", "clean", "arrange"},
@@ -107,15 +107,17 @@ class TaskExecutor:
             if kw_set is None:
                 kw_set = set(re.findall(r"\w+", schema.get("function", {}).get("description", "").lower()))
                 kw_set -= {"a", "an", "the", "to", "for", "of", "and", "with", "is"}
-            score = sum(1 for kw in kw_set if kw in keywords)
+            score = sum(
+                1 for kw in kw_set
+                if re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", keywords)
+            )
             scored.append((score, schema))
 
         # Sort by relevance, keep only tools that actually matched. Including
         # zero-score write/delete tools confuses small local models.
         scored.sort(key=lambda x: x[0], reverse=True)
-        selected = [s for score, s in scored if score > 0][:5]
+        selected = [s for score, s in scored if score > 0][:3]
 
-        # Always include safe read/list fallbacks for navigation context.
         names = {s.get("function", {}).get("name") for s in selected}
         if self._looks_like_coding_agent_goal(goal):
             for coding_tool in ["file_write", "file_edit", "file_read", "glob", "powershell_session", "shell"]:
@@ -126,8 +128,9 @@ class TaskExecutor:
                             names.add(coding_tool)
                             break
 
-        for fallback in ["folder_list", "file_read", "glob"]:
-            if fallback not in names:
+        # A fallback is useful only when the request matched no tool at all.
+        if not selected:
+            for fallback in ["folder_list", "file_read", "glob"]:
                 for s in all_schemas:
                     if s.get("function", {}).get("name") == fallback:
                         selected.append(s)
@@ -235,6 +238,7 @@ class TaskExecutor:
             if tool_calls and len(tool_calls) > 0:
                 conversation.append({"role": "assistant", "content": content or "",
                                      "tool_calls": tool_calls})
+                turn_step_start = len(task.steps)
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     tool_name = fn.get("name", "")
@@ -270,6 +274,11 @@ class TaskExecutor:
                         "tool_call_id": tc.get("id", "call_0"),
                         "content": f"[Tool Result: {tool_name}]\n{step_result}",
                     })
+                completed_steps = task.steps[turn_step_start:]
+                if (len(schemas) == 1 and completed_steps and all(
+                    step.status == EventStatus.SUCCESS.value for step in completed_steps
+                )):
+                    return "\n\n".join(step.output for step in completed_steps)
                 continue
 
             fallback_call = self._extract_json_tool_call(content)

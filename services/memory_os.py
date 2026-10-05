@@ -896,18 +896,25 @@ class MemoryOSAgent:
     def _action_mode(self, user_message: str) -> str:
         """Create and execute a task with the TaskExecutor."""
         self._remember("user", user_message, "action")
-        # Leave space in the small local model's 2,048-token window for tool
-        # schemas and the current request. Code follow-ups fetch their artifact
-        # separately below, so Action only needs a short recent conversation.
-        context = self._context_block(limit=6, max_chars=1200)
-        contextual_goal = (
-            "Use the recent MemoryOS context to resolve pronouns and follow-up "
-            "requests. If the latest request says save/run/alter 'it' or 'the "
-            "program', use the most recent code or artifact from context.\n\n"
-            f"Recent MemoryOS context:\n{context}\n\n"
-            f"Latest user request:\n{user_message}"
+        references_context = re.search(
+            r"\b(it|that|those|them|same|previous|prior|earlier|above|again|"
+            r"continue|last|the (?:file|folder|program|code|result|one)|"
+            r"this (?:code|program|file|result|one))\b",
+            user_message,
+            re.IGNORECASE,
         )
-        task = Task(goal=contextual_goal, mode="action")
+        if references_context:
+            # Keep recent context for follow-ups, but don't spend prompt tokens
+            # on unrelated turns when the request is self-contained.
+            context = self._context_block(limit=6, max_chars=1200)
+            goal = (
+                "Use recent context only to resolve the follow-up request.\n\n"
+                f"Recent MemoryOS context:\n{context}\n\n"
+                f"Latest user request:\n{user_message}"
+            )
+        else:
+            goal = f"Latest user request:\n{user_message}"
+        task = Task(goal=goal, mode="action")
         queue = get_task_queue()
         queue.enqueue(task)
 
