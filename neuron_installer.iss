@@ -85,6 +85,10 @@ Name: "runonstartup"; Description: "Launch NeuCockpit on Windows startup"; Group
 ; ── PyInstaller --onedir output (ENTIRE self-contained app) ──
 Source: "{#MyBundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Python prefers version-tagged extensions over the new generic bundled binary.
+Type: files; Name: "{app}\_internal\tokenizers\*.pyd"
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "Rahul.NeuCockpit.Desktop.1.0"
 Name: "{group}\neufs command"; Filename: "{app}\{#MyCliExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
