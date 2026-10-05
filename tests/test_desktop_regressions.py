@@ -127,7 +127,7 @@ def test_action_executes_all_tool_calls_and_feeds_results(monkeypatch, tmp_path)
     assert len(calls) == 2
 
 
-def test_action_returns_after_single_tool_operation_succeeds(monkeypatch):
+def test_action_continues_after_one_tool_when_request_needs_two_steps(monkeypatch):
     from services.agent.executor import TaskExecutor
     from services.agent.task import Task
 
@@ -136,8 +136,11 @@ def test_action_returns_after_single_tool_operation_succeeds(monkeypatch):
     class Engine:
         def chat_with_tools(self, messages, tools, **kwargs):
             calls.append(tools)
-            return {"content": "", "tool_calls": [{"id": "call_0", "function": {
-                "name": "folder_list", "arguments": json.dumps({"path": "C:/Users/example/Documents"})}}]}
+            if len(calls) == 3:
+                assert len([m for m in messages if m["role"] == "tool"]) == 2
+                return {"content": "Both folders contain notes.txt"}
+            return {"content": "", "tool_calls": [{"id": str(len(calls)), "function": {
+                "name": "folder_list", "arguments": json.dumps({"path": f"C:/example/{len(calls)}"})}}]}
 
     executor = TaskExecutor(Engine())
 
@@ -148,13 +151,14 @@ def test_action_returns_after_single_tool_operation_succeeds(monkeypatch):
         return "[OK] notes.txt"
 
     monkeypatch.setattr(executor, "_execute_tool_step", execute)
-    task = Task("List files in this folder: C:/Users/example/Documents")
+    task = Task("List C:/example/1 then C:/example/2 and compare the filenames")
     result = executor.run(task)
 
     assert task.status == "completed"
-    assert len(calls) == 1
+    assert len(calls) == 3
+    assert len(task.steps) == 2
     assert [tool["function"]["name"] for tool in calls[0]] == ["folder_list"]
-    assert result == "notes.txt"
+    assert result == "Both folders contain notes.txt"
 
 
 def test_denied_code_write_never_runs_or_claims_saved(tmp_path, monkeypatch):

@@ -238,7 +238,6 @@ class TaskExecutor:
             if tool_calls and len(tool_calls) > 0:
                 conversation.append({"role": "assistant", "content": content or "",
                                      "tool_calls": tool_calls})
-                turn_step_start = len(task.steps)
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     tool_name = fn.get("name", "")
@@ -274,11 +273,6 @@ class TaskExecutor:
                         "tool_call_id": tc.get("id", "call_0"),
                         "content": f"[Tool Result: {tool_name}]\n{step_result}",
                     })
-                completed_steps = task.steps[turn_step_start:]
-                if (len(schemas) == 1 and completed_steps and all(
-                    step.status == EventStatus.SUCCESS.value for step in completed_steps
-                )):
-                    return "\n\n".join(step.output for step in completed_steps)
                 continue
 
             fallback_call = self._extract_json_tool_call(content)
