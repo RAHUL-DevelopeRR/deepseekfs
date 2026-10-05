@@ -108,6 +108,7 @@ def test_successful_single_tool_action_does_not_prompt_twice(tmp_path):
 
     result = executor.run(task)
 
-    assert result.startswith("Created ")
+    assert "Stopped after repeated file_write request" in result
+    assert "Created " in result
     assert len(approvals) == 1
     assert target.read_text(encoding="utf-8") == "hello"
