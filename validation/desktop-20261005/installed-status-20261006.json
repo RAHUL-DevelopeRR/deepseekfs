@@ -10,6 +10,7 @@
   "installer_exit_code": 0,
   "installation_completed_ist": "2026-10-06T09:23:06+05:30",
   "restart_required": false,
+  "installed_desktop_startup_smoke": "passed; exit code 0",
   "installed_cpu_backend": "ggml-cpu-haswell.dll",
   "bge_onnx_loaded": true,
   "qwen_model_load_log_seconds": [7.0, 12.1, 13.7],
