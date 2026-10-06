@@ -1,0 +1,22 @@
+{
+  "checked_date_ist": "2026-10-06",
+  "release": "v1.0.0-build-202610051619",
+  "source_commit": "4e3d5a635fd42b28046e6f9f37e3817894851cfd",
+  "workflow": "37337296495",
+  "build_status": "completed",
+  "build_conclusion": "success",
+  "native_packages_passed_ci": 6,
+  "installer_checksum_verified": true,
+  "installer_exit_code": 0,
+  "installation_completed_ist": "2026-10-06T09:23:06+05:30",
+  "restart_required": false,
+  "installed_cpu_backend": "ggml-cpu-haswell.dll",
+  "bge_onnx_loaded": true,
+  "qwen_model_load_log_seconds": [7.0, 12.1, 13.7],
+  "streaming_response": "AI MODE OK",
+  "engine_first_token_seconds": 43.81,
+  "engine_generation_seconds": 46.98,
+  "action_folder_list": "failed: worker response timed out before tool call",
+  "local_performance_resolved": false,
+  "website_download_endpoints_http_200": 6
+}
