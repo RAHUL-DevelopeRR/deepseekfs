@@ -1,0 +1,13 @@
+Subject: NeuCockpit — private file search and local AI for your team
+
+Hello {company} team,
+
+I found {company} through {source}. I thought NeuCockpit might be useful for a team working with code and documents: it searches local files by meaning and summarizes them with AI running on the computer. It has Windows, macOS, and Linux builds.
+
+The 20-second film and download links are at https://www.zero-x.live/ and https://www.zero-x.live/neuron.html.
+
+This is a product introduction from ZeroX. If you do not want further marketing email from us, reply with "unsubscribe" and we will honor that request.
+
+Rahul S
+ZeroX
+{full postal address required before sending}

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=1920, height=1080">
+  <title>NeuCockpit launch</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#090B10;color:#FFFFFF;font-family:system-ui,sans-serif}
+    #root{position:relative;width:100%;height:100%;overflow:hidden;background:#090B10}.clip{position:absolute;inset:0;overflow:hidden}
+    .grid{position:absolute;inset:0;opacity:.13;background-image:linear-gradient(rgba(0,229,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,.07) 1px,transparent 1px);background-size:98px 98px}
+    .glow{position:absolute;width:850px;height:850px;border-radius:50%;background:radial-gradient(circle,rgba(0,229,255,.12),transparent 65%);left:1090px;top:80px}
+    .eyebrow{position:absolute;left:110px;top:56px;color:#00E5FF;letter-spacing:.23em;text-transform:uppercase;font-size:23px;font-weight:750}
+    .counter{position:absolute;right:110px;top:56px;font-size:22px;letter-spacing:.18em;color:#B9C2CE}
+    .rule{position:absolute;left:110px;right:110px;top:117px;height:2px;background:linear-gradient(90deg,#00E5FF,rgba(124,77,255,.45),transparent)}
+    .hook{position:absolute;left:110px;top:282px;width:1540px;font-size:132px;line-height:1.05;font-weight:820;letter-spacing:-.06em}.cyan{color:#00E5FF}
+    .cursor{display:inline-block;width:17px;height:100px;margin-left:18px;background:#00E5FF;vertical-align:-13px}
+    .hook-sub{position:absolute;left:114px;top:652px;font-size:34px;color:#B9C2CE}.small-bottom{position:absolute;left:110px;bottom:75px;color:#A9B6C3;font-size:22px;letter-spacing:.2em}
+    .stage-title{position:absolute;left:110px;top:196px;width:510px;font-size:73px;line-height:1.08;font-weight:800;letter-spacing:-.05em}
+    .stage-sub{position:absolute;left:110px;top:418px;width:500px;font-size:30px;line-height:1.43;color:#B9C2CE}
+    .window{position:absolute;left:670px;top:180px;width:1130px;height:730px;border:2px solid #4C5E6B;border-radius:29px;background:#16191E;box-shadow:0 42px 140px rgba(0,0,0,.62),0 0 90px rgba(0,229,255,.13);overflow:hidden}
+    .win-top{height:90px;display:flex;align-items:center;gap:15px;padding:0 31px;border-bottom:2px solid #303740;background:#1D2228}.dot{width:15px;height:15px;border-radius:50%;background:#50616B}.dot:first-child{background:#00E5FF}
+    .win-title{margin-left:26px;font-size:27px;font-weight:700}.pill{margin-left:auto;padding:10px 19px;border:2px solid rgba(0,229,255,.55);border-radius:99px;color:#88F1FB;font-size:19px;letter-spacing:.08em}
+    .search{position:relative;height:82px;margin:32px 34px 21px;border:2px solid #53636F;border-radius:17px;background:#242B32;display:flex;align-items:center;padding:0 26px;color:#AAB7C0;font-size:30px}
+    .search-icon{font-size:39px;color:#00E5FF;margin-right:19px}.query{position:absolute;left:83px;top:17px;right:15px;height:54px;background:#242B32;color:#F4FCFF;white-space:nowrap;overflow:hidden}
+    .tabs{display:flex;gap:33px;margin:0 36px 24px;padding-bottom:18px;border-bottom:2px solid #343C45;color:#AAB8C1;font-size:24px}.tabs span:first-child{color:#00E5FF;font-weight:700}
+    .list-head{display:flex;justify-content:space-between;margin:0 42px 16px;color:#AAB8C1;font-size:19px;text-transform:uppercase;letter-spacing:.15em}
+    .result{display:flex;align-items:center;gap:25px;margin:0 29px 14px;height:92px;padding:0 25px;border:2px solid #3B464E;border-radius:15px;background:#20272D}.selected{background:#123F54;border-color:#00C9E4}
+    .file-icon{display:grid;place-items:center;width:54px;height:59px;border:2px solid #36AEC1;border-radius:9px;color:#A2F5FA;font-size:20px;font-weight:800}
+    .file-main{font-size:27px;font-weight:650}.file-meta{margin-top:5px;color:#AAB8C1;font-size:20px}.arrow{margin-left:auto;color:#8CEAF3;font-size:29px}
+    .win-foot{position:absolute;left:34px;right:34px;bottom:20px;display:flex;justify-content:space-between;color:#ADBCC6;font-size:18px}
+    .demo{position:absolute;right:121px;bottom:61px;font-size:20px;text-transform:uppercase;letter-spacing:.16em;color:#B7CBD1}
+    .step{position:absolute;left:110px;bottom:170px;font-size:34px;font-weight:700}.summary{position:absolute;left:110px;top:565px;width:500px;height:286px;padding:24px 29px;border:2px solid #50C9D3;border-radius:23px;background:#111B22;box-shadow:0 36px 100px rgba(0,0,0,.65),0 0 70px rgba(0,229,255,.22)}
+    .summary-kicker{font-size:17px;letter-spacing:.16em;color:#00E5FF;font-weight:700}.summary-title{margin-top:11px;font-size:33px;font-weight:750;letter-spacing:-.03em}.summary-rule{margin-top:11px;height:2px;background:#405562}
+    .summary-text{margin-top:13px;color:#D0DEE4;font-size:23px;line-height:1.32}.summary-foot{position:absolute;left:29px;bottom:17px;color:#9EEBF1;font-size:17px}
+    .end-tag{position:absolute;left:110px;top:220px;color:#00E5FF;font-size:24px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
+    .end-line{position:absolute;left:110px;top:320px;width:1650px;display:flex;flex-wrap:wrap;gap:25px;font-size:108px;line-height:1.13;letter-spacing:-.055em;font-weight:800}
+    .end-name{position:absolute;left:110px;bottom:117px;font-size:48px;font-weight:800;letter-spacing:-.04em}.end-url{position:absolute;right:110px;bottom:127px;color:#B8C8D0;font-size:30px}
+    .end-bars{position:absolute;right:130px;top:176px;width:400px;height:100px;border-top:3px solid #00E5FF;border-right:3px solid #7C4DFF}
+    /* White typography and restrained neon: keep every supporting label readable. */
+    .counter,.hook-sub,.small-bottom,.stage-sub,.search,.tabs,.list-head,.file-meta,.win-foot,.demo,.summary-text,.end-url{color:#FFFFFF}
+    .window{background:#101318;border-color:#45515B;box-shadow:0 24px 70px rgba(0,0,0,.45),0 0 45px rgba(0,229,255,.08)}
+    .win-top{background:#161B20}.search,.query{background:#1B2127}
+    .result{background:#171D22}.result.selected{background:#15313F}
+    .summary{background:#0E171D;box-shadow:0 24px 60px rgba(0,0,0,.4),0 0 40px rgba(0,229,255,.12)}
+  </style>
+</head>
+<body>
+<div id="root" data-composition-id="neucockpit" data-start="0" data-width="1920" data-height="1080" data-duration="20">
+  <div class="grid"></div><div id="glow" class="glow"></div>
+  <section id="hook-scene" class="clip" data-start="0" data-duration="2.5" data-track-index="0">
+    <div class="eyebrow">ZEROX / NEUCOCKPIT</div><div class="counter">01 / 05</div><div class="rule"></div>
+    <div id="hook" class="hook">Your files know<br><span class="cyan">the answer.</span><span id="cursor" class="cursor"></span></div>
+    <div id="hook-sub" class="hook-sub">Find it without sending your work away.</div><div class="small-bottom">LOCAL FILE INTELLIGENCE</div>
+  </section>
+  <section id="demo-scene" class="clip" data-start="2.5" data-duration="14" data-track-index="0">
+    <div class="eyebrow">NEUCOCKPIT / DESKTOP</div><div class="counter">02 — 04 / 05</div><div class="rule"></div>
+    <div id="stage-title" class="stage-title">Unified File <span class="cyan">Intelligence.</span></div>
+    <div id="stage-sub" class="stage-sub">Search and summarize files by meaning, on your machine.</div>
+    <div id="window" class="window">
+      <div class="win-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="win-title">NeuCockpit</span><span class="pill">ON DEVICE</span></div>
+      <div class="search"><span class="search-icon">⌕</span><span id="query" class="query">quarterly proposal</span></div>
+      <div class="tabs"><span>All</span><span>Files</span><span>Folders</span><span>Code</span><span>Docs</span><span>Media</span></div>
+      <div class="list-head"><span>Matching files</span><span>Local index</span></div>
+      <div id="result1" class="result selected"><span class="file-icon">PDF</span><div><div class="file-main">Quarterly_Project_Proposal.pdf</div><div class="file-meta">Documents / Planning</div></div><span class="arrow">↗</span></div>
+      <div id="result2" class="result"><span class="file-icon">MD</span><div><div class="file-main">Project_notes.md</div><div class="file-meta">Notes / Team</div></div><span class="arrow">↗</span></div>
+      <div id="result3" class="result"><span class="file-icon">DOC</span><div><div class="file-main">Milestone_review.docx</div><div class="file-meta">Documents / Reviews</div></div><span class="arrow">↗</span></div>
+      <div class="win-foot"><span>Semantic search</span><span>Private by default</span></div>
+    </div>
+    <div class="demo">Illustrative demo</div><div id="step1" class="step"><span class="cyan">01</span> &nbsp; Search by meaning</div><div id="step2" class="step"><span class="cyan">02</span> &nbsp; Summarize locally</div>
+    <div id="summary" class="summary"><div class="summary-kicker">LOCAL SUMMARY / EXAMPLE</div><div class="summary-title">Quarterly proposal</div><div class="summary-rule"></div><div class="summary-text">Key priorities: launch scope, owners, and review milestones.</div><div class="summary-foot">On-device AI • Illustrative output</div></div>
+  </section>
+  <section id="closing-scene" class="clip" data-start="16.5" data-duration="3.5" data-track-index="0">
+    <div class="eyebrow">ZEROX / NEUCOCKPIT</div><div class="counter">05 / 05</div><div class="rule"></div>
+    <div class="end-tag">A better way to work with your files</div><div class="end-line"><span id="end1">Search.</span><span id="end2" class="cyan">Summarize.</span><span id="end3">Stay offline.</span></div>
+    <div id="end-name" class="end-name">NeuCockpit</div><div id="end-url" class="end-url">zero-x.live</div><div class="end-bars"></div>
+  </section>
+  <audio id="music" src="assets/music/bed.mp3" data-start="0" data-duration="20" data-volume="0.22"></audio>
+  <audio id="click" src="assets/sfx/click.ogg" data-start="12.15" data-duration="0.1" data-volume="0.38"></audio>
+</div>
+<script>
+  const tl=gsap.timeline({paused:true});
+  tl.fromTo('#hook',{opacity:0,x:-70},{opacity:1,x:0,duration:.5,ease:'power3.out'},.12);
+  tl.fromTo('#hook-sub',{opacity:0,y:35},{opacity:1,y:0,duration:.42,ease:'power2.out'},.72);
+  tl.fromTo('#cursor',{opacity:0},{opacity:1,duration:.17,ease:'none'},.85);
+  tl.fromTo('#stage-title',{opacity:0,x:-75},{opacity:1,x:0,duration:.52,ease:'power3.out'},2.65);
+  tl.fromTo('#stage-sub',{opacity:0,y:50},{opacity:1,y:0,duration:.48,ease:'power2.out'},3.1);
+  tl.fromTo('#window',{opacity:0,x:150,scale:.9},{opacity:1,x:0,scale:1,duration:.68,ease:'power3.out'},2.78);
+  tl.fromTo('#query',{clipPath:'inset(0 100% 0 0)'},{clipPath:'inset(0 0% 0 0)',duration:1.5,ease:'steps(19)'},6.25);
+  tl.fromTo('#result1',{opacity:0,x:65},{opacity:1,x:0,duration:.43,ease:'power2.out'},7.8);
+  tl.fromTo('#result2',{opacity:0,x:65},{opacity:1,x:0,duration:.43,ease:'power2.out'},8.62);
+  tl.fromTo('#result3',{opacity:0,x:65},{opacity:1,x:0,duration:.43,ease:'power2.out'},9.44);
+  tl.fromTo('#step1',{opacity:0,y:25},{opacity:1,y:0,duration:.4,ease:'power2.out'},6.2);
+  tl.to('#step1',{opacity:0,duration:.2},11.9);
+  tl.fromTo('#step2',{opacity:0,y:25},{opacity:1,y:0,duration:.42,ease:'power2.out'},12.08);
+  tl.fromTo('#summary',{opacity:0,x:-100,scale:.94},{opacity:1,x:0,scale:1,duration:.62,ease:'power3.out'},12.22);
+  tl.fromTo('#end1',{opacity:0,y:70},{opacity:1,y:0,duration:.4,ease:'power3.out'},16.62);
+  tl.fromTo('#end2',{opacity:0,y:70},{opacity:1,y:0,duration:.4,ease:'power3.out'},17.08);
+  tl.fromTo('#end3',{opacity:0,y:70},{opacity:1,y:0,duration:.4,ease:'power3.out'},17.54);
+  tl.fromTo('#end-name',{opacity:0,x:-40},{opacity:1,x:0,duration:.42,ease:'power2.out'},18.08);
+  tl.fromTo('#end-url',{opacity:0,x:40},{opacity:1,x:0,duration:.42,ease:'power2.out'},18.25);
+  tl.fromTo('#glow',{opacity:.35,scale:.88},{opacity:.68,scale:1.07,duration:10,ease:'sine.inOut',yoyo:true,repeat:1},0);
+  window.__timelines['neucockpit']=tl;
+</script>
+</body>
+</html>
