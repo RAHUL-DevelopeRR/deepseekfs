@@ -1,0 +1,35 @@
+{
+  "page": "https://neuron.zero-x.live/",
+  "downloads": [
+    {
+      "asset": "NeuCockpitSetup_v1.0_windows_x64.exe",
+      "status": 200,
+      "bytes": "1295602832"
+    },
+    {
+      "asset": "NeuCockpitSetup_v1.0_windows_arm64.exe",
+      "status": 200,
+      "bytes": "1272007471"
+    },
+    {
+      "asset": "NeuCockpit-v1.0-linux-x64.run",
+      "status": 200,
+      "bytes": "1394437457"
+    },
+    {
+      "asset": "NeuCockpit-v1.0-linux-arm64.run",
+      "status": 200,
+      "bytes": "1363095161"
+    },
+    {
+      "asset": "NeuCockpit-v1.0-macos-arm64.dmg",
+      "status": 200,
+      "bytes": "1365276652"
+    },
+    {
+      "asset": "NeuCockpit-v1.0-macos-intel.dmg",
+      "status": 200,
+      "bytes": "1378389960"
+    }
+  ]
+}

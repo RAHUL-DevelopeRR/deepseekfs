@@ -1,0 +1,48 @@
+{
+  "bge": {
+    "backend": "BAAI/bge-small-en-v1.5:onnx-cls:model.onnx:133093490",
+    "dense_chunks": 3,
+    "normalized": true,
+    "seconds": 0.89
+  },
+  "retrieval": {
+    "files_and_folders": 2,
+    "chunks": 2
+  },
+  "chat": {
+    "persisted_recall": "Your project's name is Atlas.",
+    "first_response": "Sure, I'll remember that your project name is Atlas."
+  },
+  "action": {
+    "listing_tools": [
+      "folder_list"
+    ],
+    "writing_tools": [
+      "file_write"
+    ],
+    "file_verified": true
+  },
+  "tools": {
+    "exposed": [
+      "file_read",
+      "file_write",
+      "file_edit",
+      "file_delete",
+      "folder_create",
+      "folder_list",
+      "folder_search",
+      "folder_organize",
+      "semantic_search",
+      "summarize",
+      "ocr",
+      "system_profile",
+      "claw_tool_index",
+      "powershell_session",
+      "shell",
+      "python_exec",
+      "glob"
+    ],
+    "mcp_transport": false
+  },
+  "ok": true
+}

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu, QFileDialog,
     QSizePolicy, QGraphicsDropShadowEffect,
     QSlider, QPushButton, QGraphicsOpacityEffect,
-    QGridLayout, QProgressBar, QCheckBox,
+    QGridLayout, QProgressBar, QCheckBox, QComboBox,
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QSize, QTimer,
@@ -41,6 +41,7 @@ from ui.memory_lane_panel import MemoryLanePanel
 from ui.memoryos_panel import MemoryOSPanel
 from ui.activity_panel import ActivityPanel
 from ui.icons import icon_pixmap, icon_label
+from ui.hotkeys import PANEL_HOTKEYS, normalize_hotkey
 
 # â”€â”€ resolve assets path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -1170,6 +1171,24 @@ class SettingsOverlay(QFrame):
         """)
         sl.valueChanged.connect(lambda v: (self._tv.setText(str(v)), self._topk(v)))
         root.addWidget(sl)
+
+        hotkey_label = QLabel("Global panel shortcut (Windows)")
+        hotkey_label.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.7); background: transparent;")
+        root.addWidget(hotkey_label)
+        shortcut = QComboBox()
+        for spec in PANEL_HOTKEYS:
+            key = normalize_hotkey(spec.label)
+            shortcut.addItem(spec.label, key)
+            if key == normalize_hotkey(cfg.get("hotkey")):
+                shortcut.setCurrentIndex(shortcut.count() - 1)
+        shortcut.currentIndexChanged.connect(
+            lambda _index: self._hotkey(shortcut.currentData())
+        )
+        root.addWidget(shortcut)
+        self._shortcut_status = QLabel(getattr(svc, "hotkey_status", "Shortcut changes apply immediately. Ctrl+Alt+N is the fallback."))
+        self._shortcut_status.setWordWrap(True)
+        self._shortcut_status.setStyleSheet("font-size: 11px; color: #B8C8FF; background: transparent;")
+        root.addWidget(self._shortcut_status)
         root.addStretch()
 
     def _add(self):
@@ -1182,6 +1201,10 @@ class SettingsOverlay(QFrame):
 
     def _topk(self, v):
         c = self._svc.get_config(); c["top_k"] = v; self._svc.save_config(c)
+
+    def _hotkey(self, value):
+        c = self._svc.get_config(); c["hotkey"] = value; self._svc.save_config(c)
+        self._shortcut_status.setText(getattr(self._svc, "hotkey_status", "Shortcut changes apply immediately. Ctrl+Alt+N is the fallback."))
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

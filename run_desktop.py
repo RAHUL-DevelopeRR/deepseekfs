@@ -2,9 +2,9 @@
 Neuron - Desktop Entry Point (v5.2.0)
 ======================================
 Bootstraps the PyQt6 application:
-  - Pre-loads torch DLLs when running as frozen exe
+  - Keeps llama.cpp isolated in its worker process
   - Shows a splash screen while DesktopService loads
-  - Registers global hotkey (Shift+Space) for search panel
+  - Registers the configured global shortcut for the search panel
   - Registers overlay hotkey (Ctrl+Shift+R) for research overlay
   - Sets AppUserModelID for Windows system integration
   - Launches SpotlightPanel (the real UI in ui/spotlight_panel.py)
@@ -17,43 +17,8 @@ from __future__ import annotations
 # Patch Jinja2 BEFORE any llama_cpp imports (SmolLM3 compatibility)
 import services.jinja2_patches  # noqa: F401
 
-# ═══════════════════════════════════════════════════════════════
-# MUST BE FIRST — Pre-load ALL PyTorch DLLs before any imports
-# ═══════════════════════════════════════════════════════════════
-import os, sys, glob, ctypes
-
-# When frozen by PyInstaller, resolve the _MEIPASS temp dir
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    _meipass = sys._MEIPASS
-    _torch_lib = os.path.join(_meipass, 'torch', 'lib')
-
-    for _p in [_torch_lib, _meipass]:
-        if os.path.isdir(_p):
-            try:
-                os.add_dll_directory(_p)
-            except OSError:
-                pass
-
-    os.environ['PATH'] = _torch_lib + ';' + _meipass + ';' + os.environ.get('PATH', '')
-
-    _load_order = [
-        'c10.dll', 'libiomp5md.dll', 'libiompstubs5md.dll',
-        'uv.dll', 'shm.dll', 'torch_global_deps.dll',
-        'torch.dll', 'torch_cpu.dll', 'torch_python.dll',
-    ]
-    _kernel32 = ctypes.WinDLL('kernel32.dll')
-    _kernel32.LoadLibraryW.restype = ctypes.c_void_p
-    _kernel32.SetDllDirectoryW(_torch_lib)
-
-    for _dll_name in _load_order:
-        _dll_path = os.path.join(_torch_lib, _dll_name)
-        if os.path.exists(_dll_path):
-            _kernel32.LoadLibraryW(_dll_path)
-
-    for _dll_path in glob.glob(os.path.join(_torch_lib, '*.dll')):
-        _kernel32.LoadLibraryW(_dll_path)
-# ═══════════════════════════════════════════════════════════════
-
+import os
+import sys
 import ctypes
 import ctypes.wintypes
 import platform
@@ -63,6 +28,16 @@ from pathlib import Path
 # ── Project root on sys.path ─────────────────────────────────
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+
+if "--llm-worker" in sys.argv:
+    from services.llm_worker import main as _llm_worker_main
+    raise SystemExit(_llm_worker_main())
+
+# Keep llama.cpp native faults and CPU-instruction failures outside Qt.
+os.environ.setdefault("NEURON_LLM_BACKEND", "worker")
+os.environ.setdefault("NEURON_LLM_PROFILE", "balanced")
+os.environ.setdefault("NEURON_LLM_BATCH", "128")
+os.environ.setdefault("NEURON_UI_STREAMING", "1")
 
 # ── Core imports (must happen BEFORE PyQt6) ───────────────────
 import app.config as config
@@ -78,6 +53,9 @@ install_crash_diagnostics()
 # ═══════════════════════════════════════════════════════════════
 def _preload_llm():
     """Pre-load an existing local LLM before PyQt6, without downloading."""
+    if os.getenv("NEURON_LLM_BACKEND", "worker").lower() == "worker":
+        logger.info("Encyl: LLM preload skipped; worker backend loads Qwen on demand.")
+        return
     try:
         from services.model_manager import get_llm_model_path
         if get_llm_model_path() is None:
@@ -88,7 +66,9 @@ def _preload_llm():
         engine = get_llm_engine()
         ok = engine.load_model(allow_download=False)
         if ok:
-            logger.info(f"Encyl: AI model ready (ctx={engine._model.n_ctx()})")
+            model = getattr(engine, "_model", None)
+            ctx = model.n_ctx() if model is not None and hasattr(model, "n_ctx") else "worker"
+            logger.info(f"Encyl: AI model ready (ctx={ctx})")
         else:
             logger.info(f"Encyl: Model load deferred: {engine.load_error}")
     except Exception as e:
@@ -111,7 +91,7 @@ from services.desktop_service import DesktopService
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap, QBitmap, QRegion
-from ui.hotkeys import GlobalHotkeyManager, OVERLAY_PRIMARY, PANEL_HOTKEYS
+from ui.hotkeys import GlobalHotkeyManager, OVERLAY_PRIMARY, get_panel_hotkey_specs
 from ui.icon_helpers import make_circular_splash, make_white_bg_icon
 
 
@@ -129,17 +109,23 @@ def main():
     # Default Apps, taskbar grouping, and notification settings.
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "Rahul.Neuron.Desktop.5.2"
+            "Rahul.NeuCockpit.Desktop.1.0"
         )
     except Exception:
         pass  # Non-critical on non-Windows
 
     # ── 1. App object FIRST ──
     app = QApplication(sys.argv)
-    app.setApplicationName("Neuron")
-    app.setApplicationVersion("5.2.0")
+    app.setApplicationName("NeuCockpit")
+    app.setApplicationVersion("1.0.0")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
+    from services.desktop_instance import DesktopInstance
+    instance = DesktopInstance()
+    if not instance.acquire():
+        logger.info("Desktop: existing instance activated; secondary launcher exits")
+        return
+    app.aboutToQuit.connect(instance.close)
     app.aboutToQuit.connect(lambda: logger.info("Desktop: QApplication aboutToQuit emitted"))
     app.lastWindowClosed.connect(lambda: logger.info("Desktop: QApplication lastWindowClosed emitted"))
     hotkeys = GlobalHotkeyManager(app)
@@ -170,7 +156,7 @@ def main():
         | Qt.WindowType.FramelessWindowHint)
     splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     splash.setMask(QRegion(mask_bmp))
-    splash.showMessage("Neuron is loading…",
+    splash.showMessage("NeuCockpit is loading...",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
         QColor("#ffffff"))
     if smoke_mode:
@@ -213,6 +199,7 @@ def main():
     from ui.spotlight_panel import SpotlightPanel
 
     panel = SpotlightPanel(service)
+    instance.activated.connect(panel._show)
 
     # ── 6. Poll until service is ready, then close splash ──
     def _check_ready():
@@ -227,11 +214,14 @@ def main():
     QTimer.singleShot(300, _check_ready)
 
     # ── 7. Register global hotkey ──
-    panel_hotkey_ok = False
-    for spec in PANEL_HOTKEYS:
-        panel_hotkey_ok |= hotkeys.register(spec, panel.activate_from_hotkey)
-    if not panel_hotkey_ok:
-        logger.warning("Panel hotkeys unavailable; tray menu remains available.")
+    def apply_panel_hotkey(cfg):
+        hotkeys.set_panel_shortcut(cfg.get("hotkey"), panel.toggle_from_hotkey)
+        service.hotkey_status = (
+            "Active shortcuts: " + ", ".join(hotkeys.registered_labels)
+            if hotkeys.registered_labels else "Global shortcuts unavailable. Open NeuCockpit from the tray."
+        )
+    apply_panel_hotkey(config.UserConfig.load())
+    service.on_config_changed = apply_panel_hotkey
 
     # ── 8. Register Research Overlay hotkey (Ctrl+Shift+R) ──
     _overlay = None
@@ -280,8 +270,8 @@ if __name__ == "__main__":
         try:
             ctypes.windll.user32.MessageBoxW(
                 0,
-                f"Neuron failed to start:\n\n{str(exc)[:300]}\n\nCheck storage/crash.log for details.",
-                "Neuron — Startup Error",
+                f"NeuCockpit failed to start:\n\n{str(exc)[:300]}\n\nCheck storage/crash.log for details.",
+                "NeuCockpit Startup Error",
                 0x10,
             )
         except Exception:

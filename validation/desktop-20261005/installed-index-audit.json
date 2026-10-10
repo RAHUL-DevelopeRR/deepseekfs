@@ -1,0 +1,13 @@
+{
+  "database": "C:\\Users\\DELL\\AppData\\Local\\Neuron\\storage\\cache\\metadata_baai_bge_small_en_v1_5.db",
+  "integrity": "ok",
+  "backend": "BAAI/bge-small-en-v1.5:onnx-cls:model.onnx:133093490",
+  "files": 302,
+  "chunks": 894,
+  "pending_migration": 0,
+  "evidence_kinds": {
+    "content": 663,
+    "metadata": 231
+  },
+  "invalid_vectors": 0
+}

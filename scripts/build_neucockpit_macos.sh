@@ -11,22 +11,20 @@ echo "Platform: $(uname -m)"
 
 python3 -m pip install --upgrade pip
 
-# Filter out Windows-only and Linux-specific packages
-grep -viE '(pywin32|pyaudiowpatch|pefile|ctypes\.wintypes|vosk)' requirements.txt > /tmp/requirements-macos.txt
+python3 -m pip install -r requirements-package.txt
 
-# Replace torch+cpu with plain torch (macOS uses MPS or CPU)
-sed -i '' 's/torch==.*+cpu/torch/g' /tmp/requirements-macos.txt 2>/dev/null || \
-sed 's/torch==.*+cpu/torch/g' requirements.txt > /tmp/requirements-macos.txt
-
-python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller || {
-    echo "Some packages failed, retrying..."
-    python3 -m pip install -r /tmp/requirements-macos.txt pyinstaller --ignore-installed 2>&1 || true
-}
-
-# Download models if not skipping
-if [ "${NEURON_SKIP_QWEN_GGUF}" != "1" ]; then
-    python3 -c "from services.model_manager import download_llm_model; download_llm_model()" || echo "Model download skipped"
+# Build llama.cpp as a portable CPU backend. Prebuilt/native wheels can emit
+# illegal-instruction crashes on older Intel CPUs.
+export CMAKE_ARGS="${CMAKE_ARGS:-} -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
+if [ "$(uname -m)" = "x86_64" ]; then
+    # Intel releases use CPU inference; omit Metal device/shader initialization.
+    export CMAKE_ARGS="$CMAKE_ARGS -DGGML_METAL=OFF"
 fi
+export FORCE_CMAKE=1
+python3 -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python==0.3.35"
+
+# Download release models into app-local storage so PyInstaller bundles them.
+python3 scripts/prepare_release_models.py
 
 python3 -m PyInstaller neuron_onedir.spec --noconfirm
 
@@ -40,12 +38,23 @@ else
     OUTNAME="NeuCockpit-v1.0-macos-intel.dmg"
 fi
 
-hdiutil create \
-  -volname "$VOLNAME" \
-  -srcfolder dist/Neuron \
-  -ov \
-  -format UDZO \
-  "dist/release/$OUTNAME"
+for attempt in 1 2 3; do
+    if hdiutil create \
+      -volname "$VOLNAME" \
+      -srcfolder dist/Neuron \
+      -ov \
+      -format UDZO \
+      "dist/release/$OUTNAME"; then
+        break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+        exit 1
+    fi
+    sleep 5
+done
+
+rm -rf dist/release/upload
+bash scripts/prepare_release_upload.sh "dist/release/$OUTNAME" dist/release/upload
 
 echo "=== Build complete ==="
 ls -lh dist/release/

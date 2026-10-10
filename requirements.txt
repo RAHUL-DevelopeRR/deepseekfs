@@ -71,7 +71,7 @@ tzlocal==5.3.1
 urllib3==2.6.3
 watchdog==6.0.0
 xlsxwriter==3.2.9
-llama-cpp-python>=0.3.0
+llama-cpp-python==0.3.35
 vosk>=0.3.45
 pyaudiowpatch>=0.2.14
 spacy>=3.7.0

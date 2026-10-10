@@ -1,0 +1,67 @@
+name: Retrieval regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/ui-ux-unique-icons]
+  pull_request:
+
+jobs:
+  retrieval:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      HF_HUB_OFFLINE: '1'
+      QT_QPA_PLATFORM: offscreen
+      NEURON_STORAGE_DIR: ${{ github.workspace }}/neucockpit-retrieval-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
+      - name: Install regression dependencies
+        run: >-
+          python -m pip install pytest pytest-timeout faiss-cpu numpy watchdog
+          PyMuPDF python-docx python-pptx openpyxl pillow dateparser requests rich jinja2
+          PyQt6 markdown-it-py psutil
+      - name: Verify chunk retrieval, persistence, grounding and model selection
+        run: >-
+          python -m pytest tests/test_chunk_retrieval.py tests/test_model_manager_cache.py
+          tests/test_folder_indexing.py tests/test_tool_permissions.py tests/test_startup_indexer.py
+          tests/test_desktop_regressions.py tests/test_hotkeys.py tests/test_memory_context.py
+          tests/test_action_coding_tools.py tests/test_chat_budget.py
+          -q --timeout=40
+
+  local-ai-flows:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      NEURON_LOG_STDERR: '1'
+      CMAKE_ARGS: '-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF'
+      FORCE_CMAKE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install the release runtime
+        run: |
+          python -m pip install -r requirements-package.txt
+          python -m pip install --no-binary=llama-cpp-python llama-cpp-python==0.3.35
+      - name: Prepare the actual BGE and Qwen models
+        run: python scripts/prepare_release_models.py
+      - name: Verify persistent chat, real tool execution and BGE retrieval
+        run: python scripts/verify_desktop_flows.py > desktop-flows.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-runtime-evidence
+          path: desktop-flows.json

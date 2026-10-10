@@ -1,0 +1,380 @@
+"""Client for the isolated local LLM worker."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from queue import Queue, Empty
+from itertools import count
+from pathlib import Path
+from typing import Any, Iterator, Optional
+
+from app.logger import logger
+from services.llm_engine import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE
+from services.model_health import format_ai_unavailable, normalize_model_error
+
+
+class LLMWorkerClient:
+    """Drop-in LLMEngine facade backed by a supervised subprocess.
+
+    The API intentionally mirrors ``LLMEngine`` for callers that already use
+    ``generate``, ``chat``, ``chat_with_tools`` and summarization helpers.
+    Calls are serialized through a lock because the worker owns one model.
+    """
+
+    def __init__(self, command: Optional[list[str]] = None, cwd: Optional[str] = None):
+        self._command = command
+        self._cwd = cwd or str(Path(__file__).resolve().parent.parent)
+        self._process: subprocess.Popen[str] | None = None
+        self._lock = threading.RLock()
+        self._ids = count(1)
+        self._loaded = False
+        self._load_error: str | None = None
+        self._stderr_thread: threading.Thread | None = None
+        self._stdout_thread: threading.Thread | None = None
+        self._responses: Queue = Queue()
+        self.request_timeout = float(os.getenv("NEURON_LLM_REQUEST_TIMEOUT", "120"))
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._loaded
+
+    @property
+    def load_error(self) -> str | None:
+        return self._load_error
+
+    @property
+    def cache_size(self) -> int:
+        return 0
+
+    def _build_command(self) -> list[str]:
+        if self._command:
+            return list(self._command)
+        if getattr(sys, "frozen", False):
+            worker_name = "NeuronLLMWorker.exe" if os.name == "nt" else "NeuronLLMWorker"
+            sibling = Path(sys.executable).with_name(worker_name)
+            if sibling.exists():
+                return [str(sibling)]
+            return [sys.executable, "--llm-worker"]
+        return [sys.executable, "-m", "services.llm_worker"]
+
+    def _start(self) -> None:
+        if self._process is not None and self._process.poll() is None:
+            return
+
+        env = os.environ.copy()
+        env["NEURON_LLM_WORKER_PROCESS"] = "1"
+        env.setdefault("NEURON_LOG_STDERR", "1")
+        env.setdefault("NEURON_LLM_VERBOSE", "0")
+        flags = 0
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        cmd = self._build_command()
+        logger.info(f"LLMWorkerClient: starting worker: {cmd}")
+        self._process = subprocess.Popen(
+            cmd,
+            cwd=self._cwd,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=flags,
+        )
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr,
+            args=(self._process,),
+            name="llm-worker-stderr",
+            daemon=True,
+        )
+        self._stderr_thread.start()
+        self._responses = Queue()
+        self._stdout_thread = threading.Thread(target=self._drain_stdout, args=(self._process, self._responses),
+                                               name="llm-worker-stdout", daemon=True)
+        self._stdout_thread.start()
+
+        try:
+            ready = self._read_response(expect_event=True, timeout_s=20)
+            if not ready.get("ok"):
+                raise RuntimeError(f"LLM worker did not start: {ready}")
+        except Exception:
+            self.cancel()
+            raise
+
+    def _drain_stderr(self, proc) -> None:
+        if proc is None or proc.stderr is None:
+            return
+        for line in proc.stderr:
+            line = line.rstrip()
+            if line:
+                logger.info(f"LLMWorker: {line}")
+
+    @staticmethod
+    def _drain_stdout(proc, responses):
+        try:
+            for line in proc.stdout:
+                responses.put(line)
+        finally:
+            responses.put(None)
+
+    def _read_response(self, expect_event: bool = False, timeout_s: float = 120) -> dict[str, Any]:
+        proc = self._process
+        if proc is None or proc.stdout is None:
+            raise RuntimeError("LLM worker is not running")
+
+        responses = self._responses
+        deadline = time.monotonic() + timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("LLM worker response timed out")
+            try:
+                line = responses.get(timeout=remaining)
+            except Empty as exc:
+                raise TimeoutError("LLM worker response timed out") from exc
+            if line is None:
+                raise RuntimeError(f"LLM worker closed stdout (exit code {proc.poll()})")
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                logger.info(f"LLMWorker stdout: {line.rstrip()}")
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if expect_event and payload.get("event") != "ready":
+                continue
+            return payload
+
+    def _request(self, command: str, payload: dict[str, Any] | None = None) -> Any:
+        with self._lock:
+            try:
+                self._start()
+                proc = self._process
+                if proc is None or proc.stdin is None:
+                    raise RuntimeError("LLM worker stdin unavailable")
+                request_id = next(self._ids)
+                proc.stdin.write(
+                    json.dumps(
+                        {"id": request_id, "command": command, "payload": payload or {}},
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\n"
+                )
+                proc.stdin.flush()
+
+                deadline = time.monotonic() + self.request_timeout
+                while True:
+                    response = self._read_response(timeout_s=max(0, deadline - time.monotonic()))
+                    if response.get("id") != request_id:
+                        continue
+                    if not response.get("ok"):
+                        raise RuntimeError(response.get("error", "worker request failed"))
+                    return response.get("result")
+            except Exception as exc:
+                self.cancel()
+                self._loaded = False
+                self._load_error = normalize_model_error(exc)
+                logger.error(f"LLMWorkerClient: {command} failed: {self._load_error}")
+                return None
+
+    def _stream_request(
+        self,
+        command: str,
+        payload: dict[str, Any] | None = None,
+    ) -> Iterator[str]:
+        with self._lock:
+            try:
+                self._start()
+                proc = self._process
+                if proc is None or proc.stdin is None:
+                    raise RuntimeError("LLM worker stdin unavailable")
+                request_id = next(self._ids)
+                proc.stdin.write(
+                    json.dumps(
+                        {"id": request_id, "command": command, "payload": payload or {}},
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\n"
+                )
+                proc.stdin.flush()
+
+                deadline = time.monotonic() + self.request_timeout
+                while True:
+                    response = self._read_response(timeout_s=max(0, deadline - time.monotonic()))
+                    if response.get("id") != request_id:
+                        continue
+                    if not response.get("ok"):
+                        raise RuntimeError(response.get("error", "worker stream failed"))
+                    event = response.get("event")
+                    if event == "token":
+                        yield str(response.get("token", ""))
+                    elif event == "done":
+                        return
+                    else:
+                        result = response.get("result")
+                        if isinstance(result, str):
+                            yield result
+                        return
+            except Exception as exc:
+                self.cancel()
+                self._loaded = False
+                self._load_error = normalize_model_error(exc)
+                logger.error(f"LLMWorkerClient: {command} failed: {self._load_error}")
+                yield format_ai_unavailable(self._load_error)
+
+    def load_model(self, progress_cb=None, allow_download: bool = False) -> bool:
+        result = self._request("load", {"allow_download": allow_download})
+        if isinstance(result, dict):
+            self._loaded = bool(result.get("loaded"))
+            self._load_error = normalize_model_error(result.get("load_error")) if result.get("load_error") else None
+        else:
+            self._loaded = False
+        if progress_cb and self._loaded:
+            progress_cb(1.0, "Model ready")
+        return self._loaded
+
+    def unload(self) -> None:
+        # Closing the app must not wait for an inference lock or stalled worker.
+        self.cancel()
+
+    def cancel(self) -> None:
+        """Terminate an in-flight worker request without waiting on the client lock."""
+        proc = self._process
+        if proc is not None and proc.poll() is None:
+            logger.warning("LLMWorkerClient: cancelling worker process")
+            try:
+                if os.name == "nt":
+                    # Windows venv launchers spawn a child interpreter that owns the pipes.
+                    subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/taskkill.exe"),
+                        "/PID", str(proc.pid), "/T", "/F"], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, timeout=3,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+        for reader in (self._stdout_thread, self._stderr_thread):
+            if reader is not None and reader is not threading.current_thread():
+                reader.join(timeout=2)
+        if proc is not None and proc.poll() is not None:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
+        self._process = None
+        self._loaded = False
+
+    def generate(
+        self,
+        prompt: str,
+        system: str = "",
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = DEFAULT_TEMPERATURE,
+        stop: Optional[list[str]] = None,
+    ) -> str:
+        result = self._request(
+            "generate",
+            {
+                "prompt": prompt,
+                "system": system,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stop": stop,
+            },
+        )
+        return result if isinstance(result, str) else format_ai_unavailable(self._load_error)
+
+    def generate_stream(self, *args, **kwargs) -> Iterator[str]:
+        prompt = args[0] if args else kwargs.get("prompt", "")
+        system = kwargs.get("system", args[1] if len(args) > 1 else "")
+        max_tokens = kwargs.get("max_tokens", DEFAULT_MAX_TOKENS)
+        temperature = kwargs.get("temperature", DEFAULT_TEMPERATURE)
+        yield from self._stream_request(
+            "generate_stream",
+            {
+                "prompt": prompt,
+                "system": system,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+
+    def chat(
+        self,
+        messages: list[dict],
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = DEFAULT_TEMPERATURE,
+        tools_description: str = "",
+    ) -> str:
+        result = self._request(
+            "chat",
+            {
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "tools_description": tools_description,
+            },
+        )
+        return result if isinstance(result, str) else format_ai_unavailable(self._load_error)
+
+    def chat_stream(
+        self,
+        messages: list[dict],
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Iterator[str]:
+        yield from self._stream_request(
+            "chat_stream",
+            {
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+
+    def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> dict:
+        result = self._request(
+            "chat_with_tools",
+            {
+                "messages": messages,
+                "tools": tools,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        if not isinstance(result, dict):
+            raise RuntimeError(self._load_error or "Tool generation returned no response")
+        return result
+
+    def summarize_file(self, path: str) -> str:
+        result = self._request("summarize_file", {"path": path})
+        return result if isinstance(result, str) else "AI summary unavailable."
+
+    def ask_about_files(self, question: str, file_contexts: list[dict]) -> str:
+        result = self._request(
+            "ask_about_files",
+            {"question": question, "file_contexts": file_contexts},
+        )
+        return result if isinstance(result, str) else "AI could not generate a response."
+
+    def suggest_tags(self, path: str) -> list[str]:
+        result = self._request("suggest_tags", {"path": path})
+        return result if isinstance(result, list) else []

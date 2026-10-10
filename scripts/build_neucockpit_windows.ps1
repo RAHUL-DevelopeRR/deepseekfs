@@ -1,0 +1,188 @@
+param(
+    [ValidateSet("x64", "arm64")]
+    [string]$Arch = "x64",
+
+    [ValidateSet("zip", "installer", "both")]
+    [string]$Package = "zip"
+)
+
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
+
+$Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+Push-Location $Root
+try {
+    $Python = if (Test-Path -LiteralPath ".venv\Scripts\python.exe") {
+        (Resolve-Path ".venv\Scripts\python.exe").Path
+    } else {
+        "python"
+    }
+
+    function Find-Iscc {
+        $cmd = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
+        if ($cmd) {
+            return $cmd.Source
+        }
+
+        $candidates = @(
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+        )
+        foreach ($candidate in $candidates) {
+            if ($candidate -and (Test-Path $candidate)) {
+                return $candidate
+            }
+        }
+
+        throw "Inno Setup 6 compiler was not found. Install Inno Setup, then rerun this script."
+    }
+
+    & $Python -m pip install --upgrade pip setuptools wheel
+
+    $req = Join-Path $env:TEMP "requirements-windows-$Arch.txt"
+    $lines = Get-Content requirements-package.txt |
+        Where-Object {
+            $_ -notmatch '^\s*pyaudiowpatch' -and
+            $_ -notmatch '^\s*vosk' -and
+            $_ -notmatch '^\s*pywin32\b' -and
+            $_ -notmatch '^\s*llama-cpp-python'
+        }
+
+    if ($Arch -eq "arm64") {
+        $lines = $lines | Where-Object {
+            $_ -notmatch '^\s*--extra-index-url' -and
+            $_ -notmatch '^\s*numpy==' -and
+            $_ -notmatch '^\s*PyMuPDF==' -and
+            $_ -notmatch '^\s*watchdog==' -and
+            $_ -notmatch '^\s*PyYAML==' -and
+            $_ -notmatch '^\s*cryptography==' -and
+            $_ -notmatch '^\s*torch==' -and
+            $_ -notmatch '^\s*transformers==' -and
+            $_ -notmatch '^\s*sentence-transformers==' -and
+            $_ -notmatch '^\s*safetensors==' -and
+            $_ -notmatch '^\s*spacy' -and
+            $_ -notmatch '^\s*tokenizers=='
+        }
+    }
+
+    $lines | Set-Content -Encoding ascii $req
+
+    if ($Arch -eq "arm64") {
+        & $Python -m pip install --prefer-binary `
+            numpy `
+            PyQt6==6.10.2 `
+            PyQt6-Qt6==6.10.2 `
+            PyQt6_sip==13.11.1 `
+            onnxruntime `
+            tokenizers `
+            faiss-cpu==1.13.2 `
+            scipy==1.17.1 `
+            scikit-learn==1.8.0 `
+            cryptography `
+            huggingface_hub==0.36.2 `
+            pyinstaller `
+            cmake `
+            ninja
+    }
+
+    & $Python -m pip install --prefer-binary pyinstaller cmake ninja
+    & $Python -m pip install -r $req pyinstaller
+
+    $portableArgs = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_AVX512=OFF"
+
+    if ($Arch -eq "arm64") {
+        $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
+        if (-not $clang) {
+            $clang = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter clang-cl.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\Llvm\\ARM64\\bin\\clang-cl\.exe$' } |
+                Select-Object -First 1
+        }
+        if (-not $clang) {
+            throw "clang-cl.exe was not found. Windows ARM64 llama.cpp builds require clang."
+        }
+        $clangPath = if ($clang.Source) { $clang.Source } else { $clang.FullName }
+        $env:CC = $clangPath
+        $env:CXX = $clangPath
+        $env:CMAKE_GENERATOR = "Ninja"
+        $portableArgs = "$portableArgs -DCMAKE_C_COMPILER=`"$clangPath`" -DCMAKE_CXX_COMPILER=`"$clangPath`""
+    } else {
+        Remove-Item Env:\CMAKE_GENERATOR -ErrorAction SilentlyContinue
+        $portableArgs = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_INSTALL_BINDIR=llama_cpp/lib"
+    }
+    $env:CMAKE_ARGS = $portableArgs
+    $env:FORCE_CMAKE = "1"
+    & $Python -m pip install --no-cache-dir --force-reinstall --no-binary=llama-cpp-python "llama-cpp-python==0.3.35"
+    if ($Arch -eq "x64") {
+        & $Python -c "from pathlib import Path; import llama_cpp; p=Path(llama_cpp.__file__).parent/'lib'; assert (p/'ggml-cpu-x64.dll').is_file() and (p/'ggml-cpu-haswell.dll').is_file(), f'Missing dynamic CPU backends in {p}'"
+    }
+
+    & $Python scripts\prepare_release_models.py
+
+    & $Python -m PyInstaller neuron_onedir.spec --noconfirm
+
+    $env:NEURON_DESKTOP_SMOKE = "1"
+    $env:NEURON_STARTUP_INDEX_ON_LAUNCH = "0"
+    try {
+        $app = Start-Process -FilePath (Join-Path $Root "dist\Neuron\NeuCockpit.exe") `
+            -WorkingDirectory (Join-Path $Root "dist\Neuron") -WindowStyle Hidden -PassThru
+        if (-not $app.WaitForExit(120000)) {
+            $app.Kill()
+            throw "Packaged desktop startup timed out."
+        }
+        if ($app.ExitCode -ne 0) { throw "Packaged desktop startup failed: $($app.ExitCode)" }
+    }
+    finally {
+        Remove-Item Env:NEURON_DESKTOP_SMOKE,Env:NEURON_STARTUP_INDEX_ON_LAUNCH -ErrorAction SilentlyContinue
+    }
+
+    $uploadDir = "dist\release\upload"
+    if (Test-Path $uploadDir) {
+        Remove-Item -LiteralPath $uploadDir -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Force -Path dist\release | Out-Null
+
+    if ($Package -in @("zip", "both")) {
+        $zip = "dist\release\NeuCockpit-v1.0-windows-$Arch.zip"
+        if (Test-Path $zip) {
+            Remove-Item -LiteralPath $zip -Force
+        }
+
+        $sevenZip = Get-Command 7z.exe -ErrorAction SilentlyContinue
+        if ($sevenZip) {
+            & $sevenZip.Source a -tzip -mx=5 $zip ".\dist\Neuron\*" | Out-Host
+        } else {
+            & $Python -c "import pathlib, zipfile; root=pathlib.Path('dist/Neuron'); out=pathlib.Path(r'$zip'); z=zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,allowZip64=True); [z.write(p, p.relative_to(root.parent).as_posix()) for p in root.rglob('*') if p.is_file()]; z.close()"
+        }
+
+        & "$PSScriptRoot\prepare_release_upload.ps1" -AssetPath $zip -UploadDir $uploadDir
+    }
+
+    if ($Package -in @("installer", "both")) {
+        $iscc = Find-Iscc
+        if ($Arch -eq "arm64") {
+            $installerBase = "NeuCockpitSetup_v1.0_windows_arm64"
+            $allowedArch = "arm64"
+            $installMode = "arm64"
+        } else {
+            $installerBase = "NeuCockpitSetup_v1.0_windows_x64"
+            $allowedArch = "x64compatible"
+            $installMode = "x64compatible"
+        }
+
+        & $iscc `
+            "/DMySetupOutputBaseFilename=$installerBase" `
+            "/DMySetupArchitecturesAllowed=$allowedArch" `
+            "/DMySetupArchitecturesInstallIn64BitMode=$installMode" `
+            (Join-Path $Root "neuron_installer.iss")
+        $installer = "installer_output\$installerBase.exe"
+        if (-not (Test-Path $installer)) {
+            throw "Expected installer was not created: $installer"
+        }
+        & "$PSScriptRoot\prepare_release_upload.ps1" -AssetPath $installer -UploadDir $uploadDir
+    }
+}
+finally {
+    Pop-Location
+}

@@ -29,6 +29,8 @@ import app.config as config
 
 
 _EXAMPLES_PATH = config.STORAGE_DIR / "intent_examples.json"
+if not _EXAMPLES_PATH.is_file():
+    _EXAMPLES_PATH = config.BASE_DIR / "storage" / "intent_examples.json"
 _VALID_INTENTS = {"chat", "query", "action"}
 
 # Confidence threshold — below this, default to "chat" (safe fallback)

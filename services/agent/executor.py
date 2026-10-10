@@ -66,54 +66,71 @@ class TaskExecutor:
         return self._engine
 
     def _get_schemas(self) -> List[Dict]:
-        if self._tool_schemas is None:
-            self._tool_schemas = get_tool_schemas()
-        return self._tool_schemas
+        return self._tool_schemas if self._tool_schemas is not None else get_tool_schemas()
 
     def _select_relevant_schemas(self, goal: str) -> List[Dict]:
         """Select only relevant tool schemas based on the goal.
         
-        Sending all 14 schemas to a 3B model creates a massive prompt
+        Sending all schemas to a small local model creates a massive prompt
         (2000+ tokens) and causes 60-90 second inference times.
-        Selecting 4-6 relevant tools cuts this to ~5-10 seconds.
+        Selecting only matching tools keeps the schema prefill small for local models.
         """
+        goal = goal.rsplit("Latest user request:\n", 1)[-1]
         keywords = goal.lower()
         all_schemas = self._get_schemas()
 
         # Tool relevance scoring based on keywords
         _TOOL_KEYWORDS = {
             "file_read":       {"read", "open", "content", "view", "show"},
-            "file_write":      {"write", "create", "save", "make"},
-            "file_edit":       {"edit", "modify", "change", "update"},
+            "file_write":      {"write", "create", "save", "make", "give", "code", "program", "project"},
+            "file_edit":       {"edit", "modify", "change", "update", "alter", "insert"},
             "file_delete":     {"delete", "remove", "trash", "erase"},
-            "folder_create":   {"folder", "directory", "mkdir", "create folder"},
+            "folder_create":   {"mkdir", "create folder", "new folder", "create directory"},
             "folder_list":     {"list", "dir", "folder", "what's in", "show folder"},
             "folder_search":   {"search", "find", "locate", "where"},
             "folder_organize": {"organize", "sort", "clean", "arrange"},
             "semantic_search": {"search", "find", "about", "related"},
             "summarize":       {"summarize", "summary", "describe", "overview"},
-            "shell":           {"run", "command", "shell", "cmd", "pip", "npm", "git"},
+            "shell":           {"run", "command", "shell", "cmd", "powershell", "terminal", "compile", "javac", "java", "pip", "npm", "git"},
             "python_exec":     {"python", "code", "script", "execute", "run python"},
-            "glob":            {"glob", "pattern", "find files", "wildcard"},
+            "glob":            {"glob", "pattern", "find files", "wildcard", "locate"},
             "ocr":             {"ocr", "image", "text from", "screenshot"},
+            "system_profile":  {"system", "os", "platform", "device", "windows", "linux", "mac"},
+            "claw_tool_index":  {"claw", "claude", "tool", "tools", "agent"},
+            "powershell_session": {"powershell", "terminal", "session", "run", "compile", "test", "javac", "java", "npm", "git"},
         }
 
         scored = []
         for schema in all_schemas:
             name = schema.get("function", {}).get("name", "")
-            kw_set = _TOOL_KEYWORDS.get(name, set())
-            score = sum(1 for kw in kw_set if kw in keywords)
+            kw_set = _TOOL_KEYWORDS.get(name)
+            if kw_set is None:
+                kw_set = set(re.findall(r"\w+", schema.get("function", {}).get("description", "").lower()))
+                kw_set -= {"a", "an", "the", "to", "for", "of", "and", "with", "is"}
+            score = sum(
+                1 for kw in kw_set
+                if re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", keywords)
+            )
             scored.append((score, schema))
 
         # Sort by relevance, keep only tools that actually matched. Including
         # zero-score write/delete tools confuses small local models.
         scored.sort(key=lambda x: x[0], reverse=True)
-        selected = [s for score, s in scored if score > 0][:5]
+        selected = [s for score, s in scored if score > 0][:3]
 
-        # Always include safe read/list fallbacks for navigation context.
         names = {s.get("function", {}).get("name") for s in selected}
-        for fallback in ["folder_list", "file_read", "glob"]:
-            if fallback not in names:
+        if self._looks_like_coding_agent_goal(goal):
+            for coding_tool in ["file_write", "file_edit", "file_read", "glob", "powershell_session", "shell"]:
+                if coding_tool not in names:
+                    for s in all_schemas:
+                        if s.get("function", {}).get("name") == coding_tool:
+                            selected.append(s)
+                            names.add(coding_tool)
+                            break
+
+        # A fallback is useful only when the request matched no tool at all.
+        if not selected:
+            for fallback in ["folder_list", "file_read", "glob"]:
                 for s in all_schemas:
                     if s.get("function", {}).get("name") == fallback:
                         selected.append(s)
@@ -121,6 +138,20 @@ class TaskExecutor:
 
         logger.info(f"Executor: Selected {len(selected)} tools for: {goal[:50]}")
         return selected
+
+    @staticmethod
+    def _looks_like_coding_agent_goal(goal: str) -> bool:
+        low = goal.lower()
+        has_code_subject = re.search(
+            r"\b(code|program|project|app|application|class|java|python|"
+            r"javascript|typescript|html|css|database|sql|jdbc)\b",
+            low,
+        )
+        has_creation_or_change = re.search(
+            r"\b(give|create|write|make|build|generate|alter|edit|modify|run|compile|save)\b",
+            low,
+        )
+        return bool(has_code_subject and has_creation_or_change)
 
     # ── Main execution loop ───────────────────────────────────
 
@@ -144,6 +175,8 @@ class TaskExecutor:
 
         try:
             result = self._execute_loop(task)
+            if task.steps and not any(step.status == EventStatus.SUCCESS.value for step in task.steps):
+                raise RuntimeError("No requested tool operation succeeded. " + task.steps[-1].output)
             task.complete(result)
             store.insert(AgentEvent(
                 event_type=EventType.TASK_COMPLETED.value,
@@ -176,7 +209,8 @@ class TaskExecutor:
                 self.on_thinking(task, f"Step {turn + 1}/{MAX_TURNS}...")
 
             # Build messages
-            messages = [{"role": "system", "content": build_action_context("")}]
+            messages = [{"role": "system", "content": build_action_context(
+                self._looks_like_coding_agent_goal(task.goal.rsplit("Latest user request:\n", 1)[-1]))}]
             messages.append({"role": "user", "content": task.goal})
             messages.extend(conversation)
 
@@ -190,10 +224,7 @@ class TaskExecutor:
                     temperature=0.3,
                 )
             except Exception as e:
-                # Fallback to plain chat if tool calling fails
-                logger.warning(f"Executor: Native tools failed, falling back: {e}")
-                response = engine.chat(messages=messages, max_tokens=300, temperature=0.3)
-                return response or "I was unable to complete the task."
+                raise RuntimeError(f"Action could not generate a tool call: {e}") from e
 
             elapsed_ms = int((time.time() - t0) * 1000)
 
@@ -202,18 +233,22 @@ class TaskExecutor:
             # Check for tool calls
             tool_calls = result_msg.get("tool_calls")
             content = result_msg.get("content", "")
+            allowed = {schema["function"]["name"] for schema in schemas}
 
             if tool_calls and len(tool_calls) > 0:
-                tc = tool_calls[0]
-                fn = tc.get("function", {})
-                tool_name = fn.get("name", "")
+                conversation.append({"role": "assistant", "content": content or "",
+                                     "tool_calls": tool_calls})
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
 
-                try:
-                    tool_args = json.loads(fn.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    tool_args = parse_arguments(fn.get("arguments", ""))
+                    try:
+                        tool_args = json.loads(fn.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        tool_args = parse_arguments(fn.get("arguments", ""))
 
-                if tool_name and tool_name in ALL_TOOLS:
+                    if tool_name not in allowed:
+                        raise ValueError(f"Tool not exposed for this task: {tool_name}")
                     signature = json.dumps(
                         {"tool": tool_name, "args": tool_args},
                         sort_keys=True,
@@ -234,18 +269,17 @@ class TaskExecutor:
 
                     # Add observation to conversation
                     conversation.append({
-                        "role": "assistant",
-                        "content": content or f"Calling {tool_name}...",
-                    })
-                    conversation.append({
-                        "role": "user",
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", "call_0"),
                         "content": f"[Tool Result: {tool_name}]\n{step_result}",
                     })
-                    continue  # Next turn
+                continue
 
             fallback_call = self._extract_json_tool_call(content)
             if fallback_call:
                 tool_name, tool_args = fallback_call
+                if tool_name not in allowed:
+                    raise ValueError(f"Tool not exposed for this task: {tool_name}")
                 signature = json.dumps(
                     {"tool": tool_name, "args": tool_args},
                     sort_keys=True,
@@ -271,10 +305,17 @@ class TaskExecutor:
 
             # No tool call — this is the final answer
             if content and content.strip():
+                if not seen_tool_calls:
+                    if turn == 0:
+                        conversation.append({"role": "user", "content":
+                            "This is Action mode. Perform the requested operation using a listed tool. "
+                            "If a required path or permission is missing, explain what is needed."})
+                        continue
+                    raise RuntimeError("No tool was executed. Model response: " + content.strip())
                 return content.strip()
 
         # Max turns exhausted
-        return "Completed the available steps. Please check the results."
+        raise RuntimeError("Tool step limit reached before a final answer. Last result: " + last_tool_result)
 
     def _extract_json_tool_call(self, content: str) -> Optional[tuple[str, Dict]]:
         """Parse Qwen-style JSON tool calls emitted as plain text."""
@@ -347,7 +388,7 @@ class TaskExecutor:
             step.description = "Calling folder_list"
 
         permission = tool.permission
-        if tool_name == "shell" and hasattr(tool, "_classify_command"):
+        if hasattr(tool, "_classify_command"):
             permission = tool._classify_command(cleaned_args.get("command", ""))
 
         # Permission check
@@ -401,4 +442,7 @@ class TaskExecutor:
             f"Executor: [{task.task_id}] {tool_name} -> "
             f"{status_tag} ({duration_ms}ms, {len(result.output)} chars)"
         )
+        if tool_name == "semantic_search" and result.success and isinstance(result.data, list):
+            from services.retrieval_context import search_observation
+            return f"[{status_tag}] {search_observation(result.data)}"
         return f"[{status_tag}] {result.output[:2000]}"

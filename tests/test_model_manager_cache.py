@@ -19,13 +19,44 @@ def test_model_manager_prefers_cached_exact_qwen(monkeypatch, tmp_path):
     )
     alt = _sparse_file(
         tmp_path / "qwen2.5-coder-0.5b-instruct-q4_0.gguf",
-        model_manager._MIN_GGUF_SIZE_BYTES + 1024,
+        model_manager._MIN_GGUF_SIZE_BYTES + 1024 * 1024,
     )
 
     monkeypatch.setenv("NEURON_MODEL_DIRS", str(tmp_path))
+    monkeypatch.setenv("NEURON_MODEL_DIRS_ONLY", "1")
 
     assert model_manager.get_llm_model_path() == exact
     assert alt.exists()
+
+
+def test_model_manager_rejects_small_qwen_fallback_by_default(monkeypatch, tmp_path):
+    from services import model_manager
+
+    _sparse_file(
+        tmp_path / model_manager.LEGACY_SMALL_MODEL_FILE,
+        model_manager._MIN_GGUF_SIZE_BYTES + 1024 * 1024,
+    )
+
+    monkeypatch.setenv("NEURON_MODEL_DIRS", str(tmp_path))
+    monkeypatch.setenv("NEURON_MODEL_DIRS_ONLY", "1")
+    monkeypatch.delenv(model_manager.ALLOW_SMALL_MODEL_FALLBACK_ENV, raising=False)
+
+    assert model_manager.get_llm_model_path() is None
+
+
+def test_model_manager_allows_explicit_small_qwen_fallback(monkeypatch, tmp_path):
+    from services import model_manager
+
+    small = _sparse_file(
+        tmp_path / model_manager.LEGACY_SMALL_MODEL_FILE,
+        model_manager._MIN_GGUF_SIZE_BYTES + 1024 * 1024,
+    )
+
+    monkeypatch.setenv("NEURON_MODEL_DIRS", str(tmp_path))
+    monkeypatch.setenv("NEURON_MODEL_DIRS_ONLY", "1")
+    monkeypatch.setenv(model_manager.ALLOW_SMALL_MODEL_FALLBACK_ENV, "1")
+
+    assert model_manager.get_llm_model_path() == small
 
 
 def test_model_manager_ignores_partial_downloads(monkeypatch, tmp_path):

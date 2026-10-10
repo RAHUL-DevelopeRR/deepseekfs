@@ -7,6 +7,12 @@ import pytest
 from neufs import _parse_tool_args
 
 
+@pytest.fixture(autouse=True)
+def isolated_cli_state(monkeypatch, tmp_path_factory):
+    monkeypatch.setenv('NEURON_STORAGE_DIR', str(tmp_path_factory.mktemp('neufs-cli-state')))
+    monkeypatch.setenv('HF_HUB_OFFLINE', '1')
+
+
 def test_parse_tool_args_accepts_repeatable_pairs():
     parsed = _parse_tool_args("{}", ["path=.", "max_items=5", "recursive=false"])
 
@@ -76,3 +82,19 @@ def test_neufs_summarize_folder(tmp_path):
     assert "Folder summary" in payload["summary"]
     assert payload["data"]["files"] == 2
     assert payload["data"]["top_extensions"][".txt"] == 1
+
+
+def test_neufs_doctor_reports_model_without_loading():
+    result = subprocess.run(
+        [sys.executable, "neufs.py", "doctor"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=20,
+    )
+
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
+    assert payload["ok"] is True
+    assert "runtime" in payload
+    assert "model_search_dirs" in payload
+    assert payload["load_attempted"] is False

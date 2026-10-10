@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ctypes
 import platform
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -102,6 +103,49 @@ PANEL_HOTKEYS = (
     PANEL_OS_SAFE_FALLBACK,
 )
 
+_HOTKEY_ALIASES = {
+    "shift+space": PANEL_PRIMARY,
+    "ctrl+space": PANEL_FALLBACK,
+    "control+space": PANEL_FALLBACK,
+    "ctrl+alt+space": PANEL_SAFE_FALLBACK,
+    "control+alt+space": PANEL_SAFE_FALLBACK,
+    "ctrl+alt+n": PANEL_OS_SAFE_FALLBACK,
+    "control+alt+n": PANEL_OS_SAFE_FALLBACK,
+}
+
+
+def normalize_hotkey(value: str | None) -> str:
+    """Normalize user-configured hotkey text to a stable config key."""
+    if not value:
+        return "shift+space"
+    parts = (
+        value.lower()
+        .replace("control", "ctrl")
+        .replace("-", "+")
+        .replace(" ", "+")
+        .split("+")
+    )
+    cleaned = [part for part in (p.strip() for p in parts) if part]
+    order = {"ctrl": 0, "alt": 1, "shift": 2}
+    modifiers = sorted([p for p in cleaned if p in order], key=lambda p: order[p])
+    keys = [p for p in cleaned if p not in order]
+    key = keys[-1] if keys else "space"
+    normalized = "+".join([*modifiers, key])
+    return normalized if normalized in _HOTKEY_ALIASES else "shift+space"
+
+
+def get_hotkey_label(value: str | None) -> str:
+    """Return a display label for a normalized or user-entered hotkey."""
+    return _HOTKEY_ALIASES[normalize_hotkey(value)].label
+
+
+def get_panel_hotkey_specs(value: str | None = None) -> tuple[HotkeySpec, ...]:
+    """Return the selected panel hotkey plus the OS-safe fallback."""
+    selected = _HOTKEY_ALIASES[normalize_hotkey(value)]
+    if selected == PANEL_OS_SAFE_FALLBACK:
+        return (PANEL_OS_SAFE_FALLBACK,)
+    return (selected, PANEL_OS_SAFE_FALLBACK)
+
 
 class _MSG(ctypes.Structure):
     _fields_ = [
@@ -127,14 +171,14 @@ class _WindowsHotkeyFilter(QAbstractNativeEventFilter):
         self,
         spec: HotkeySpec,
         callback: Callable[[], None],
-        debounce_ms: int = 350,
-        release_guard_ms: int = 450,
+        debounce_ms: int = 80,
+        release_guard_ms: int = 0,
     ):
         super().__init__()
         self._spec = spec
         self._callback = callback
         self._debounce_s = max(0.05, debounce_ms / 1000.0)
-        self._release_guard_s = max(0.05, release_guard_ms / 1000.0)
+        self._release_guard_s = max(0.0, release_guard_ms / 1000.0)
         self._last_fire = 0.0
         self._blocked_until = 0.0
         self._armed = True
@@ -204,7 +248,8 @@ class _WindowsHotkeyFilter(QAbstractNativeEventFilter):
     def _keys_still_down(self) -> bool:
         try:
             user32 = ctypes.windll.user32
-            keys = (self._spec.virtual_key, *self._spec.modifier_keys)
+            # Holding Ctrl/Shift between presses must not latch the shortcut.
+            keys = (self._spec.virtual_key,)
             return any(user32.GetAsyncKeyState(key) & 0x8000 for key in keys)
         except Exception:
             return False
@@ -217,7 +262,8 @@ class GlobalHotkeyManager:
         self._app = app
         self._filters: list[_WindowsHotkeyFilter] = []
         self._registered: list[HotkeySpec] = []
-        self._system = platform.system()
+        self._system = "Windows" if sys.platform == "win32" else platform.system()
+        self._panel_value = None
 
     @property
     def supported(self) -> bool:
@@ -228,6 +274,8 @@ class GlobalHotkeyManager:
         return [spec.label for spec in self._registered]
 
     def register(self, spec: HotkeySpec, callback: Callable[[], None]) -> bool:
+        if spec in self._registered:
+            return True
         if not self.supported:
             logger.warning(
                 f"Hotkey: global shortcut {spec.label} unsupported on {self._system}; "
@@ -252,6 +300,26 @@ class GlobalHotkeyManager:
         self._registered.append(spec)
         logger.info(f"Hotkey: registered {spec.label}")
         return True
+
+    def set_panel_shortcut(self, value, callback):
+        value = normalize_hotkey(value)
+        if value == self._panel_value:
+            return
+        for spec in list(self._registered):
+            if spec in PANEL_HOTKEYS:
+                self.unregister(spec)
+        self._panel_value = value
+        for spec in get_panel_hotkey_specs(value):
+            self.register(spec, callback)
+
+    def unregister(self, spec):
+        if spec not in self._registered:
+            return
+        index = self._registered.index(spec)
+        if self.supported:
+            ctypes.WinDLL("user32", use_last_error=True).UnregisterHotKey(None, spec.hotkey_id)
+        self._app.removeNativeEventFilter(self._filters.pop(index))
+        self._registered.pop(index)
 
     def unregister_all(self) -> None:
         if self.supported:

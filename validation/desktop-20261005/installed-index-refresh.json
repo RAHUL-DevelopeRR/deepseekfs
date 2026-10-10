@@ -1,0 +1,12 @@
+{
+  "refresh": {
+    "updated": 68,
+    "unchanged": 234,
+    "missing_removed": 0,
+    "failed": 0
+  },
+  "seconds": 11.39,
+  "records": 302,
+  "chunks": 915,
+  "pending_version_refresh": 0
+}

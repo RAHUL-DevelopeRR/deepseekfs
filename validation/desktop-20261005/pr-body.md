@@ -1,0 +1,11 @@
+NeuCockpit now indexes token-bounded document chunks, retrieves excerpts with source paths, preserves recent conversation across modes, and executes model-selected local tools in Action mode. Edited files replace stale vectors. Hotkeys rearm when the trigger key is released, shortcut changes apply immediately, and a second desktop launch activates the existing process.
+
+Qwen receives serialized tool schemas and observations, validates arguments and permissions, and reports tool failures. Multi-step requests continue after a successful call, including when every step uses the same tool. The repository exposes local Python tools and plugins; it has no MCP transport.
+
+Windows packaging removes obsolete tokenizer and llama.cpp binaries during upgrade. The x64 build includes baseline and optimized CPU variants selected by GGML at runtime, with an explicit check that the variant libraries are bundled. This addresses the scalar runtime's slow generation without requiring AVX2 on every PC.
+
+Validation: 22 focused Action, permission, desktop and worker tests passed. The earlier full suite passed 264 tests with 2 skipped; the latest broader run encountered local CLI/PowerShell timeouts and an outdated assertion. The assertion and focused checks pass; two local CLI greeting timeouts remain unresolved. All six native packages passed offline AI validation and were published as v1.0.0-build-202610051619 in successful workflow 37337296495. All six website download endpoints return HTTP 200.
+
+The Windows x64 installer was checksum-verified and installed on the user's PC on 6 October, exit code 0. Installed desktop startup, BGE ONNX and the synthetic streamed answer passed. The optimized haswell CPU backend is selected. However, engine time to first streamed token remained 43.81 seconds, and installed Action folder listing timed out before generating a tool call. Local latency and Action are therefore unresolved; passing CI does not establish local performance. See validation/desktop-20261005/installed-status-20261006.json.
+
+Retrieval limits: images use metadata or optional OCR, video uses metadata/subtitles, and scanned-PDF OCR is not implemented. History and extraction are bounded. See docs/DESKTOP_BUG_REVIEW_2026-10-05.md for detailed findings and evidence.
